@@ -426,6 +426,8 @@ async def create_task(task_data: BuildTaskCreate):
         config_data = task.config.model_dump() if hasattr(task.config, "model_dump") else task.config.dict()
     except Exception:
         config_data = {}
+    if task.mode == "web" and task.web_url:
+        config_data["web_url"] = task.web_url
     zip_path = task_input_dir / "project.zip"
     icon_path = task_input_dir / "logo.png"
     zip_info = {}
@@ -535,6 +537,8 @@ async def start_task(task_id: str, client_id: str = None):
         config_data = task.config.model_dump() if hasattr(task.config, 'model_dump') else task.config.dict()
     except Exception:
         config_data = {}
+    if task.mode == "web" and task.web_url:
+        config_data["web_url"] = task.web_url
     zip_path = TASKS_DIR / task_id / "input" / "project.zip"
     icon_path = TASKS_DIR / task_id / "input" / "logo.png"
     zip_info = {}
