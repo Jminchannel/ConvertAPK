@@ -415,11 +415,8 @@ if (!fs.existsSync(indexHtml)) {
 }
 
 let html = readText(indexHtml);
-if (html.includes("convertapk-download-helper")) {
-  process.exit(0);
-}
 
-const script =
+const downloadScript =
   "<script id=\"convertapk-download-helper\">(function(){\n" +
   "  if (window.__convertapkDownloadHelper) return;\n" +
   "  window.__convertapkDownloadHelper = true;\n" +
@@ -626,10 +623,68 @@ const script =
   "  }, true);\n" +
   "})();</script>";
 
+const newlineScript =
+  "<script id=\"convertapk-newline-fix\">(function(){\n" +
+  "  if (window.__convertapkNewlineFix) return;\n" +
+  "  window.__convertapkNewlineFix = true;\n" +
+  "  function shouldSkip(node){\n" +
+  "    if (!node || !node.parentElement) return true;\n" +
+  "    var tag = node.parentElement.tagName || '';\n" +
+  "    return ['SCRIPT','STYLE','TEXTAREA','CODE','PRE','INPUT'].includes(tag);\n" +
+  "  }\n" +
+  "  function replaceNode(node){\n" +
+  "    var text = node.nodeValue || '';\n" +
+  "    if (text.indexOf('\\\\n') === -1) return;\n" +
+  "    var parts = text.split('\\\\n');\n" +
+  "    var frag = document.createDocumentFragment();\n" +
+  "    for (var i = 0; i < parts.length; i++) {\n" +
+  "      frag.appendChild(document.createTextNode(parts[i]));\n" +
+  "      if (i < parts.length - 1) frag.appendChild(document.createElement('br'));\n" +
+  "    }\n" +
+  "    if (node.parentNode) node.parentNode.replaceChild(frag, node);\n" +
+  "  }\n" +
+  "  function walk(){\n" +
+  "    var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);\n" +
+  "    var n; var list = [];\n" +
+  "    while ((n = walker.nextNode())) {\n" +
+  "      if (shouldSkip(n)) continue;\n" +
+  "      if (n.nodeValue && n.nodeValue.indexOf('\\\\n') !== -1) list.push(n);\n" +
+  "    }\n" +
+  "    for (var i = 0; i < list.length; i++) replaceNode(list[i]);\n" +
+  "  }\n" +
+  "  function run(){\n" +
+  "    if (!document.body) return;\n" +
+  "    walk();\n" +
+  "  }\n" +
+  "  if (document.readyState === 'loading') {\n" +
+  "    document.addEventListener('DOMContentLoaded', run);\n" +
+  "  } else {\n" +
+  "    run();\n" +
+  "  }\n" +
+  "  var scheduled = false;\n" +
+  "  var obs = new MutationObserver(function(){\n" +
+  "    if (scheduled) return;\n" +
+  "    scheduled = true;\n" +
+  "    setTimeout(function(){ scheduled = false; run(); }, 50);\n" +
+  "  });\n" +
+  "  if (document.body) obs.observe(document.body, { childList: true, subtree: true });\n" +
+  "})();</script>";
+
+let insert = "";
+if (!html.includes("convertapk-download-helper")) {
+  insert += downloadScript + "\\n";
+}
+if (!html.includes("convertapk-newline-fix")) {
+  insert += newlineScript + "\\n";
+}
+if (!insert) {
+  process.exit(0);
+}
+
 if (html.includes("</body>")) {
-  html = html.replace("</body>", script + "\\n</body>");
+  html = html.replace("</body>", insert + "</body>");
 } else {
-  html += "\\n" + script;
+  html += "\\n" + insert;
 }
 
 writeText(indexHtml, html);
