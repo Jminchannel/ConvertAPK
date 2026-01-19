@@ -51,6 +51,18 @@ class AppConfig(BaseModel):
             )
         return trimmed
 
+    @field_validator("keystore_password", "key_password")
+    @classmethod
+    def validate_sign_passwords(cls, value: Optional[str], info) -> Optional[str]:
+        if value is None:
+            return None
+        if isinstance(value, str) and value == "":
+            return None
+        raw = str(value)
+        if len(raw) < 6:
+            raise ValueError(f"{info.field_name} must be at least 6 characters")
+        return raw
+
     @field_validator("orientation")
     @classmethod
     def validate_orientation(cls, value: str) -> str:

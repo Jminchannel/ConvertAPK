@@ -270,7 +270,7 @@ else
     PROJECT_ROOT=$(dirname "$PACKAGE_JSON")
     log_info "Project root: $PROJECT_ROOT"
 
-    cd $PROJECT_ROOT
+    cd "$PROJECT_ROOT"
 
     log_success "Step 0 done"
 fi

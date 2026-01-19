@@ -445,11 +445,25 @@
                 </div>
                 <div class="form-group">
                   <label class="form-label">{{ t('config.keystorePassword') }}</label>
-                  <input type="password" class="form-input" v-model="config.keystore_password" placeholder="********" />
+                  <input
+                    type="password"
+                    class="form-input"
+                    :class="{ 'input-error': keystorePasswordError }"
+                    v-model="config.keystore_password"
+                    placeholder="********"
+                  />
+                  <div v-if="keystorePasswordError" class="form-error">{{ keystorePasswordError }}</div>
                 </div>
                 <div class="form-group">
                   <label class="form-label">{{ t('config.keyPassword') }}</label>
-                  <input type="password" class="form-input" v-model="config.key_password" placeholder="********" />
+                  <input
+                    type="password"
+                    class="form-input"
+                    :class="{ 'input-error': keyPasswordError }"
+                    v-model="config.key_password"
+                    placeholder="********"
+                  />
+                  <div v-if="keyPasswordError" class="form-error">{{ keyPasswordError }}</div>
                 </div>
               </div>
 
@@ -1081,11 +1095,25 @@ const packageNameError = computed(() => {
   return isValidPackageName(config.value.package_name) ? '' : t('config.packageNameRule')
 })
 
+const keystorePasswordError = computed(() => {
+  const value = String(config.value.keystore_password || '')
+  if (!value) return ''
+  return value.length >= 6 ? '' : t('config.keystorePasswordRule')
+})
+
+const keyPasswordError = computed(() => {
+  const value = String(config.value.key_password || '')
+  if (!value) return ''
+  return value.length >= 6 ? '' : t('config.keyPasswordRule')
+})
+
 const canCreateTask = computed(() => {
   const common =
     config.value.app_name &&
     config.value.package_name &&
     !packageNameError.value &&
+    !keystorePasswordError.value &&
+    !keyPasswordError.value &&
     (appIcon.value || uploadedIcon.value)
 
   if (mode.value === 'convert') {
@@ -1384,6 +1412,14 @@ const createTask = async () => {
   if (!canCreateTask.value) return
   if (packageNameError.value) {
     showToast(packageNameError.value, 'error')
+    return
+  }
+  if (keystorePasswordError.value) {
+    showToast(keystorePasswordError.value, 'error')
+    return
+  }
+  if (keyPasswordError.value) {
+    showToast(keyPasswordError.value, 'error')
     return
   }
   isCreating.value = true

@@ -79,6 +79,8 @@ export const messages = {
       keystoreAlias: 'Key Alias',
       keystorePassword: 'Keystore Password',
       keyPassword: 'Key Password',
+      keystorePasswordRule: 'Keystore password must be at least 6 characters.',
+      keyPasswordRule: 'Key password must be at least 6 characters.',
       // APK Style
       styleTitle: 'APK Style',
       orientation: 'Screen Orientation',
@@ -389,6 +391,8 @@ export const messages = {
       keystoreAlias: '密钥别名',
       keystorePassword: '密钥库密码',
       keyPassword: '密钥密码',
+      keystorePasswordRule: '密钥库密码至少 6 个字符',
+      keyPasswordRule: '密钥密码至少 6 个字符',
       // APK Style
       styleTitle: 'APK 样式',
       orientation: '屏幕方向',
@@ -694,6 +698,8 @@ export const messages = {
       keystoreAlias: '金鑰別名',
       keystorePassword: '金鑰庫密碼',
       keyPassword: '金鑰密碼',
+      keystorePasswordRule: '金鑰庫密碼至少 6 個字元',
+      keyPasswordRule: '金鑰密碼至少 6 個字元',
       // APK Style
       styleTitle: 'APK 樣式',
       orientation: '螢幕方向',
