@@ -48,6 +48,8 @@ services:
       context: .
       dockerfile: admin/backend/Dockerfile
     image: convertapk-admin-backend:latest
+    env_file:
+      - ./admin/backend/.env
     environment:
       - TZ=Asia/Shanghai
       - DATABASE_URL=postgresql://postgres:postgres@admin-db:5432/convertapk_admin
