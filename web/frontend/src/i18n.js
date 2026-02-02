@@ -161,7 +161,9 @@ export const messages = {
       viewLogs: 'View Logs',
       retry: 'Retry',
       start: 'Start Build',
-      download: 'Download',
+      download: 'Download Product',
+      downloadMenu: 'Download Menu',
+      downloadSigned: 'Signed APK/AAB',
       delete: 'Delete',
       confirmDelete: 'Delete this task?',
       waiting: 'Waiting',
@@ -475,6 +477,8 @@ export const messages = {
       retry: '重试',
       start: '开始构建',
       download: '下载产物',
+      downloadMenu: '下载菜单',
+      downloadSigned: '下载签名',
       delete: '删除',
       jump: '跳转页码',
       go: '跳转'
@@ -782,6 +786,8 @@ export const messages = {
       retry: '重試',
       start: '開始建構',
       download: '下載產物',
+      downloadMenu: '下載選單',
+      downloadSigned: '下載簽名',
       delete: '刪除',
       jump: '跳轉頁碼',
       go: '跳轉'

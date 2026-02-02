@@ -539,14 +539,21 @@
                   <span v-if="task.status === 'processing'" class="task-progress-badge">
                     {{ isQueuedTask(task) ? t('tasks.waiting') : `${task.progress}%` }}
                   </span>
-                  <a
-                    v-if="task.status === 'success'"
-                    class="btn btn-primary btn-sm"
-                    :href="getDownloadUrl(task.id)"
-                    :title="t('tasks.download')"
-                  >
-                    ↓
-                  </a>
+                  <div v-if="task.status === 'success'" class="download-dropdown">
+                    <button class="btn btn-primary btn-sm dropdown-trigger" :title="t('tasks.downloadMenu')">
+                      <span class="action-icon">?</span>
+                      <span class="action-label">{{ t('tasks.downloadMenu') }}</span>
+                      <span class="dropdown-caret">?</span>
+                    </button>
+                    <div class="dropdown-menu">
+                      <a class="dropdown-item" :href="getDownloadUrl(task.id)">
+                        {{ t('tasks.download') }}
+                      </a>
+                      <a class="dropdown-item" :href="getDownloadUrl(task.id)">
+                        {{ t('tasks.downloadSigned') }}
+                      </a>
+                    </div>
+                  </div>
                   <button
                     v-if="task.status === 'success' || isQueuedTask(task)"
                     class="btn btn-success btn-sm"
@@ -1864,5 +1871,54 @@ onUnmounted(() => {
 @keyframes slideDown {
   from { opacity: 0; transform: translateY(-10px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+.download-dropdown {
+  position: relative;
+  display: inline-flex;
+}
+
+.download-dropdown .dropdown-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.download-dropdown .dropdown-caret {
+  font-size: 10px;
+  opacity: 0.8;
+}
+
+.download-dropdown .dropdown-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 6px;
+  min-width: 140px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  padding: 6px;
+  display: none;
+  z-index: 10;
+}
+
+.download-dropdown:hover .dropdown-menu {
+  display: block;
+}
+
+.download-dropdown .dropdown-item {
+  display: block;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  color: var(--text-main);
+  text-decoration: none;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.download-dropdown .dropdown-item:hover {
+  background: var(--bg-hover);
 }
 </style>
