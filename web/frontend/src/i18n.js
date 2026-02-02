@@ -163,7 +163,7 @@ export const messages = {
       start: 'Start Build',
       download: 'Download Product',
       downloadMenu: 'Download Menu',
-      downloadSigned: 'Signed APK/AAB',
+      downloadSigned: 'Download Keystore',
       delete: 'Delete',
       confirmDelete: 'Delete this task?',
       waiting: 'Waiting',

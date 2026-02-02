@@ -658,6 +658,30 @@ async def download_file(task_id: str, client_id: str = None):
     )
 
 
+@app.get("/api/keystore/{task_id}")
+async def download_keystore(task_id: str, client_id: str = None):
+    """下载签名密钥(keystore)"""
+    if task_id not in tasks_db:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    task = tasks_db[task_id]
+    client_id = _require_client_id(client_id)
+    _assert_task_owner(task, client_id)
+
+    if task.status != BuildStatus.SUCCESS:
+        raise HTTPException(status_code=400, detail="任务未完成或构建失败")
+
+    keystore_path = TASKS_DIR / task_id / "keystore" / "release.keystore"
+    if not keystore_path.exists():
+        raise HTTPException(status_code=404, detail="签名密钥不存在")
+
+    return FileResponse(
+        path=str(keystore_path),
+        filename="release.keystore",
+        media_type="application/octet-stream",
+    )
+
+
 @app.post("/api/tasks/{task_id}/retry", response_model=BuildTaskResponse)
 async def retry_task(task_id: str, client_id: str = None):
     """重试失败的构建任务"""

@@ -131,6 +131,11 @@ export const getDownloadUrl = (taskId) => {
   return `/api/download/${taskId}?client_id=${encodeURIComponent(clientId)}`
 }
 
+export const getKeystoreUrl = (taskId) => {
+  const clientId = getClientId()
+  return `/api/keystore/${taskId}?client_id=${encodeURIComponent(clientId)}`
+}
+
 export const getIconUrl = (taskId) => {
   const clientId = getClientId()
   return `/api/icon/${taskId}?client_id=${encodeURIComponent(clientId)}`

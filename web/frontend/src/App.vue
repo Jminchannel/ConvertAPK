@@ -551,7 +551,7 @@
                       <a class="dropdown-item" :href="getDownloadUrl(task.id)" @click="closeDownloadMenu">
                         {{ t('tasks.download') }}
                       </a>
-                      <a class="dropdown-item" :href="getDownloadUrl(task.id)" @click="closeDownloadMenu">
+                      <a class="dropdown-item" :href="getKeystoreUrl(task.id)" @click="closeDownloadMenu">
                         {{ t('tasks.downloadSigned') }}
                       </a>
                     </div>
@@ -1237,6 +1237,7 @@ const getTaskIcon = (status) => {
   return map[status] || '📦'
 }
 const getDownloadUrl = (taskId) => api.getDownloadUrl(taskId)
+const getKeystoreUrl = (taskId) => api.getKeystoreUrl(taskId)
 const isQueuedTask = (task) => {
   if (task?.status === 'pending') return true
   if (task?.status !== 'processing') return false
