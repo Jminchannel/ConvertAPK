@@ -539,17 +539,19 @@
                   <span v-if="task.status === 'processing'" class="task-progress-badge">
                     {{ isQueuedTask(task) ? t('tasks.waiting') : `${task.progress}%` }}
                   </span>
-                  <div v-if="task.status === 'success'" class="download-dropdown">
-                    <button class="btn btn-primary btn-sm dropdown-trigger" :title="t('tasks.downloadMenu')">
-                      <span class="action-icon">?</span>
-                      <span class="action-label">{{ t('tasks.downloadMenu') }}</span>
-                      <span class="dropdown-caret">?</span>
+                  <div v-if="task.status === 'success'" class="download-dropdown" :class="{ open: openDownloadMenu === task.id }">
+                    <button
+                      class="btn btn-primary btn-sm dropdown-trigger"
+                      :title="t('tasks.downloadMenu')"
+                      @click.stop="toggleDownloadMenu(task.id)"
+                    >
+                      <span class="action-icon">&#x2B07;</span>
                     </button>
-                    <div class="dropdown-menu">
-                      <a class="dropdown-item" :href="getDownloadUrl(task.id)">
+                    <div v-if="openDownloadMenu === task.id" class="dropdown-menu">
+                      <a class="dropdown-item" :href="getDownloadUrl(task.id)" @click="closeDownloadMenu">
                         {{ t('tasks.download') }}
                       </a>
-                      <a class="dropdown-item" :href="getDownloadUrl(task.id)">
+                      <a class="dropdown-item" :href="getDownloadUrl(task.id)" @click="closeDownloadMenu">
                         {{ t('tasks.downloadSigned') }}
                       </a>
                     </div>
@@ -809,6 +811,7 @@ import { messages, getSavedLanguage, saveLanguage, getSavedTheme, saveTheme, cre
 const currentTheme = ref(getSavedTheme())
 const currentLang = ref(getSavedLanguage())
 const showLangMenu = ref(false)
+const openDownloadMenu = ref(null)
 const languages = [
   { code: 'en', label: 'English' },
   { code: 'zh-CN', label: '简体中文' },
@@ -841,8 +844,16 @@ const changeLanguage = (lang) => {
   showLangMenu.value = false
 }
 
+const toggleDownloadMenu = (taskId) => {
+  openDownloadMenu.value = openDownloadMenu.value === taskId ? null : taskId
+}
+const closeDownloadMenu = () => {
+  openDownloadMenu.value = null
+}
+
 const handleClickOutside = (e) => {
   if (!e.target.closest('.lang-switch')) showLangMenu.value = false
+  if (!e.target.closest('.download-dropdown')) closeDownloadMenu()
 }
 
 // Modes & feature state
@@ -1904,7 +1915,7 @@ onUnmounted(() => {
   z-index: 10;
 }
 
-.download-dropdown:hover .dropdown-menu {
+.download-dropdown.open .dropdown-menu {
   display: block;
 }
 
