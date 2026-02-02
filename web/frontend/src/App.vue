@@ -341,6 +341,8 @@
                 </div>
               </div>
 
+
+
               <div class="grid grid-3">
                 <div class="form-group">
                   <label class="form-label">{{ t('config.versionName') }}</label>
@@ -437,12 +439,51 @@
                 <div>
                   <div class="card-title" style="font-size: 15px;">{{ t('config.signConfig') }}</div>
                 </div>
+
+              </div>
+
+              <div class="form-group keystore-upload">
+                <label class="form-label">{{ t('config.keystoreUpload') }}</label>
+                <div class="keystore-upload-row">
+                  <input
+                    ref="keystoreInput"
+                    type="file"
+                    class="keystore-file-input"
+                    accept=".jks,.keystore"
+                    @change="handleKeystoreSelect"
+                    :disabled="isKeystoreUploaded || !!updatingTaskId"
+                  />
+                  <button
+                    class="btn btn-ghost btn-sm"
+                    type="button"
+                    @click="triggerKeystoreInput"
+                    :disabled="isKeystoreUploaded || !!updatingTaskId"
+                  >
+                    {{ t('config.keystoreChoose') }}
+                  </button>
+                  <span v-if="uploadedKeystore" class="keystore-name">
+                    {{ uploadedKeystore.original_name }}
+                  </span>
+                  <button
+                    v-if="uploadedKeystore"
+                    class="btn btn-ghost btn-sm"
+                    type="button"
+                    @click="clearKeystoreUpload"
+                  >
+                    {{ t('config.keystoreRemove') }}
+                  </button>
+                </div>
+                <div v-if="keystoreUploadError" class="form-error">{{ keystoreUploadError }}</div>
+                <div v-if="isKeystoreUploaded" class="form-hint warning">
+                  {{ t('config.keystoreUploadWarning') }}
+                </div>
               </div>
 
               <div class="grid grid-3">
+
                 <div class="form-group">
                   <label class="form-label">{{ t('config.keystoreAlias') }}</label>
-                  <input type="text" class="form-input" v-model="config.keystore_alias" placeholder="key0" />
+                  <input type="text" class="form-input" v-model="config.keystore_alias" placeholder="key0" :disabled="isKeystoreUploaded" />
                 </div>
                 <div class="form-group">
                   <label class="form-label">{{ t('config.keystorePassword') }}</label>
@@ -545,7 +586,7 @@
                       :title="t('tasks.downloadMenu')"
                       @click.stop="toggleDownloadMenu(task.id)"
                     >
-                      <span class="action-icon">&#x2B07;</span>
+                      <span class="action-icon">?</span>
                     </button>
                     <div v-if="openDownloadMenu === task.id" class="dropdown-menu">
                       <a class="dropdown-item" :href="getDownloadUrl(task.id)" @click="closeDownloadMenu">
@@ -971,6 +1012,9 @@ const currentStep = ref(1)
 const isDragging = ref(false)
 const fileInput = ref(null)
 const iconInput = ref(null)
+const keystoreInput = ref(null)
+const uploadedKeystore = ref(null)
+const keystoreUploadError = ref('')
 const uploadedFile = ref(null)
 const uploadProgress = ref(0)
 const isCreating = ref(false)
@@ -1126,13 +1170,15 @@ const keyPasswordError = computed(() => {
   return value.length >= 6 ? '' : t('config.keyPasswordRule')
 })
 
+const isKeystoreUploaded = computed(() => Boolean(uploadedKeystore.value))
+
 const canCreateTask = computed(() => {
+  const shouldCheckKeystore = !isKeystoreUploaded.value
   const common =
     config.value.app_name &&
     config.value.package_name &&
     !packageNameError.value &&
-    !keystorePasswordError.value &&
-    !keyPasswordError.value &&
+    (!shouldCheckKeystore || (!keystorePasswordError.value && !keyPasswordError.value)) &&
     (appIcon.value || uploadedIcon.value)
 
   if (mode.value === 'convert') {
@@ -1420,8 +1466,15 @@ const useTaskConfig = (task) => {
     appIcon.value = api.getIconUrl(task.id)
   } else {
     uploadedIcon.value = null
+  uploadedKeystore.value = null
+  keystoreUploadError.value = ''
+  if (keystoreInput.value) keystoreInput.value.value = ''
     appIcon.value = null
   }
+  uploadedKeystore.value = null
+  keystoreUploadError.value = ''
+  if (keystoreInput.value) keystoreInput.value.value = ''
+
   uploadedFile.value = { filename: 'project.zip', reused: true, original_name: '使用上一版本的项目文件', size: 0 }
   uploadProgress.value = 100
   currentStep.value = 1
@@ -1434,11 +1487,11 @@ const createTask = async () => {
     showToast(packageNameError.value, 'error')
     return
   }
-  if (keystorePasswordError.value) {
+  if (!isKeystoreUploaded.value && keystorePasswordError.value) {
     showToast(keystorePasswordError.value, 'error')
     return
   }
-  if (keyPasswordError.value) {
+  if (!isKeystoreUploaded.value && keyPasswordError.value) {
     showToast(keyPasswordError.value, 'error')
     return
   }
@@ -1483,6 +1536,7 @@ const createTask = async () => {
         ad_config: mode.value === 'web' && enableAds.value ? adConfig.value : null,
         filename: mode.value === 'convert' ? uploadedFile.value.filename : null,
         icon_filename: uploadedIcon.value?.filename || null,
+        keystore_filename: uploadedKeystore.value?.filename || null,
         config: {
           app_name: config.value.app_name,
           package_name: config.value.package_name.trim(),
@@ -1531,6 +1585,9 @@ const resetForm = () => {
   appIcon.value = null
   appIconFile.value = null
   uploadedIcon.value = null
+  uploadedKeystore.value = null
+  keystoreUploadError.value = ''
+  if (keystoreInput.value) keystoreInput.value.value = ''
   iconError.value = ''
   updatingTaskId.value = null
   updatingTask.value = null

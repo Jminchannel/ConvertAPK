@@ -139,6 +139,7 @@ class BuildTask(BaseModel):
     web_url: Optional[str] = None
     filename: Optional[str] = None
     icon_filename: Optional[str] = None
+    keystore_filename: Optional[str] = None
     config: AppConfig
     status: BuildStatus = BuildStatus.PENDING
     created_at: datetime
@@ -158,6 +159,7 @@ class BuildTaskCreate(BaseModel):
     web_url: Optional[str] = None
     filename: Optional[str] = None
     icon_filename: Optional[str] = None
+    keystore_filename: Optional[str] = None
     config: AppConfig
     reuse_keystore_from: Optional[str] = None  # 复用某个任务的签名密钥
 
@@ -171,6 +173,7 @@ class BuildTaskResponse(BaseModel):
     web_url: Optional[str] = None
     filename: Optional[str] = None
     icon_filename: Optional[str] = None
+    keystore_filename: Optional[str] = None
     config: AppConfig
     status: BuildStatus
     created_at: datetime

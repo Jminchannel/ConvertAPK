@@ -50,6 +50,19 @@ export const uploadIcon = async (file) => {
   return response.data
 }
 
+// 上传签名文件（.jks / .keystore）
+export const uploadKeystore = async (file) => {
+  const formData = new FormData()
+  formData.append('file', file)
+
+  const response = await api.post('/upload-keystore', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data'
+    }
+  })
+  return response.data
+}
+
 export const probeUrl = async (url) => {
   const response = await api.post('/url-probe', { url })
   return response.data

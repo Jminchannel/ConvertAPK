@@ -60,6 +60,14 @@ def _assert_task_owner(task: BuildTask, client_id: str) -> None:
     if not task.client_id or task.client_id != client_id:
         raise HTTPException(status_code=403, detail="无权操作此任务")
 
+def _safe_filename(value: str, fallback: str = "app") -> str:
+    raw = (value or "").strip()
+    if not raw:
+        return fallback
+    safe = "".join(ch if ch.isalnum() or ch in ("-", "_") else "-" for ch in raw)
+    safe = "-".join(filter(None, safe.split("-")))
+    return safe or fallback
+
 FRONTEND_LOGGED = False
 FRONTEND_LOG_PATH = Path(os.getenv("APPDATA", ".")) / "ConvertAPK" / "frontend-resolve.log"
 BACKEND_ENV_LOG_PATH = Path(os.getenv("APPDATA", ".")) / "ConvertAPK" / "backend-env.log"
@@ -330,6 +338,34 @@ async def upload_icon(file: UploadFile = File(...)):
     }
 
 
+@app.post("/api/upload-keystore")
+async def upload_keystore(file: UploadFile = File(...)):
+    """???????.jks / .keystore?"""
+    filename_lower = (file.filename or "").lower()
+    if not (filename_lower.endswith(".jks") or filename_lower.endswith(".keystore")):
+        raise HTTPException(status_code=400, detail="??? .jks ? .keystore ??")
+
+    file_id = str(uuid.uuid4())
+    filename = f"{file_id}_{file.filename}"
+    file_path = BACKEND_UPLOAD_DIR / filename
+
+    try:
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"????????: {str(e)}")
+
+    file_size = file_path.stat().st_size
+
+    return {
+        "filename": filename,
+        "original_name": file.filename,
+        "size": file_size,
+        "message": "????????"
+    }
+
+
+
 @app.post("/api/tasks", response_model=BuildTaskResponse)
 async def create_task(task_data: BuildTaskCreate):
     """创建构建任务"""
@@ -384,6 +420,17 @@ async def create_task(task_data: BuildTaskCreate):
             shutil.copy2(str(src_icon), str(dst_icon))  # 用copy因为可能被复用
             icon_in_task = "logo.png"
     
+
+
+    # ???????????????????
+    keystore_in_task = None
+    if task_data.keystore_filename:
+        src_keystore = BACKEND_UPLOAD_DIR / task_data.keystore_filename
+        if not src_keystore.exists():
+            raise HTTPException(status_code=400, detail="?????????????")
+        dst_keystore = task_keystore_dir / "release.keystore"
+        shutil.move(str(src_keystore), str(dst_keystore))
+        keystore_in_task = "release.keystore"
     # 复用之前任务的图标（如果没有新上传）
     if not icon_in_task and reuse_from:
         reuse_task = tasks_db.get(reuse_from)
@@ -395,7 +442,7 @@ async def create_task(task_data: BuildTaskCreate):
                 icon_in_task = "logo.png"
     
     # 复用之前任务的签名密钥
-    if reuse_from:
+    if reuse_from and not keystore_in_task:
         src_keystore = TASKS_DIR / reuse_from / "keystore" / "release.keystore"
         if src_keystore.exists():
             dst_keystore = task_keystore_dir / "release.keystore"
@@ -408,6 +455,7 @@ async def create_task(task_data: BuildTaskCreate):
         web_url=web_url,
         filename="project.zip" if mode == "convert" else None,
         icon_filename=icon_in_task,
+        keystore_filename=keystore_in_task,
         config=task_data.config,
         status=BuildStatus.PENDING,
         created_at=now,
@@ -675,9 +723,12 @@ async def download_keystore(task_id: str, client_id: str = None):
     if not keystore_path.exists():
         raise HTTPException(status_code=404, detail="签名密钥不存在")
 
+    app_name = _safe_filename(getattr(task.config, "app_name", "") or "app")
+    filename = f"{app_name}-release.keystore"
+
     return FileResponse(
         path=str(keystore_path),
-        filename="release.keystore",
+        filename=filename,
         media_type="application/octet-stream",
     )
 

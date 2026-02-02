@@ -315,6 +315,8 @@ class APKBuilder:
         # 检查是否复用签名
         keystore_reused = False
         keystore_file = task_keystore_dir / "release.keystore"
+        if keystore_file.exists():
+            keystore_reused = True
         if reuse_keystore_from and keystore_file.exists():
             keystore_reused = True
         
