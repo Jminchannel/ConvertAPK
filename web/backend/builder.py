@@ -81,6 +81,46 @@ LOGS_DIR.mkdir(parents=True, exist_ok=True)
 TASKS_DIR.mkdir(parents=True, exist_ok=True)
 NPM_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
+_UNSIGNED_MARKERS = ("unsigned", "unaligned", "aligned")
+
+
+def _is_unsigned_artifact(name: str) -> bool:
+    lower = (name or "").lower()
+    if "unsigned" in lower or "unaligned" in lower:
+        return True
+    if "aligned" in lower and "signed" not in lower:
+        return True
+    return False
+
+
+def _select_artifact_file(
+    artifact_files: list[Path],
+    app_name: str,
+    version_name: str,
+    artifact_ext: str,
+) -> Path | None:
+    if not artifact_files:
+        return None
+    app_name = (app_name or "").strip()
+    version_name = (version_name or "").strip()
+    if app_name and version_name:
+        exact = f"{app_name}-v{version_name}{artifact_ext}"
+        for item in artifact_files:
+            if item.name == exact:
+                return item
+    if version_name:
+        candidates = [
+            item
+            for item in artifact_files
+            if version_name in item.name and not _is_unsigned_artifact(item.name)
+        ]
+        if candidates:
+            return max(candidates, key=lambda p: p.stat().st_mtime)
+    candidates = [item for item in artifact_files if not _is_unsigned_artifact(item.name)]
+    if candidates:
+        return max(candidates, key=lambda p: p.stat().st_mtime)
+    return max(artifact_files, key=lambda p: p.stat().st_mtime)
+
 
 def _parse_hex_color(raw: str) -> Optional[Tuple[int, int, int]]:
     value = (raw or "").strip().lstrip("#")
@@ -579,8 +619,13 @@ class APKBuilder:
 
                 # 查找任务输出目录中的产物文件
                 artifact_files = list(task_output_dir.glob(f"*{artifact_ext}"))
-                if artifact_files:
-                    output_file = artifact_files[0]
+                output_file = _select_artifact_file(
+                    artifact_files,
+                    env.get("APP_NAME", ""),
+                    env.get("VERSION_NAME", ""),
+                    artifact_ext,
+                )
+                if output_file:
                     # 使用任务ID重命名，复制到后端outputs目录
                     final_filename = f"{task_id}_{output_file.name}"
                     dst_file = BACKEND_OUTPUT_DIR / final_filename
