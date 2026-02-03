@@ -299,69 +299,6 @@
                   <div class="quickgen-title">{{ t('config.quickGenerateEnabled') }}</div>
                   <div class="quickgen-subtitle">{{ t('config.quickGenerateDesc') }}</div>
                 </div>
-                <div class="quickgen-grid">
-                  <div class="quickgen-icon" aria-hidden="true">
-                    <img
-                      v-if="!quickGenerateIconError"
-                      :src="quickGenerateIconUrl"
-                      alt="demo icon"
-                      @error="quickGenerateIconError = true"
-                    />
-                    <div v-else class="quickgen-icon-fallback">PNG</div>
-                  </div>
-                  <div class="quickgen-values">
-                    <div class="quickgen-item">
-                      <div class="k">{{ t('config.appName') }}</div>
-                      <div class="v tags">
-                        <span class="quickgen-tag">demo</span>
-                      </div>
-                    </div>
-                    <div class="quickgen-item">
-                      <div class="k">{{ t('config.packageName') }}</div>
-                      <div class="v mono">com.convertapk.demo</div>
-                    </div>
-                    <div class="quickgen-item">
-                      <div class="k">{{ t('config.versionName') }}</div>
-                      <div class="v tags">
-                        <span class="quickgen-tag">{{ t('config.quickGenerateAuto') }}</span>
-                      </div>
-                    </div>
-                    <div class="quickgen-item">
-                      <div class="k">{{ t('config.versionCode') }}</div>
-                      <div class="v tags">
-                        <span class="quickgen-tag">{{ t('config.quickGenerateAuto') }}</span>
-                      </div>
-                    </div>
-                    <div class="quickgen-item">
-                      <div class="k">{{ t('config.outputFormat') }}</div>
-                      <div class="v tags">
-                        <span class="quickgen-tag">{{ t('config.apk') }}</span>
-                      </div>
-                    </div>
-                    <div class="quickgen-item">
-                      <div class="k">{{ t('config.styleTitle') }}</div>
-                      <div class="v tags">
-                        <span class="quickgen-tag">{{ t('config.orientationPortrait') }}</span>
-                        <span class="quickgen-tag">{{ t('config.doubleClickExit') }}</span>
-                        <span class="quickgen-tag">{{ t('config.statusBarHidden') }}</span>
-                      </div>
-                    </div>
-                    <div class="quickgen-item">
-                      <div class="k">{{ t('config.permissionsTitle') }}</div>
-                      <div class="v tags">
-                        <span class="quickgen-tag">{{ t('config.quickGenerateAllPermissions') }}</span>
-                      </div>
-                    </div>
-                    <div class="quickgen-item">
-                      <div class="k">{{ t('config.signConfig') }}</div>
-                      <div class="v tags mono">
-                        <span class="quickgen-tag">key0</span>
-                        <span class="quickgen-tag">123456</span>
-                        <span class="quickgen-tag">123456</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
               </div>
 
               <template v-if="!quickGenerate">
@@ -1007,8 +944,6 @@ const adConfig = ref({ appId: '', appKey: '', placementId: '' })
 const enablePermissions = ref(false)
 const useCustomKeystore = ref(false)
 const quickGenerate = ref(false)
-const quickGenerateIconUrl = '/api/quick-generate/icon'
-const quickGenerateIconError = ref(false)
 const codeCopied = ref(false)
 
 const jsTemplate = `// 1. 定义广告API (h5api) - 需添加到您的网页中
@@ -1342,7 +1277,6 @@ watch(() => mode.value, (value) => {
 
 watch(quickGenerate, (enabled) => {
   if (!enabled) return
-  quickGenerateIconError.value = false
   if (mode.value !== 'convert' || updatingTaskId.value) {
     quickGenerate.value = false
     return
@@ -2112,7 +2046,7 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  margin-bottom: 14px;
+  margin-bottom: 0;
 }
 .quickgen-title {
   font-size: 14px;
