@@ -1335,6 +1335,44 @@ const uploadFile = async (file) => {
   }
 }
 
+const triggerKeystoreInput = () => {
+  if (isKeystoreUploaded.value || updatingTaskId.value) return
+  keystoreInput.value?.click?.()
+}
+
+const handleKeystoreSelect = async (event) => {
+  if (updatingTaskId.value) {
+    showToast(t('config.keystoreUploadNotAllowed'), 'error')
+    return
+  }
+  const file = event.target.files[0]
+  if (!file) return
+  keystoreUploadError.value = ''
+  const name = (file.name || '').toLowerCase()
+  if (!(name.endsWith('.jks') || name.endsWith('.keystore'))) {
+    keystoreUploadError.value = t('config.keystoreUploadInvalid')
+    showToast(keystoreUploadError.value, 'error')
+    if (keystoreInput.value) keystoreInput.value.value = ''
+    return
+  }
+  try {
+    const result = await api.uploadKeystore(file)
+    uploadedKeystore.value = result
+    useCustomKeystore.value = true
+    showToast(t('config.keystoreUploadSuccess'), 'success')
+  } catch (error) {
+    keystoreUploadError.value = t('config.keystoreUploadFailed')
+    showToast(keystoreUploadError.value + ': ' + (error.response?.data?.detail || error.message), 'error')
+  }
+}
+
+const clearKeystoreUpload = () => {
+  uploadedKeystore.value = null
+  useCustomKeystore.value = false
+  keystoreUploadError.value = ''
+  if (keystoreInput.value) keystoreInput.value.value = ''
+}
+
 // Icon cropper flow
 const handleIconSelect = async (event) => {
   const file = event.target.files[0]
