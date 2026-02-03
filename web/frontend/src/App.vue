@@ -438,17 +438,25 @@
                 <div class="card-icon" style="width: 36px; height: 36px; font-size: 16px;">🔐</div>
                 <div>
                   <div class="card-title" style="font-size: 15px;">{{ t('config.signConfig') }}</div>
+                  <div class="card-subtitle" style="font-size: 12px; color: var(--text-muted);">{{ t('config.signConfigHint') }}</div>
                 </div>
 
               </div>
 
-              <div class="form-group keystore-upload">
+
+              <label class="settings-checkbox keystore-toggle">
+                <input type="checkbox" v-model="useCustomKeystore" :disabled="!!updatingTaskId" />
+                {{ t('config.keystoreUploadToggle') }}
+              </label>
+
+              <div v-if="useCustomKeystore" class="form-group keystore-upload">
                 <label class="form-label">{{ t('config.keystoreUpload') }}</label>
                 <div class="keystore-upload-card">
                   <input
                     ref="keystoreInput"
                     type="file"
                     class="keystore-file-input"
+                    id="keystore-file-input"
                     accept=".jks,.keystore"
                     @change="handleKeystoreSelect"
                     :disabled="isKeystoreUploaded || !!updatingTaskId"
@@ -456,7 +464,6 @@
                   <div class="keystore-upload-main">
                     <div class="keystore-icon">🔑</div>
                     <div class="keystore-meta">
-                      <div class="keystore-title">{{ t('config.keystoreUpload') }}</div>
                       <div class="keystore-subtitle">.jks / .keystore</div>
                     </div>
                   </div>
@@ -485,6 +492,9 @@
                 <div v-if="keystoreUploadError" class="form-error">{{ keystoreUploadError }}</div>
                 <div v-if="isKeystoreUploaded" class="form-hint warning">
                   {{ t('config.keystoreUploadWarning') }}
+                </div>
+                <div v-if="useCustomKeystore" class="form-hint">
+                  {{ t('config.keystoreUpgradePackageHint') }}
                 </div>
               </div>
 
@@ -912,6 +922,7 @@ const webUrl = ref('')
 const enableAds = ref(false)
 const adConfig = ref({ appId: '', appKey: '', placementId: '' })
 const enablePermissions = ref(false)
+const useCustomKeystore = ref(false)
 const codeCopied = ref(false)
 
 const jsTemplate = `// 1. 定义广告API (h5api) - 需添加到您的网页中
@@ -1476,6 +1487,7 @@ const useTaskConfig = (task) => {
   } else {
     uploadedIcon.value = null
   uploadedKeystore.value = null
+  useCustomKeystore.value = false
   keystoreUploadError.value = ''
   if (keystoreInput.value) keystoreInput.value.value = ''
     appIcon.value = null
@@ -1595,6 +1607,7 @@ const resetForm = () => {
   appIconFile.value = null
   uploadedIcon.value = null
   uploadedKeystore.value = null
+  useCustomKeystore.value = false
   keystoreUploadError.value = ''
   if (keystoreInput.value) keystoreInput.value.value = ''
   iconError.value = ''
@@ -1758,6 +1771,12 @@ watch(
   },
   { deep: true }
 )
+
+watch(useCustomKeystore, (next) => {
+  if (!next) {
+    clearKeystoreUpload()
+  }
+})
 
 watch(sortedTasks, () => {
   if (currentTaskPage.value > totalTaskPages.value) {
@@ -2053,6 +2072,15 @@ onUnmounted(() => {
   gap: 8px;
 }
 
+.keystore-upload-actions .btn {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.keystore-upload-actions .btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
 .keystore-pill {
   display: inline-flex;
   align-items: center;
@@ -2078,5 +2106,12 @@ onUnmounted(() => {
   margin-top: 6px;
   color: var(--warning-start);
   font-size: 12px;
+}
+
+.keystore-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
 }
 </style>
