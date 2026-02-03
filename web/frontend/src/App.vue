@@ -595,7 +595,7 @@
                       :title="t('tasks.downloadMenu')"
                       @click.stop="toggleDownloadMenu(task.id)"
                     >
-                      <span class="action-icon">?</span>
+                      <span class="action-icon">&#x2B07;</span>
                     </button>
                     <div v-if="openDownloadMenu === task.id" class="dropdown-menu">
                       <a class="dropdown-item" :href="getDownloadUrl(task.id)" @click="closeDownloadMenu">
