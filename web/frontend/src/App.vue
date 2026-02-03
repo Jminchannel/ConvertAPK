@@ -269,17 +269,80 @@
                     }}
                   </div>
                 </div>
-                <button
-                  v-if="updatingTaskId"
-                  class="btn btn-ghost btn-sm"
-                  @click="resetForm"
-                  :title="t('config.cancelUpdate')"
-                  style="margin-left: auto;"
-                >
+                <div class="card-header-actions">
+                  <label
+                    v-if="mode === 'convert'"
+                    class="quickgen-toggle"
+                    :class="{ disabled: updatingTaskId }"
+                    :title="t('config.quickGenerateHint')"
+                  >
+                    <input type="checkbox" v-model="quickGenerate" :disabled="!!updatingTaskId" />
+                    <span class="quickgen-pill">
+                      <span class="quickgen-spark">✨</span>
+                      <span class="quickgen-text">{{ t('config.quickGenerate') }}</span>
+                    </span>
+                  </label>
+
+                  <button
+                    v-if="updatingTaskId"
+                    class="btn btn-ghost btn-sm"
+                    @click="resetForm"
+                    :title="t('config.cancelUpdate')"
+                  >
                   ✕ {{ t('config.cancelUpdate') }}
                 </button>
+                </div>
               </div>
 
+              <div v-if="quickGenerate" class="quickgen-panel">
+                <div class="quickgen-head">
+                  <div class="quickgen-title">{{ t('config.quickGenerateEnabled') }}</div>
+                  <div class="quickgen-subtitle">{{ t('config.quickGenerateDesc') }}</div>
+                </div>
+                <div class="quickgen-grid">
+                  <div class="quickgen-icon" aria-hidden="true">
+                    <img :src="quickGenerateIconUrl" alt="demo icon" />
+                  </div>
+                  <div class="quickgen-values">
+                    <div class="quickgen-item">
+                      <div class="k">{{ t('config.appName') }}</div>
+                      <div class="v">demo</div>
+                    </div>
+                    <div class="quickgen-item">
+                      <div class="k">{{ t('config.packageName') }}</div>
+                      <div class="v mono">com.convertapk.demo</div>
+                    </div>
+                    <div class="quickgen-item">
+                      <div class="k">{{ t('config.versionName') }}</div>
+                      <div class="v">{{ t('config.quickGenerateAuto') }}</div>
+                    </div>
+                    <div class="quickgen-item">
+                      <div class="k">{{ t('config.versionCode') }}</div>
+                      <div class="v">{{ t('config.quickGenerateAuto') }}</div>
+                    </div>
+                    <div class="quickgen-item">
+                      <div class="k">{{ t('config.outputFormat') }}</div>
+                      <div class="v">{{ t('config.apk') }}</div>
+                    </div>
+                    <div class="quickgen-item">
+                      <div class="k">{{ t('config.styleTitle') }}</div>
+                      <div class="v">
+                        {{ t('config.orientationPortrait') }} / {{ t('config.doubleClickExit') }} / {{ t('config.statusBarHidden') }}
+                      </div>
+                    </div>
+                    <div class="quickgen-item">
+                      <div class="k">{{ t('config.permissionsTitle') }}</div>
+                      <div class="v">{{ t('config.quickGenerateAllPermissions') }}</div>
+                    </div>
+                    <div class="quickgen-item">
+                      <div class="k">{{ t('config.signConfig') }}</div>
+                      <div class="v mono">key0 / 123456 / 123456</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <template v-if="!quickGenerate">
               <!-- Icon -->
               <div class="icon-upload-section">
                 <div class="icon-upload">
@@ -524,6 +587,8 @@
                   <div v-if="keyPasswordError" class="form-error">{{ keyPasswordError }}</div>
                 </div>
               </div>
+
+              </template>
 
               <button
                 class="btn btn-primary btn-lg"
@@ -919,6 +984,8 @@ const enableAds = ref(false)
 const adConfig = ref({ appId: '', appKey: '', placementId: '' })
 const enablePermissions = ref(false)
 const useCustomKeystore = ref(false)
+const quickGenerate = ref(false)
+const quickGenerateIconUrl = '/api/quick-generate/icon'
 const codeCopied = ref(false)
 
 const jsTemplate = `// 1. 定义广告API (h5api) - 需添加到您的网页中
@@ -1103,6 +1170,40 @@ const config = ref({
   key_password: ''
 })
 
+const applyQuickGenerateDefaults = () => {
+  // Quick generate uses backend defaults for icon & signing file; clear any user uploads.
+  if (appIcon.value && !appIcon.value.startsWith('/api/')) URL.revokeObjectURL(appIcon.value)
+  appIcon.value = null
+  appIconFile.value = null
+  uploadedIcon.value = null
+  iconError.value = ''
+
+  uploadedKeystore.value = null
+  useCustomKeystore.value = false
+  keystoreUploadError.value = ''
+  if (keystoreInput.value) keystoreInput.value.value = ''
+
+  enablePermissions.value = true
+  config.value = {
+    ...config.value,
+    app_name: 'demo',
+    package_name: 'com.convertapk.demo',
+    // Backend will auto-increment these on each task creation.
+    version_name: '1.0.0',
+    version_code: 1,
+    output_format: 'apk',
+    orientation: 'portrait',
+    double_click_exit: true,
+    status_bar_hidden: true,
+    status_bar_style: 'light',
+    status_bar_color: 'transparent',
+    permissions: [...permissionsList],
+    keystore_alias: 'key0',
+    keystore_password: '123456',
+    key_password: '123456'
+  }
+}
+
 // Toast
 const toast = ref({ show: false, type: 'success', message: '' })
 const showToast = (message, type = 'success') => {
@@ -1190,12 +1291,15 @@ const isKeystoreUploaded = computed(() => Boolean(uploadedKeystore.value))
 
 const canCreateTask = computed(() => {
   const shouldCheckKeystore = !isKeystoreUploaded.value
+  const hasIcon = quickGenerate.value && mode.value === 'convert' && !updatingTaskId.value
+    ? true
+    : (appIcon.value || uploadedIcon.value)
   const common =
     config.value.app_name &&
     config.value.package_name &&
     !packageNameError.value &&
     (!shouldCheckKeystore || (!keystorePasswordError.value && !keyPasswordError.value)) &&
-    (appIcon.value || uploadedIcon.value)
+    hasIcon
 
   if (mode.value === 'convert') {
     return common && uploadedFile.value
@@ -1205,6 +1309,21 @@ const canCreateTask = computed(() => {
     return basicWeb && adConfig.value.appId && adConfig.value.appKey && adConfig.value.placementId
   }
   return basicWeb
+})
+
+watch(() => mode.value, (value) => {
+  if (value !== 'convert' && quickGenerate.value) {
+    quickGenerate.value = false
+  }
+})
+
+watch(quickGenerate, (enabled) => {
+  if (!enabled) return
+  if (mode.value !== 'convert' || updatingTaskId.value) {
+    quickGenerate.value = false
+    return
+  }
+  applyQuickGenerateDefaults()
 })
 
 const resolveWebUrl = async (input) => {
@@ -1486,6 +1605,7 @@ const deleteTask = async (taskId) => {
 const useTaskConfig = (task) => {
   updatingTaskId.value = task.id
   updatingTask.value = task
+  quickGenerate.value = false
 
   mode.value = task.mode || 'convert'
   webUrl.value = task.web_url || ''
@@ -1563,6 +1683,9 @@ const createTask = async () => {
         webUrl.value = normalizedWebUrl
       }
     }
+
+    const isQuickGenerate = quickGenerate.value && mode.value === 'convert' && !updatingTaskId.value
+
   if (updatingTaskId.value) {
       if (compareVersion(config.value.version_name, previousVersionName.value) < 0) {
         showToast(t('toast.versionError'), 'error')
@@ -1586,12 +1709,13 @@ const createTask = async () => {
       showToast(`"${config.value.app_name}" 已更新至 v${config.value.version_name}`, 'success')
     } else {
       const taskData = {
+        quick_generate: isQuickGenerate,
         mode: mode.value,
         web_url: mode.value === 'web' ? normalizedWebUrl : null,
         ad_config: mode.value === 'web' && enableAds.value ? adConfig.value : null,
         filename: mode.value === 'convert' ? uploadedFile.value.filename : null,
-        icon_filename: uploadedIcon.value?.filename || null,
-        keystore_filename: uploadedKeystore.value?.filename || null,
+        icon_filename: isQuickGenerate ? null : (uploadedIcon.value?.filename || null),
+        keystore_filename: isQuickGenerate ? null : (uploadedKeystore.value?.filename || null),
         config: {
           app_name: config.value.app_name,
           package_name: config.value.package_name.trim(),
@@ -1620,7 +1744,7 @@ const createTask = async () => {
         showToast('启动失败: ' + (error.response?.data?.detail || error.message), 'error')
       }
     }
-    resetForm()
+    resetForm({ preserveQuickGenerate: isQuickGenerate })
     await refreshTasks()
   } catch (error) {
     showToast('操作失败: ' + (error.response?.data?.detail || error.message), 'error')
@@ -1629,7 +1753,8 @@ const createTask = async () => {
   }
 }
 
-const resetForm = () => {
+const resetForm = (options = {}) => {
+  const preserveQuickGenerate = Boolean(options.preserveQuickGenerate)
   webUrl.value = ''
   enableAds.value = false
   enablePermissions.value = false
@@ -1647,6 +1772,7 @@ const resetForm = () => {
   iconError.value = ''
   updatingTaskId.value = null
   updatingTask.value = null
+  if (!preserveQuickGenerate) quickGenerate.value = false
   previousVersionName.value = ''
   config.value = {
     app_name: '',
@@ -1663,6 +1789,9 @@ const resetForm = () => {
     keystore_alias: '',
     keystore_password: '',
     key_password: ''
+  }
+  if (preserveQuickGenerate && quickGenerate.value && mode.value === 'convert') {
+    applyQuickGenerateDefaults()
   }
   currentStep.value = 1
 }
@@ -1889,6 +2018,144 @@ onUnmounted(() => {
   box-shadow: var(--shadow-sm);
 }
 .mode-icon { font-size: 16px; }
+
+/* Card Header Actions */
+.card-header-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.quickgen-toggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+}
+.quickgen-toggle input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.quickgen-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border-color);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-sub);
+  font-size: 12px;
+  line-height: 1;
+  transition: transform 0.18s ease, background 0.18s ease, border-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+}
+.quickgen-spark { font-size: 13px; }
+.quickgen-toggle:hover .quickgen-pill {
+  border-color: var(--border-hover);
+  transform: translateY(-1px);
+}
+.quickgen-toggle.disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.quickgen-toggle.disabled:hover .quickgen-pill {
+  transform: none;
+  border-color: var(--border-color);
+}
+.quickgen-toggle input:checked + .quickgen-pill {
+  background: var(--primary-gradient);
+  border-color: transparent;
+  color: #fff;
+  box-shadow: var(--shadow-glow);
+}
+
+/* Quick Generate */
+.quickgen-panel {
+  margin-top: 16px;
+  padding: 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(99, 102, 241, 0.22);
+  background:
+    radial-gradient(circle at 20% 10%, rgba(99, 102, 241, 0.18), transparent 35%),
+    radial-gradient(circle at 80% 0%, rgba(139, 92, 246, 0.14), transparent 40%),
+    rgba(0, 0, 0, 0.18);
+  box-shadow: var(--shadow-sm);
+}
+.quickgen-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 14px;
+}
+.quickgen-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-main);
+  letter-spacing: 0.2px;
+}
+.quickgen-subtitle {
+  font-size: 12px;
+  color: var(--text-sub);
+}
+.quickgen-grid {
+  display: grid;
+  grid-template-columns: 92px 1fr;
+  gap: 16px;
+  align-items: start;
+}
+.quickgen-icon {
+  width: 92px;
+  height: 92px;
+  border-radius: 18px;
+  overflow: hidden;
+  border: 1px dashed rgba(255, 255, 255, 0.18);
+  background: rgba(0, 0, 0, 0.25);
+}
+.quickgen-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.quickgen-values {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.quickgen-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  background: rgba(0, 0, 0, 0.18);
+}
+.quickgen-item .k {
+  font-size: 11px;
+  color: var(--text-sub);
+  white-space: nowrap;
+}
+.quickgen-item .v {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-main);
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.quickgen-item .v.mono {
+  font-family: var(--font-mono);
+  font-weight: 500;
+}
+@media (max-width: 640px) {
+  .quickgen-grid { grid-template-columns: 1fr; }
+  .quickgen-values { grid-template-columns: 1fr; }
+}
 
 /* Panels */
 .ad-config-panel,

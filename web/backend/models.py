@@ -135,6 +135,7 @@ class BuildTask(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
     client_id: str = ""  # 客户端ID，用于隔离不同设备/浏览器
+    quick_generate: bool = False
     mode: str = "convert"
     web_url: Optional[str] = None
     filename: Optional[str] = None

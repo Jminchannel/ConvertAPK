@@ -22,7 +22,15 @@ from models import (
     BuildTask, BuildTaskCreate, BuildTaskResponse, 
     BuildStatus, AppConfig, UpdateTaskRequest
 )
-from builder import init_task_runner, get_task_runner, BACKEND_OUTPUT_DIR, LOGS_DIR, TASKS_DIR, UPLOAD_DIR as BACKEND_UPLOAD_DIR
+from builder import (
+    init_task_runner,
+    get_task_runner,
+    APK_WORKER_DIR,
+    BACKEND_OUTPUT_DIR,
+    LOGS_DIR,
+    TASKS_DIR,
+    UPLOAD_DIR as BACKEND_UPLOAD_DIR,
+)
 import env_setup
 from admin_client import (
     report_task_start,
@@ -194,6 +202,96 @@ tasks_db = {}
 TASKS_STATE_PATH = TASKS_DIR / "tasks.json"
 TASKS_STATE_LOCK = threading.Lock()
 
+# One-click (Quick) generate defaults (client-side shortcut).
+QUICK_GENERATE_STATE_PATH = TASKS_DIR / "quick-generate.json"
+QUICK_GENERATE_STATE_LOCK = threading.Lock()
+QUICK_GENERATE_ICON_PATH = APK_WORKER_DIR / "templates" / "demoLogo.png"
+QUICK_GENERATE_APP_NAME = "demo"
+QUICK_GENERATE_PACKAGE_NAME = "com.convertapk.demo"
+QUICK_GENERATE_KEY_ALIAS = "key0"
+QUICK_GENERATE_KEYSTORE_PASSWORD = "123456"
+QUICK_GENERATE_KEY_PASSWORD = "123456"
+QUICK_GENERATE_PERMISSIONS = [
+    "INTERNET",
+    "ACCESS_NETWORK_STATE",
+    "ACCESS_WIFI_STATE",
+    "CAMERA",
+    "READ_EXTERNAL_STORAGE",
+    "WRITE_EXTERNAL_STORAGE",
+    "ACCESS_FINE_LOCATION",
+    "ACCESS_COARSE_LOCATION",
+    "RECORD_AUDIO",
+    "READ_PHONE_STATE",
+    "CALL_PHONE",
+    "READ_CONTACTS",
+    "WRITE_CONTACTS",
+    "VIBRATE",
+    "WAKE_LOCK",
+    "RECEIVE_BOOT_COMPLETED",
+    "FOREGROUND_SERVICE",
+    "REQUEST_INSTALL_PACKAGES",
+    "SYSTEM_ALERT_WINDOW",
+    "BLUETOOTH",
+    "BLUETOOTH_ADMIN",
+    "NFC",
+    "READ_CALENDAR",
+    "WRITE_CALENDAR",
+]
+
+
+def _bump_patch_version(value: str) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return "1.0.1"
+    parts: list[int] = []
+    for item in raw.split("."):
+        try:
+            parts.append(max(0, int(item)))
+        except Exception:
+            parts.append(0)
+    while len(parts) < 3:
+        parts.append(0)
+    parts[-1] += 1
+    return ".".join(str(p) for p in parts)
+
+
+def _load_quick_generate_state() -> dict:
+    default = {"version_name": "1.0.0", "version_code": 1}
+    try:
+        if not QUICK_GENERATE_STATE_PATH.exists():
+            return default
+        data = json.loads(QUICK_GENERATE_STATE_PATH.read_text(encoding="utf-8"))
+        version_name = str(data.get("version_name") or default["version_name"]).strip() or default["version_name"]
+        try:
+            version_code = int(data.get("version_code") or default["version_code"])
+        except Exception:
+            version_code = default["version_code"]
+        if version_code < 1:
+            version_code = 1
+        return {"version_name": version_name, "version_code": version_code}
+    except Exception:
+        return default
+
+
+def _persist_quick_generate_state(state: dict) -> None:
+    QUICK_GENERATE_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = QUICK_GENERATE_STATE_PATH.with_suffix(".json.tmp")
+    tmp_path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp_path.replace(QUICK_GENERATE_STATE_PATH)
+
+
+def _alloc_quick_generate_versions() -> tuple[str, int]:
+    with QUICK_GENERATE_STATE_LOCK:
+        current = _load_quick_generate_state()
+        version_name = current.get("version_name") or "1.0.0"
+        version_code = int(current.get("version_code") or 1)
+        next_state = {
+            "version_name": _bump_patch_version(version_name),
+            "version_code": version_code + 1,
+        }
+        _persist_quick_generate_state(next_state)
+        return version_name, version_code
+
 
 def _task_to_dict(task: BuildTask) -> dict:
     data = task.model_dump()
@@ -338,6 +436,18 @@ async def upload_icon(file: UploadFile = File(...)):
     }
 
 
+@app.get("/api/quick-generate/icon", include_in_schema=False)
+async def quick_generate_icon():
+    """Quick Generate default icon preview."""
+    if not QUICK_GENERATE_ICON_PATH.exists():
+        raise HTTPException(status_code=404, detail="Not Found")
+    return FileResponse(
+        path=str(QUICK_GENERATE_ICON_PATH),
+        filename="demoLogo.png",
+        media_type="image/png",
+    )
+
+
 @app.post("/api/upload-keystore")
 async def upload_keystore(file: UploadFile = File(...)):
     """???????.jks / .keystore?"""
@@ -381,9 +491,13 @@ async def create_task(task_data: BuildTaskCreate):
         web_url = str(task_data.web_url or "").strip()
         if not web_url:
             raise HTTPException(status_code=400, detail="web_url is required for web mode")
+
+    quick_generate = bool(getattr(task_data, "quick_generate", False))
+    if quick_generate and mode != "convert":
+        raise HTTPException(status_code=400, detail="quick_generate is only supported for convert mode")
     
     # 验证复用的任务是否存在
-    reuse_from = task_data.reuse_keystore_from
+    reuse_from = None if quick_generate else task_data.reuse_keystore_from
     if reuse_from:
         reuse_task = tasks_db.get(reuse_from)
         if not reuse_task:
@@ -400,6 +514,8 @@ async def create_task(task_data: BuildTaskCreate):
     task_input_dir.mkdir(parents=True, exist_ok=True)
     task_output_dir.mkdir(parents=True, exist_ok=True)
     task_keystore_dir.mkdir(parents=True, exist_ok=True)
+
+    effective_config = task_data.config
     
     # 移动ZIP文件到任务目录（仅 convert 模式）
     if mode == "convert":
@@ -410,10 +526,35 @@ async def create_task(task_data: BuildTaskCreate):
             raise HTTPException(status_code=400, detail="ZIP文件不存在，请重新上传")
         dst_zip = task_input_dir / "project.zip"
         shutil.move(str(src_zip), str(dst_zip))
+
+        if quick_generate:
+            version_name, version_code = _alloc_quick_generate_versions()
+            effective_config = AppConfig(
+                app_name=QUICK_GENERATE_APP_NAME,
+                package_name=QUICK_GENERATE_PACKAGE_NAME,
+                version_name=version_name,
+                version_code=version_code,
+                output_format="apk",
+                orientation="portrait",
+                double_click_exit=True,
+                status_bar_hidden=True,
+                status_bar_style="light",
+                status_bar_color="transparent",
+                permissions=QUICK_GENERATE_PERMISSIONS,
+                keystore_alias=QUICK_GENERATE_KEY_ALIAS,
+                keystore_password=QUICK_GENERATE_KEYSTORE_PASSWORD,
+                key_password=QUICK_GENERATE_KEY_PASSWORD,
+            )
     
     # 移动图标文件到任务目录（如果有）
     icon_in_task = None
-    if task_data.icon_filename:
+    if quick_generate:
+        if not QUICK_GENERATE_ICON_PATH.exists():
+            raise HTTPException(status_code=500, detail="Quick generate icon is missing")
+        dst_icon = task_input_dir / "logo.png"
+        shutil.copy2(str(QUICK_GENERATE_ICON_PATH), str(dst_icon))
+        icon_in_task = "logo.png"
+    elif task_data.icon_filename:
         src_icon = BACKEND_UPLOAD_DIR / task_data.icon_filename
         if src_icon.exists():
             dst_icon = task_input_dir / "logo.png"
@@ -424,7 +565,7 @@ async def create_task(task_data: BuildTaskCreate):
 
     # ???????????????????
     keystore_in_task = None
-    if task_data.keystore_filename:
+    if (not quick_generate) and task_data.keystore_filename:
         src_keystore = BACKEND_UPLOAD_DIR / task_data.keystore_filename
         if not src_keystore.exists():
             raise HTTPException(status_code=400, detail="?????????????")
@@ -456,7 +597,7 @@ async def create_task(task_data: BuildTaskCreate):
         filename="project.zip" if mode == "convert" else None,
         icon_filename=icon_in_task,
         keystore_filename=keystore_in_task,
-        config=task_data.config,
+        config=effective_config,
         status=BuildStatus.PENDING,
         created_at=now,
         updated_at=now,
