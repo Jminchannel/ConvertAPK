@@ -4,9 +4,6 @@
     <header class="header">
       <div class="container header-content">
         <div class="logo">
-          <div class="logo-icon">
-            <img :src="appLogo" alt="logo" class="logo-icon-img" />
-          </div>
           <div>
             <div class="logo-text">{{ t('header.title') }}</div>
             <div class="logo-subtitle">{{ t('header.subtitle') }}</div>
@@ -862,7 +859,6 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { Cropper } from 'vue-advanced-cropper'
 import 'vue-advanced-cropper/dist/style.css'
 import * as api from './api'
-import appLogo from './assets/icon.png'
 const alipayQr = new URL('./pics/支付宝.png', import.meta.url).href
 const wechatQr = new URL('./pics/微信.png', import.meta.url).href
 import { messages, getSavedLanguage, saveLanguage, getSavedTheme, saveTheme, createI18n } from './i18n'
