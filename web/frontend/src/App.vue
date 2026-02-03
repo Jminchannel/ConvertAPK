@@ -444,7 +444,7 @@
 
               <div class="form-group keystore-upload">
                 <label class="form-label">{{ t('config.keystoreUpload') }}</label>
-                <div class="keystore-upload-row">
+                <div class="keystore-upload-card">
                   <input
                     ref="keystoreInput"
                     type="file"
@@ -453,25 +453,34 @@
                     @change="handleKeystoreSelect"
                     :disabled="isKeystoreUploaded || !!updatingTaskId"
                   />
-                  <button
-                    class="btn btn-ghost btn-sm"
-                    type="button"
-                    @click="triggerKeystoreInput"
-                    :disabled="isKeystoreUploaded || !!updatingTaskId"
-                  >
-                    {{ t('config.keystoreChoose') }}
-                  </button>
-                  <span v-if="uploadedKeystore" class="keystore-name">
+                  <div class="keystore-upload-main">
+                    <div class="keystore-icon">🔑</div>
+                    <div class="keystore-meta">
+                      <div class="keystore-title">{{ t('config.keystoreUpload') }}</div>
+                      <div class="keystore-subtitle">.jks / .keystore</div>
+                    </div>
+                  </div>
+                  <div class="keystore-upload-actions">
+                    <button
+                      class="btn btn-ghost btn-sm"
+                      type="button"
+                      @click="triggerKeystoreInput"
+                      :disabled="isKeystoreUploaded || !!updatingTaskId"
+                    >
+                      {{ t('config.keystoreChoose') }}
+                    </button>
+                    <button
+                      v-if="uploadedKeystore"
+                      class="btn btn-ghost btn-sm"
+                      type="button"
+                      @click="clearKeystoreUpload"
+                    >
+                      {{ t('config.keystoreRemove') }}
+                    </button>
+                  </div>
+                  <div v-if="uploadedKeystore" class="keystore-pill">
                     {{ uploadedKeystore.original_name }}
-                  </span>
-                  <button
-                    v-if="uploadedKeystore"
-                    class="btn btn-ghost btn-sm"
-                    type="button"
-                    @click="clearKeystoreUpload"
-                  >
-                    {{ t('config.keystoreRemove') }}
-                  </button>
+                  </div>
                 </div>
                 <div v-if="keystoreUploadError" class="form-error">{{ keystoreUploadError }}</div>
                 <div v-if="isKeystoreUploaded" class="form-hint warning">
@@ -1989,5 +1998,85 @@ onUnmounted(() => {
 
 .download-dropdown .dropdown-item:hover {
   background: var(--bg-hover);
+}
+
+.keystore-upload {
+  margin-bottom: 12px;
+}
+
+.keystore-upload-card {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  padding: 12px 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.keystore-upload-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.keystore-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background: rgba(99, 102, 241, 0.16);
+  color: var(--primary-start);
+  display: grid;
+  place-items: center;
+  font-size: 16px;
+}
+
+.keystore-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.keystore-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.keystore-subtitle {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.keystore-upload-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.keystore-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(16, 185, 129, 0.12);
+  color: #34d399;
+  font-size: 12px;
+  border: 1px solid rgba(16, 185, 129, 0.2);
+  width: fit-content;
+}
+
+.keystore-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.form-hint.warning {
+  margin-top: 6px;
+  color: var(--warning-start);
+  font-size: 12px;
 }
 </style>
