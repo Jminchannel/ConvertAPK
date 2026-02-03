@@ -301,12 +301,20 @@
                 </div>
                 <div class="quickgen-grid">
                   <div class="quickgen-icon" aria-hidden="true">
-                    <img :src="quickGenerateIconUrl" alt="demo icon" />
+                    <img
+                      v-if="!quickGenerateIconError"
+                      :src="quickGenerateIconUrl"
+                      alt="demo icon"
+                      @error="quickGenerateIconError = true"
+                    />
+                    <div v-else class="quickgen-icon-fallback">PNG</div>
                   </div>
                   <div class="quickgen-values">
                     <div class="quickgen-item">
                       <div class="k">{{ t('config.appName') }}</div>
-                      <div class="v">demo</div>
+                      <div class="v tags">
+                        <span class="quickgen-tag">demo</span>
+                      </div>
                     </div>
                     <div class="quickgen-item">
                       <div class="k">{{ t('config.packageName') }}</div>
@@ -314,29 +322,43 @@
                     </div>
                     <div class="quickgen-item">
                       <div class="k">{{ t('config.versionName') }}</div>
-                      <div class="v">{{ t('config.quickGenerateAuto') }}</div>
+                      <div class="v tags">
+                        <span class="quickgen-tag">{{ t('config.quickGenerateAuto') }}</span>
+                      </div>
                     </div>
                     <div class="quickgen-item">
                       <div class="k">{{ t('config.versionCode') }}</div>
-                      <div class="v">{{ t('config.quickGenerateAuto') }}</div>
+                      <div class="v tags">
+                        <span class="quickgen-tag">{{ t('config.quickGenerateAuto') }}</span>
+                      </div>
                     </div>
                     <div class="quickgen-item">
                       <div class="k">{{ t('config.outputFormat') }}</div>
-                      <div class="v">{{ t('config.apk') }}</div>
+                      <div class="v tags">
+                        <span class="quickgen-tag">{{ t('config.apk') }}</span>
+                      </div>
                     </div>
                     <div class="quickgen-item">
                       <div class="k">{{ t('config.styleTitle') }}</div>
-                      <div class="v">
-                        {{ t('config.orientationPortrait') }} / {{ t('config.doubleClickExit') }} / {{ t('config.statusBarHidden') }}
+                      <div class="v tags">
+                        <span class="quickgen-tag">{{ t('config.orientationPortrait') }}</span>
+                        <span class="quickgen-tag">{{ t('config.doubleClickExit') }}</span>
+                        <span class="quickgen-tag">{{ t('config.statusBarHidden') }}</span>
                       </div>
                     </div>
                     <div class="quickgen-item">
                       <div class="k">{{ t('config.permissionsTitle') }}</div>
-                      <div class="v">{{ t('config.quickGenerateAllPermissions') }}</div>
+                      <div class="v tags">
+                        <span class="quickgen-tag">{{ t('config.quickGenerateAllPermissions') }}</span>
+                      </div>
                     </div>
                     <div class="quickgen-item">
                       <div class="k">{{ t('config.signConfig') }}</div>
-                      <div class="v mono">key0 / 123456 / 123456</div>
+                      <div class="v tags mono">
+                        <span class="quickgen-tag">key0</span>
+                        <span class="quickgen-tag">123456</span>
+                        <span class="quickgen-tag">123456</span>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -986,6 +1008,7 @@ const enablePermissions = ref(false)
 const useCustomKeystore = ref(false)
 const quickGenerate = ref(false)
 const quickGenerateIconUrl = '/api/quick-generate/icon'
+const quickGenerateIconError = ref(false)
 const codeCopied = ref(false)
 
 const jsTemplate = `// 1. 定义广告API (h5api) - 需添加到您的网页中
@@ -1319,6 +1342,7 @@ watch(() => mode.value, (value) => {
 
 watch(quickGenerate, (enabled) => {
   if (!enabled) return
+  quickGenerateIconError.value = false
   if (mode.value !== 'convert' || updatingTaskId.value) {
     quickGenerate.value = false
     return
@@ -2102,17 +2126,19 @@ onUnmounted(() => {
 }
 .quickgen-grid {
   display: grid;
-  grid-template-columns: 92px 1fr;
-  gap: 16px;
-  align-items: start;
+  grid-template-columns: 1fr;
+  gap: 14px;
 }
 .quickgen-icon {
   width: 92px;
   height: 92px;
+  margin: 0 auto;
   border-radius: 18px;
   overflow: hidden;
   border: 1px dashed rgba(255, 255, 255, 0.18);
   background: rgba(0, 0, 0, 0.25);
+  display: grid;
+  place-items: center;
 }
 .quickgen-icon img {
   width: 100%;
@@ -2120,15 +2146,25 @@ onUnmounted(() => {
   object-fit: cover;
   display: block;
 }
+.quickgen-icon-fallback {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-sub);
+  letter-spacing: 0.8px;
+}
 .quickgen-values {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 10px;
 }
 .quickgen-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  align-items: center;
   gap: 12px;
   padding: 10px 12px;
   border-radius: var(--radius-sm);
@@ -2139,22 +2175,43 @@ onUnmounted(() => {
   font-size: 11px;
   color: var(--text-sub);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .quickgen-item .v {
   font-size: 12px;
   font-weight: 600;
   color: var(--text-main);
+  min-width: 0;
+  justify-self: end;
   text-align: right;
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.quickgen-item .v.tags {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: unset;
+}
+.quickgen-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-main);
+  font-size: 11px;
+  line-height: 1;
 }
 .quickgen-item .v.mono {
   font-family: var(--font-mono);
   font-weight: 500;
-}
-@media (max-width: 640px) {
-  .quickgen-grid { grid-template-columns: 1fr; }
-  .quickgen-values { grid-template-columns: 1fr; }
 }
 
 /* Panels */
