@@ -270,18 +270,31 @@
                   </div>
                 </div>
                 <div class="card-header-actions">
-                  <label
+                  <div
                     v-if="mode === 'convert'"
-                    class="quickgen-toggle"
+                    class="quickgen-switch"
                     :class="{ disabled: updatingTaskId }"
                     :title="t('config.quickGenerateHint')"
                   >
-                    <input type="checkbox" v-model="quickGenerate" :disabled="!!updatingTaskId" />
-                    <span class="quickgen-pill">
-                      <span class="quickgen-spark">✨</span>
-                      <span class="quickgen-text">{{ t('config.quickGenerate') }}</span>
-                    </span>
-                  </label>
+                    <button
+                      type="button"
+                      class="quickgen-option"
+                      :class="{ active: !quickGenerate }"
+                      :disabled="!!updatingTaskId"
+                      @click="exitQuickGenerate"
+                    >
+                      {{ t('config.quickGenerateModeCustom') }}
+                    </button>
+                    <button
+                      type="button"
+                      class="quickgen-option"
+                      :class="{ active: quickGenerate }"
+                      :disabled="!!updatingTaskId"
+                      @click="enterQuickGenerate"
+                    >
+                      {{ t('config.quickGenerateModeQuick') }}
+                    </button>
+                  </div>
 
                   <button
                     v-if="updatingTaskId"
@@ -944,6 +957,7 @@ const adConfig = ref({ appId: '', appKey: '', placementId: '' })
 const enablePermissions = ref(false)
 const useCustomKeystore = ref(false)
 const quickGenerate = ref(false)
+const quickGenerateStash = ref(null)
 const codeCopied = ref(false)
 
 const jsTemplate = `// 1. 定义广告API (h5api) - 需添加到您的网页中
@@ -1130,7 +1144,7 @@ const config = ref({
 
 const applyQuickGenerateDefaults = () => {
   // Quick generate uses backend defaults for icon & signing file; clear any user uploads.
-  if (appIcon.value && !appIcon.value.startsWith('/api/')) URL.revokeObjectURL(appIcon.value)
+  if (appIcon.value && !appIcon.value.startsWith('/api/') && appIconFile.value) URL.revokeObjectURL(appIcon.value)
   appIcon.value = null
   appIconFile.value = null
   uploadedIcon.value = null
@@ -1160,6 +1174,64 @@ const applyQuickGenerateDefaults = () => {
     keystore_password: '123456',
     key_password: '123456'
   }
+}
+
+const stashQuickGenerateState = () => {
+  quickGenerateStash.value = {
+    config: JSON.parse(JSON.stringify(config.value)),
+    enablePermissions: enablePermissions.value,
+    useCustomKeystore: useCustomKeystore.value,
+    keystoreUploadError: keystoreUploadError.value,
+    uploadedKeystore: uploadedKeystore.value ? { ...uploadedKeystore.value } : null,
+    iconError: iconError.value,
+    uploadedIcon: uploadedIcon.value ? { ...uploadedIcon.value } : null,
+    appIcon: appIcon.value,
+    appIconFile: appIconFile.value
+  }
+}
+
+const restoreQuickGenerateState = () => {
+  const stash = quickGenerateStash.value
+  if (!stash) return
+
+  enablePermissions.value = Boolean(stash.enablePermissions)
+  useCustomKeystore.value = Boolean(stash.useCustomKeystore)
+  keystoreUploadError.value = String(stash.keystoreUploadError || '')
+  uploadedKeystore.value = stash.uploadedKeystore || null
+
+  iconError.value = String(stash.iconError || '')
+  uploadedIcon.value = stash.uploadedIcon || null
+
+  // Restore icon preview
+  if (appIcon.value && !appIcon.value.startsWith('/api/') && appIconFile.value) {
+    try { URL.revokeObjectURL(appIcon.value) } catch {}
+  }
+  appIconFile.value = stash.appIconFile || null
+  if (appIconFile.value) {
+    appIcon.value = URL.createObjectURL(appIconFile.value)
+  } else {
+    appIcon.value = stash.appIcon || null
+  }
+
+  config.value = stash.config || config.value
+
+  // File inputs cannot be restored; reset the native value for cleanliness.
+  if (keystoreInput.value) keystoreInput.value.value = ''
+}
+
+const enterQuickGenerate = () => {
+  if (quickGenerate.value) return
+  if (mode.value !== 'convert' || updatingTaskId.value) return
+  stashQuickGenerateState()
+  quickGenerate.value = true
+  applyQuickGenerateDefaults()
+}
+
+const exitQuickGenerate = () => {
+  if (!quickGenerate.value) return
+  quickGenerate.value = false
+  restoreQuickGenerateState()
+  quickGenerateStash.value = null
 }
 
 // Toast
@@ -1271,17 +1343,8 @@ const canCreateTask = computed(() => {
 
 watch(() => mode.value, (value) => {
   if (value !== 'convert' && quickGenerate.value) {
-    quickGenerate.value = false
+    exitQuickGenerate()
   }
-})
-
-watch(quickGenerate, (enabled) => {
-  if (!enabled) return
-  if (mode.value !== 'convert' || updatingTaskId.value) {
-    quickGenerate.value = false
-    return
-  }
-  applyQuickGenerateDefaults()
 })
 
 const resolveWebUrl = async (input) => {
@@ -1564,6 +1627,7 @@ const useTaskConfig = (task) => {
   updatingTaskId.value = task.id
   updatingTask.value = task
   quickGenerate.value = false
+  quickGenerateStash.value = null
 
   mode.value = task.mode || 'convert'
   webUrl.value = task.web_url || ''
@@ -1730,7 +1794,10 @@ const resetForm = (options = {}) => {
   iconError.value = ''
   updatingTaskId.value = null
   updatingTask.value = null
-  if (!preserveQuickGenerate) quickGenerate.value = false
+  if (!preserveQuickGenerate) {
+    quickGenerate.value = false
+    quickGenerateStash.value = null
+  }
   previousVersionName.value = ''
   config.value = {
     app_name: '',
@@ -1985,49 +2052,47 @@ onUnmounted(() => {
   gap: 10px;
 }
 
-.quickgen-toggle {
-  position: relative;
+.quickgen-switch {
   display: inline-flex;
   align-items: center;
-  cursor: pointer;
-  user-select: none;
-}
-.quickgen-toggle input {
-  position: absolute;
-  opacity: 0;
-  pointer-events: none;
-}
-.quickgen-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
+  gap: 4px;
+  padding: 4px;
   border-radius: 999px;
   border: 1px solid var(--border-color);
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(0, 0, 0, 0.22);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
+}
+.quickgen-option {
+  border: none;
+  background: transparent;
   color: var(--text-sub);
   font-size: 12px;
-  line-height: 1;
-  transition: transform 0.18s ease, background 0.18s ease, border-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+  font-weight: 700;
+  padding: 7px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: transform 0.18s ease, background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+  letter-spacing: 0.2px;
 }
-.quickgen-spark { font-size: 13px; }
-.quickgen-toggle:hover .quickgen-pill {
-  border-color: var(--border-hover);
-  transform: translateY(-1px);
+.quickgen-option:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-main);
 }
-.quickgen-toggle.disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-.quickgen-toggle.disabled:hover .quickgen-pill {
-  transform: none;
-  border-color: var(--border-color);
-}
-.quickgen-toggle input:checked + .quickgen-pill {
+.quickgen-option.active {
   background: var(--primary-gradient);
-  border-color: transparent;
   color: #fff;
   box-shadow: var(--shadow-glow);
+}
+.quickgen-switch.disabled {
+  opacity: 0.55;
+}
+.quickgen-option:disabled {
+  cursor: not-allowed;
+}
+.quickgen-option:disabled:hover {
+  background: transparent;
+  color: var(--text-sub);
+  transform: none;
 }
 
 /* Quick Generate */
