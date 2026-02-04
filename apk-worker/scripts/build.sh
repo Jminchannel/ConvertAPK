@@ -154,7 +154,8 @@ log_info "PACKAGE_NAME: '${PACKAGE_NAME:-未设置}'"
 log_info "=================================="
 
 TASK_MODE=${TASK_MODE:-convert}
-TASK_MODE="$(echo "$TASK_MODE" | tr '[:upper:]' '[:lower:]')"
+# Normalize and trim TASK_MODE to avoid hidden whitespace/CRLF causing mismatches.
+TASK_MODE="$(printf '%s' "$TASK_MODE" | tr '[:upper:]' '[:lower:]' | tr -d '\r\n\t ')"
 ANDROID_DIR="android"
 PROJECT_DIR="${PROJECT_DIR:-/workspace/project}"
 log_info "TASK_MODE: '${TASK_MODE}'"
