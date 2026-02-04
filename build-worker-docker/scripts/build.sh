@@ -3,6 +3,28 @@
 
 set -e
 
+# Save build logs for debugging
+mkdir -p "${OUTPUT_DIR:-/workspace/output}"
+LOG_FILE="${OUTPUT_DIR:-/workspace/output}/build.log"
+exec > >(tee -a "$LOG_FILE") 2>&1
+
+# On failure, copy Gradle problems report to output
+dump_debug_reports() {
+    local exit_code=$?
+    if [ "$exit_code" -eq 0 ]; then
+        return 0
+    fi
+    local debug_dir="${OUTPUT_DIR:-/workspace/output}/debug"
+    mkdir -p "$debug_dir"
+    if [ -f "$PROJECT_DIR/build/reports/problems/problems-report.html" ]; then
+        cp "$PROJECT_DIR/build/reports/problems/problems-report.html" "$debug_dir/"
+    fi
+    if [ -f "$PROJECT_DIR/app/build/reports/problems/problems-report.html" ]; then
+        cp "$PROJECT_DIR/app/build/reports/problems/problems-report.html" "$debug_dir/"
+    fi
+}
+trap dump_debug_reports EXIT
+
 # 颜色定义
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -131,50 +153,304 @@ log_info "APP_NAME: '${APP_NAME:-未设置}'"
 log_info "PACKAGE_NAME: '${PACKAGE_NAME:-未设置}'"
 log_info "=================================="
 
+TASK_MODE=${TASK_MODE:-convert}
+# Normalize TASK_MODE aggressively to avoid hidden chars/CRLF causing mismatches.
+TASK_MODE="$(printf '%s' "$TASK_MODE" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z')"
+ANDROID_DIR="android"
+PROJECT_DIR="${PROJECT_DIR:-/workspace/project}"
+
+# Fallback inference if TASK_MODE is missing or unrecognized.
+case "$TASK_MODE" in
+    web|html|convert) ;;
+    *)
+        if [ -n "$INPUT_DIR" ] && find "$INPUT_DIR" -maxdepth 1 -type f \( -name "*.html" -o -name "*.htm" \) | head -n 1 | grep -q .; then
+            log_warning "TASK_MODE '$TASK_MODE' unrecognized; falling back to html (HTML file found in input)"
+            TASK_MODE="html"
+        elif [ -n "$WEB_URL" ]; then
+            log_warning "TASK_MODE '$TASK_MODE' unrecognized; falling back to web (WEB_URL provided)"
+            TASK_MODE="web"
+        else
+            log_warning "TASK_MODE '$TASK_MODE' unrecognized; falling back to convert"
+            TASK_MODE="convert"
+        fi
+        ;;
+esac
+
+log_info "TASK_MODE: '${TASK_MODE}'"
+
 # ============================================
 # 步骤 0: 准备工作
 # ============================================
-log_info "Step 0: 准备工作..."
-
-# 检查输入目录是否有ZIP文件
-ZIP_FILE=$(find $INPUT_DIR -name "*.zip" -type f | head -n 1)
-
-if [ -z "$ZIP_FILE" ]; then
-    log_error "在 $INPUT_DIR 中没有找到ZIP文件"
-    exit 1
-fi
-
-log_info "找到ZIP文件: $ZIP_FILE"
-
-# 创建项目工作目录
-PROJECT_DIR=/workspace/project
-rm -rf $PROJECT_DIR
-mkdir -p $PROJECT_DIR
-
-# 解压ZIP文件
-log_info "解压项目文件..."
-unzip -q "$ZIP_FILE" -d $PROJECT_DIR
-check_error "解压失败"
-
-# 找到实际的项目根目录(可能在子目录中)
-# 查找包含package.json的目录
-PACKAGE_JSON=$(find $PROJECT_DIR -name "package.json" -type f | head -n 1)
-if [ -z "$PACKAGE_JSON" ]; then
-    log_error "未找到 package.json 文件"
-    exit 1
-fi
-
-PROJECT_ROOT=$(dirname "$PACKAGE_JSON")
-log_info "项目根目录: $PROJECT_ROOT"
-
-cd $PROJECT_ROOT
-
-log_success "准备工作完成"
-
+# Step 0: prepare
 # ============================================
-# 步骤 1: 构建 Web 项目
+log_info "Step 0: ????..."
+
+if [ "$TASK_MODE" = "web" ]; then
+    log_info "Step 1: ?? Web ??..."
+    TEMPLATE_DIR="/workspace/templates/Tubbim"
+    if [ ! -d "$TEMPLATE_DIR" ]; then
+        log_error "Web template not found: $TEMPLATE_DIR"
+        exit 1
+    fi
+    rm -rf "$PROJECT_DIR"
+    mkdir -p "$PROJECT_DIR"
+    cp -R "$TEMPLATE_DIR"/. "$PROJECT_DIR"/
+    PROJECT_ROOT="$PROJECT_DIR"
+    ANDROID_DIR="."
+
+    if [ -z "$WEB_URL" ]; then
+        log_error "WEB_URL is required for web mode"
+        exit 1
+    fi
+
+    PROJECT_ROOT="$PROJECT_ROOT" node << 'NODE'
+const fs = require('fs');
+const path = require('path');
+
+const projectRoot = process.env.PROJECT_ROOT || process.cwd();
+const appName = process.env.APP_NAME || 'MyApp';
+const packageName = process.env.PACKAGE_NAME || 'com.example.app';
+const versionName = process.env.VERSION_NAME || '1.0.0';
+const versionCode = process.env.VERSION_CODE || '1';
+const webUrl = (process.env.WEB_URL || '').trim();
+const statusBarHidden = String(process.env.STATUS_BAR_HIDDEN || '').trim().toLowerCase() === 'true';
+const statusBarColorRaw = String(process.env.STATUS_BAR_COLOR || 'transparent').trim().toLowerCase();
+const statusBarStyle = String(process.env.STATUS_BAR_STYLE || 'light').trim().toLowerCase();
+const lightStatusBarIcons = statusBarStyle === 'dark';
+const statusBarBackground =
+  statusBarColorRaw === '#ffffff' || statusBarColorRaw === 'white' || statusBarColorRaw === '#ffffffff'
+    ? 'white'
+    : 'transparent';
+const doubleClickExit = String(process.env.DOUBLE_CLICK_EXIT || '').trim().toLowerCase() !== 'false';
+
+const stringsFile = path.join(projectRoot, 'app', 'src', 'main', 'res', 'values', 'strings.xml');
+if (fs.existsSync(stringsFile)) {
+  let text = fs.readFileSync(stringsFile, 'utf8');
+  text = text.replace(/(<string\s+name="app_name">)(.*?)(<\/string>)/, `$1${appName}$3`);
+  fs.writeFileSync(stringsFile, text, 'utf8');
+}
+
+let gradleFile = path.join(projectRoot, 'app', 'build.gradle.kts');
+if (!fs.existsSync(gradleFile)) {
+  gradleFile = path.join(projectRoot, 'app', 'build.gradle');
+}
+if (fs.existsSync(gradleFile)) {
+  let gtext = fs.readFileSync(gradleFile, 'utf8');
+  gtext = gtext.replace(/applicationId\s*=\s*"[^"]+"/, `applicationId = "${packageName}"`);
+  gtext = gtext.replace(/versionCode[[:space:]]*=[[:space:]]*\d+/, `versionCode = ${versionCode}`);
+  gtext = gtext.replace(/versionName[[:space:]]*=[[:space:]]*"[^"]+"/, `versionName = "${versionName}"`);
+  gtext = gtext.replace(/buildConfigField\(\s*"String"\s*,\s*"WEBVIEW_URL"[\s\S]*?\)/, `buildConfigField("String", "WEBVIEW_URL", "\\"${webUrl}\\"")`);
+  gtext = gtext.replace(/buildConfigField\(\s*"boolean"\s*,\s*"HIDE_STATUS_BAR"[\s\S]*?\)/, `buildConfigField("boolean", "HIDE_STATUS_BAR", "${statusBarHidden}")`);
+  gtext = gtext.replace(/buildConfigField\(\s*"String"\s*,\s*"STATUS_BAR_BACKGROUND"[\s\S]*?\)/, `buildConfigField("String", "STATUS_BAR_BACKGROUND", "\\"${statusBarBackground}\\"")`);
+  gtext = gtext.replace(/buildConfigField\(\s*"boolean"\s*,\s*"LIGHT_STATUS_BAR_ICONS"[\s\S]*?\)/, `buildConfigField("boolean", "LIGHT_STATUS_BAR_ICONS", "${lightStatusBarIcons}")`);
+  gtext = gtext.replace(/buildConfigField\(\s*"boolean"\s*,\s*"DOUBLE_CLICK_EXIT"[\s\S]*?\)/, `buildConfigField("boolean", "DOUBLE_CLICK_EXIT", "${doubleClickExit}")`);
+  fs.writeFileSync(gradleFile, gtext, 'utf8');
+}
+NODE
+
+    if [ -f "$INPUT_DIR/logo.png" ]; then
+        drawable_dir="$PROJECT_ROOT/app/src/main/res/drawable"
+        if [ -d "$drawable_dir" ]; then
+            rm -f "$drawable_dir/ic_launcher_foreground.xml"
+            cp "$INPUT_DIR/logo.png" "$drawable_dir/ic_launcher_foreground.png"
+            log_info "Template launcher icon updated"
+        fi
+    fi
+
+    cd "$PROJECT_ROOT"
+    log_success "Step 0 done"
+elif [ "$TASK_MODE" = "html" ]; then
+    log_info "Step 1: ?? HTML ??..."
+    TEMPLATE_DIR="/workspace/templates/HTML2APK"
+    if [ ! -d "$TEMPLATE_DIR" ]; then
+        log_error "HTML template not found: $TEMPLATE_DIR"
+        exit 1
+    fi
+    rm -rf "$PROJECT_DIR"
+    mkdir -p "$PROJECT_DIR"
+    cp -R "$TEMPLATE_DIR"/. "$PROJECT_DIR"/
+    PROJECT_ROOT="$PROJECT_DIR"
+    ANDROID_DIR="."
+
+    HTML_FILE="$INPUT_DIR/index.html"
+    if [ ! -f "$HTML_FILE" ]; then
+        HTML_FILE=$(find "$INPUT_DIR" -maxdepth 1 -type f \( -name "*.html" -o -name "*.htm" \) | head -n 1)
+    fi
+    if [ -z "$HTML_FILE" ]; then
+        log_error "HTML file not found in $INPUT_DIR"
+        exit 1
+    fi
+
+    HTML_ROOT="$PROJECT_ROOT/html2apkdemo"
+    rm -rf "$HTML_ROOT"
+    mkdir -p "$HTML_ROOT"
+    cp "$HTML_FILE" "$HTML_ROOT/index.html"
+
+    LIBS_ZIP="$INPUT_DIR/libs.zip"
+    if [ -f "$LIBS_ZIP" ]; then
+        mkdir -p "$HTML_ROOT/libs"
+        TMP_LIBS_DIR="/tmp/html_libs_$$"
+        rm -rf "$TMP_LIBS_DIR"
+        mkdir -p "$TMP_LIBS_DIR"
+        unzip -q "$LIBS_ZIP" -d "$TMP_LIBS_DIR"
+        if [ $(find "$TMP_LIBS_DIR" -mindepth 1 -maxdepth 1 -type d | wc -l) -eq 1 ] && [ $(find "$TMP_LIBS_DIR" -mindepth 1 -maxdepth 1 -type f | wc -l) -eq 0 ]; then
+            SRC_DIR=$(find "$TMP_LIBS_DIR" -mindepth 1 -maxdepth 1 -type d | head -n 1)
+            cp -R "$SRC_DIR"/. "$HTML_ROOT/libs/"
+        else
+            cp -R "$TMP_LIBS_DIR"/. "$HTML_ROOT/libs/"
+        fi
+        rm -rf "$TMP_LIBS_DIR"
+    fi
+
+    PROJECT_ROOT="$PROJECT_ROOT" node << 'NODE'
+const fs = require('fs');
+const path = require('path');
+
+const projectRoot = process.env.PROJECT_ROOT || process.cwd();
+const appName = process.env.APP_NAME || 'MyApp';
+const packageName = process.env.PACKAGE_NAME || 'com.example.app';
+const versionName = process.env.VERSION_NAME || '1.0.0';
+const versionCode = process.env.VERSION_CODE || '1';
+const statusBarHidden = String(process.env.STATUS_BAR_HIDDEN || '').trim().toLowerCase() === 'true';
+const statusBarColorRaw = String(process.env.STATUS_BAR_COLOR || 'transparent').trim().toLowerCase();
+const statusBarStyle = String(process.env.STATUS_BAR_STYLE || 'light').trim().toLowerCase();
+const lightStatusBarIcons = statusBarStyle === 'dark';
+const statusBarBackground =
+  statusBarColorRaw === '#ffffff' || statusBarColorRaw === 'white' || statusBarColorRaw === '#ffffffff'
+    ? 'white'
+    : 'transparent';
+const doubleClickExit = String(process.env.DOUBLE_CLICK_EXIT || '').trim().toLowerCase() !== 'false';
+const orientationRaw = String(process.env.SCREEN_ORIENTATION || '').trim().toLowerCase();
+const screenOrientation = orientationRaw === 'portrait' || orientationRaw === 'landscape' ? orientationRaw : 'auto';
+
+const stringsFile = path.join(projectRoot, 'app', 'src', 'main', 'res', 'values', 'strings.xml');
+if (fs.existsSync(stringsFile)) {
+  let text = fs.readFileSync(stringsFile, 'utf8');
+  text = text.replace(/(<string\s+name="app_name">)(.*?)(<\/string>)/, `$1${appName}$3`);
+  fs.writeFileSync(stringsFile, text, 'utf8');
+}
+
+let gradleFile = path.join(projectRoot, 'app', 'build.gradle.kts');
+if (!fs.existsSync(gradleFile)) {
+  gradleFile = path.join(projectRoot, 'app', 'build.gradle');
+}
+if (fs.existsSync(gradleFile)) {
+  let gtext = fs.readFileSync(gradleFile, 'utf8');
+  gtext = gtext.replace(/applicationId\s*=\s*"[^"]+"/, `applicationId = "${packageName}"`);
+  gtext = gtext.replace(/versionCode[[:space:]]*=[[:space:]]*\d+/, `versionCode = ${versionCode}`);
+  gtext = gtext.replace(/versionName[[:space:]]*=[[:space:]]*"[^"]+"/, `versionName = "${versionName}"`);
+  gtext = gtext.replace(/buildConfigField\(\s*"boolean"\s*,\s*"HIDE_STATUS_BAR"[\s\S]*?\)/, `buildConfigField("boolean", "HIDE_STATUS_BAR", "${statusBarHidden}")`);
+  gtext = gtext.replace(/buildConfigField\(\s*"String"\s*,\s*"STATUS_BAR_BACKGROUND"[\s\S]*?\)/, `buildConfigField("String", "STATUS_BAR_BACKGROUND", "\\"${statusBarBackground}\\"")`);
+  gtext = gtext.replace(/buildConfigField\(\s*"boolean"\s*,\s*"LIGHT_STATUS_BAR_ICONS"[\s\S]*?\)/, `buildConfigField("boolean", "LIGHT_STATUS_BAR_ICONS", "${lightStatusBarIcons}")`);
+  gtext = gtext.replace(/buildConfigField\(\s*"boolean"\s*,\s*"DOUBLE_CLICK_EXIT"[\s\S]*?\)/, `buildConfigField("boolean", "DOUBLE_CLICK_EXIT", "${doubleClickExit}")`);
+  gtext = gtext.replace(/buildConfigField\(\s*"String"\s*,\s*"SCREEN_ORIENTATION"[\s\S]*?\)/, `buildConfigField("String", "SCREEN_ORIENTATION", "\\"${screenOrientation}\\"")`);
+  fs.writeFileSync(gradleFile, gtext, 'utf8');
+}
+NODE
+
+    if [ -f "$INPUT_DIR/logo.png" ]; then
+        drawable_dir="$PROJECT_ROOT/app/src/main/res/drawable"
+        if [ -d "$drawable_dir" ]; then
+            rm -f "$drawable_dir/ic_launcher_foreground.xml"
+            cp "$INPUT_DIR/logo.png" "$drawable_dir/ic_launcher_foreground.png"
+            log_info "Template launcher icon updated"
+        fi
+    fi
+
+    cd "$PROJECT_ROOT"
+    log_success "Step 0 done"
+else
+    # check zip for convert mode
+    ZIP_FILE=$(find "$INPUT_DIR" -name "*.zip" -type f | head -n 1)
+
+    if [ -z "$ZIP_FILE" ]; then
+        log_error "No ZIP found in $INPUT_DIR"
+        exit 1
+    fi
+
+    log_info "Found ZIP: $ZIP_FILE"
+
+    # create project dir
+    rm -rf "$PROJECT_DIR"
+    mkdir -p "$PROJECT_DIR"
+
+    # unzip
+    log_info "Unzip project..."
+    unzip -q "$ZIP_FILE" -d "$PROJECT_DIR"
+    check_error "Unzip failed"
+
+    SKIP_WEB_BUILD=false
+
+    # find package.json (exclude node_modules etc)
+    PACKAGE_JSON=$(find "$PROJECT_DIR" -name "package.json" -type f \
+        -not -path "*/node_modules/*" \
+        -not -path "*/android/*" \
+        -not -path "*/.git/*" \
+        | head -n 1)
+
+    if [ -z "$PACKAGE_JSON" ]; then
+        # Fallback: allow zips containing only built static site (no Node project).
+        # Common case: users zip the dist/build output folder.
+        INDEX_HTML=$(find "$PROJECT_DIR" -name "index.html" -type f \
+            -not -path "*/node_modules/*" \
+            -not -path "*/android/*" \
+            -not -path "*/.git/*" \
+            | head -n 1)
+        if [ -z "$INDEX_HTML" ]; then
+            log_error "package.json not found (and index.html not found)."
+            log_error "请上传包含 package.json 的项目源码（通常是项目根目录打包），或上传已构建的静态站点 ZIP（包含 index.html）。"
+            exit 1
+        fi
+
+        log_warning "package.json not found, treating ZIP as prebuilt web assets"
+        log_info "index.html found at: $INDEX_HTML"
+
+        # Heuristic: if index.html looks like source (e.g. Vite dev entry), warn instead of generating a broken APK.
+        if grep -qE '(^|[\"\\x27\\s])(/?src/|@vite|vite/client|react-refresh)' "$INDEX_HTML" 2>/dev/null; then
+            log_error "检测到 index.html 可能是源码入口（引用了 /src 或 vite client），但 ZIP 中缺少 package.json。"
+            log_error "请重新打包项目根目录（包含 package.json），或先构建后再上传 dist/build 的 ZIP。"
+            exit 1
+        fi
+
+        STATIC_ROOT="$(dirname "$INDEX_HTML")"
+        WRAPPER_ROOT="$PROJECT_DIR/__convertapk_prebuilt"
+        rm -rf "$WRAPPER_ROOT"
+        mkdir -p "$WRAPPER_ROOT/dist"
+        cp -R "$STATIC_ROOT"/. "$WRAPPER_ROOT/dist"/
+
+        # Minimal node project for Capacitor steps.
+        cat > "$WRAPPER_ROOT/package.json" << 'EOF'
+{
+  "name": "convertapk-prebuilt",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Generated by ConvertAPK for prebuilt web assets",
+  "scripts": {
+    "build": "echo prebuilt"
+  }
+}
+EOF
+
+        PROJECT_ROOT="$WRAPPER_ROOT"
+        WEB_DIR="dist"
+        SKIP_WEB_BUILD=true
+    else
+        PROJECT_ROOT=$(dirname "$PACKAGE_JSON")
+    fi
+
+    log_info "Project root: $PROJECT_ROOT"
+
+    cd "$PROJECT_ROOT"
+
+    log_success "Step 0 done"
+fi
+if [ "$TASK_MODE" = "convert" ]; then
 # ============================================
 log_info "Step 1: 构建 Web 项目..."
+
+if [ "$SKIP_WEB_BUILD" = "true" ]; then
+    log_warning "检测到预构建静态站点 ZIP：跳过 npm install / npm run build，直接使用 $WEB_DIR"
+else
 
 # 完整重装依赖的函数
 reinstall_dependencies() {
@@ -288,6 +564,325 @@ fi
 
 log_success "Web 项目构建完成，输出目录: $WEB_DIR"
 
+fi
+
+if [ -z "$WEB_DIR" ]; then
+    # 兼容：兜底检测输出目录
+    if [ -d "dist" ]; then
+        WEB_DIR="dist"
+    elif [ -d "build" ]; then
+        WEB_DIR="build"
+    else
+        log_error "未找到 Web 输出目录 (dist 或 build)"
+        exit 1
+    fi
+fi
+
+if [ ! -d "$WEB_DIR" ]; then
+    log_error "Web 输出目录不存在: $WEB_DIR"
+    exit 1
+fi
+
+# 注入前端下载处理脚本（拦截 blob/data 下载并尝试保存）
+log_info "注入前端下载处理脚本..."
+WEB_DIR="$WEB_DIR" node << 'NODE'
+const fs = require("fs");
+const path = require("path");
+
+function readText(file) {
+  try {
+    return fs.readFileSync(file, "utf8");
+  } catch (err) {
+    return fs.readFileSync(file, "latin1");
+  }
+}
+
+function writeText(file, text) {
+  fs.writeFileSync(file, text, "utf8");
+}
+
+const webDir = process.env.WEB_DIR || "dist";
+const indexHtml = path.join(process.cwd(), webDir, "index.html");
+if (!fs.existsSync(indexHtml)) {
+  process.exit(0);
+}
+
+let html = readText(indexHtml);
+
+const downloadScript =
+  "<script id=\"convertapk-download-helper\">(function(){\n" +
+  "  if (window.__convertapkDownloadHelper) return;\n" +
+  "  window.__convertapkDownloadHelper = true;\n" +
+  "  function getAnchor(el){\n" +
+  "    while (el && el.tagName !== 'A') el = el.parentElement;\n" +
+  "    return el;\n" +
+  "  }\n" +
+  "  function getFilename(a, href){\n" +
+  "    var name = (a.getAttribute('download') || a.download || '').trim();\n" +
+  "    if (name) return name;\n" +
+  "    try {\n" +
+  "      var url = new URL(href, window.location.href);\n" +
+  "      name = url.pathname.split('/').pop() || 'download';\n" +
+  "    } catch (e) {\n" +
+  "      name = 'download';\n" +
+  "    }\n" +
+  "    return name;\n" +
+  "  }\n" +
+  "  function readAsDataUrl(blob){\n" +
+  "    return new Promise(function(resolve, reject){\n" +
+  "      var reader = new FileReader();\n" +
+  "      reader.onload = function(){ resolve(reader.result || ''); };\n" +
+  "      reader.onerror = function(){ reject(reader.error); };\n" +
+  "      reader.readAsDataURL(blob);\n" +
+  "    });\n" +
+  "  }\n" +
+  "  async function shareFile(filename){\n" +
+  "    try {\n" +
+  "      var cap = window.Capacitor;\n" +
+  "      if (!cap || !cap.Plugins || !cap.Plugins.Share || !cap.Plugins.Filesystem) return false;\n" +
+  "      var fsPlugin = cap.Plugins.Filesystem;\n" +
+  "      var uriResult = await fsPlugin.getUri({ path: filename, directory: 'DOCUMENTS' });\n" +
+  "      var fileUrl = uriResult && uriResult.uri ? uriResult.uri : '';\n" +
+  "      if (!fileUrl) {\n" +
+  "        uriResult = await fsPlugin.getUri({ path: filename, directory: 'DATA' });\n" +
+  "        fileUrl = uriResult && uriResult.uri ? uriResult.uri : '';\n" +
+  "      }\n" +
+  "      if (!fileUrl) return false;\n" +
+  "      await cap.Plugins.Share.share({ title: filename, text: filename, url: fileUrl });\n" +
+  "      return true;\n" +
+  "    } catch (e) {\n" +
+  "      return false;\n" +
+  "    }\n" +
+  "  }\n" +
+  "  async function saveBlob(blob, filename){\n" +
+  "    var cap = window.Capacitor;\n" +
+  "    if (!cap || !cap.Plugins || !cap.Plugins.Filesystem) return false;\n" +
+  "    var dataUrl = await readAsDataUrl(blob);\n" +
+  "    var base64 = String(dataUrl).split(',')[1] || '';\n" +
+  "    var fsPlugin = cap.Plugins.Filesystem;\n" +
+  "    try {\n" +
+  "      await fsPlugin.writeFile({ path: filename, data: base64, directory: 'DOCUMENTS', recursive: true });\n" +
+  "      return true;\n" +
+  "    } catch (e) {\n" +
+  "      try {\n" +
+  "        await fsPlugin.writeFile({ path: filename, data: base64, directory: 'DATA', recursive: true });\n" +
+  "        return true;\n" +
+  "      } catch (e2) {\n" +
+  "        return false;\n" +
+  "      }\n" +
+  "    }\n" +
+  "  }\n" +
+  "  async function handleDownload(a, href){\n" +
+  "    if (!href) return false;\n" +
+  "    var isBlob = href.startsWith('blob:');\n" +
+  "    var isData = href.startsWith('data:');\n" +
+  "    if (!isBlob && !isData) {\n" +
+  "      try {\n" +
+  "        var url = new URL(href, window.location.href).toString();\n" +
+  "        var cap = window.Capacitor;\n" +
+  "        if (cap && cap.Plugins && cap.Plugins.Browser) {\n" +
+  "          cap.Plugins.Browser.open({ url: url });\n" +
+  "          return true;\n" +
+  "        }\n" +
+  "        window.open(url, '_blank');\n" +
+  "        return true;\n" +
+  "      } catch (e) {\n" +
+  "        return false;\n" +
+  "      }\n" +
+  "    }\n" +
+  "    try {\n" +
+  "      var res = await fetch(href);\n" +
+  "      var blob = await res.blob();\n" +
+  "      return await saveBlob(blob, getFilename(a, href));\n" +
+  "    } catch (e) {\n" +
+  "      return false;\n" +
+  "    }\n" +
+  "  }\n" +
+  "  async function shareFiles(files, title){\n" +
+  "    if (!files || !files.length) return false;\n" +
+  "    var file = files[0];\n" +
+  "    var name = (file && file.name) || title || 'share';\n" +
+  "    try {\n" +
+  "      var ok = await saveBlob(file, name);\n" +
+  "      if (!ok) return false;\n" +
+  "      return await shareFile(name);\n" +
+  "    } catch (e) {\n" +
+  "      return false;\n" +
+  "    }\n" +
+  "  }\n" +
+  "  (function(){\n" +
+  "    if (!navigator) return;\n" +
+  "    var cap = window.Capacitor;\n" +
+  "    if (!cap || !cap.Plugins || !cap.Plugins.Share || !cap.Plugins.Filesystem) return;\n" +
+  "    var origCanShare = navigator.canShare ? navigator.canShare.bind(navigator) : null;\n" +
+  "    navigator.canShare = function(data){\n" +
+  "      if (data && data.files && data.files.length) return true;\n" +
+  "      return origCanShare ? origCanShare(data) : false;\n" +
+  "    };\n" +
+  "    if (navigator.share) {\n" +
+  "      var origShare = navigator.share.bind(navigator);\n" +
+  "      navigator.share = async function(data){\n" +
+  "        if (data && data.files && data.files.length) {\n" +
+  "          var ok = await shareFiles(data.files, data.title || data.text || '');\n" +
+  "          if (ok) return;\n" +
+  "        }\n" +
+  "        return origShare(data);\n" +
+  "      };\n" +
+  "    } else {\n" +
+  "      navigator.share = async function(data){\n" +
+  "        if (data && data.files && data.files.length) {\n" +
+  "          var ok = await shareFiles(data.files, data.title || data.text || '');\n" +
+  "          if (ok) return;\n" +
+  "        }\n" +
+  "        throw new Error('share not supported');\n" +
+  "      };\n" +
+  "    }\n" +
+  "  })();\n" +
+  "  function hookJsPdfSave(){\n" +
+  "    try {\n" +
+  "      var JSPDF = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;\n" +
+  "      if (!JSPDF || !JSPDF.API || JSPDF.API.__convertapkSavePatched) return false;\n" +
+  "      var origSave = JSPDF.API.save;\n" +
+  "      JSPDF.API.save = function(filename){\n" +
+  "        try {\n" +
+  "          var blob = this.output('blob');\n" +
+  "          saveBlob(blob, filename || 'download.pdf');\n" +
+  "          return;\n" +
+  "        } catch (e) {\n" +
+  "        }\n" +
+  "        return origSave ? origSave.apply(this, arguments) : undefined;\n" +
+  "      };\n" +
+  "      JSPDF.API.__convertapkSavePatched = true;\n" +
+  "      return true;\n" +
+  "    } catch (e) {\n" +
+  "      return false;\n" +
+  "    }\n" +
+  "  }\n" +
+  "  var _pdfTries = 0;\n" +
+  "  var _pdfTimer = setInterval(function(){\n" +
+  "    _pdfTries += 1;\n" +
+  "    if (hookJsPdfSave() || _pdfTries > 20) clearInterval(_pdfTimer);\n" +
+  "  }, 500);\n" +
+  "  if (navigator) {\n" +
+  "    try {\n" +
+  "      navigator.msSaveOrOpenBlob = function(blob, name){ saveBlob(blob, name || 'download'); return true; };\n" +
+  "      navigator.msSaveBlob = function(blob, name){ saveBlob(blob, name || 'download'); return true; };\n" +
+  "    } catch (e) {\n" +
+  "    }\n" +
+  "  }\n" +
+  "  try {\n" +
+  "    window.saveAs = function(blob, name){ return saveBlob(blob, name || 'download'); };\n" +
+  "  } catch (e) {\n" +
+  "  }\n" +
+  "  var _origClick = HTMLAnchorElement.prototype.click;\n" +
+  "  HTMLAnchorElement.prototype.click = function(){\n" +
+  "    try {\n" +
+  "      var href = this.getAttribute('href') || this.href || '';\n" +
+  "      var download = this.getAttribute('download') || this.download;\n" +
+  "      if (download || href.startsWith('blob:') || href.startsWith('data:')) {\n" +
+  "        handleDownload(this, href);\n" +
+  "        return;\n" +
+  "      }\n" +
+  "    } catch (e) {\n" +
+  "    }\n" +
+  "    return _origClick.call(this);\n" +
+  "  };\n" +
+  "  var _origDispatch = HTMLAnchorElement.prototype.dispatchEvent;\n" +
+  "  HTMLAnchorElement.prototype.dispatchEvent = function(evt){\n" +
+  "    try {\n" +
+  "      if (evt && evt.type === 'click') {\n" +
+  "        var href = this.getAttribute('href') || this.href || '';\n" +
+  "        var download = this.getAttribute('download') || this.download;\n" +
+  "        if (download || href.startsWith('blob:') || href.startsWith('data:')) {\n" +
+  "          handleDownload(this, href);\n" +
+  "          return true;\n" +
+  "        }\n" +
+  "      }\n" +
+  "    } catch (e) {\n" +
+  "    }\n" +
+  "    return _origDispatch.call(this, evt);\n" +
+  "  };\n" +
+  "  document.addEventListener('click', function(e){\n" +
+  "    var a = getAnchor(e.target);\n" +
+  "    if (!a) return;\n" +
+  "    var href = a.getAttribute('href') || '';\n" +
+  "    var download = a.getAttribute('download') || a.download;\n" +
+  "    if (!href) return;\n" +
+  "    if (download || href.startsWith('blob:') || href.startsWith('data:')) {\n" +
+  "      e.preventDefault();\n" +
+  "      e.stopPropagation();\n" +
+  "      handleDownload(a, href);\n" +
+  "    }\n" +
+  "  }, true);\n" +
+  "})();</script>";
+
+const newlineScript =
+  "<script id=\"convertapk-newline-fix\">(function(){\n" +
+  "  if (window.__convertapkNewlineFix) return;\n" +
+  "  window.__convertapkNewlineFix = true;\n" +
+  "  function shouldSkip(node){\n" +
+  "    if (!node || !node.parentElement) return true;\n" +
+  "    var tag = node.parentElement.tagName || '';\n" +
+  "    return ['SCRIPT','STYLE','TEXTAREA','CODE','PRE','INPUT'].includes(tag);\n" +
+  "  }\n" +
+  "  function replaceNode(node){\n" +
+  "    var text = node.nodeValue || '';\n" +
+  "    if (text.indexOf('\\\\n') === -1) return;\n" +
+  "    var parts = text.split('\\\\n');\n" +
+  "    var frag = document.createDocumentFragment();\n" +
+  "    for (var i = 0; i < parts.length; i++) {\n" +
+  "      frag.appendChild(document.createTextNode(parts[i]));\n" +
+  "      if (i < parts.length - 1) frag.appendChild(document.createElement('br'));\n" +
+  "    }\n" +
+  "    if (node.parentNode) node.parentNode.replaceChild(frag, node);\n" +
+  "  }\n" +
+  "  function walk(){\n" +
+  "    var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);\n" +
+  "    var n; var list = [];\n" +
+  "    while ((n = walker.nextNode())) {\n" +
+  "      if (shouldSkip(n)) continue;\n" +
+  "      if (n.nodeValue && n.nodeValue.indexOf('\\\\n') !== -1) list.push(n);\n" +
+  "    }\n" +
+  "    for (var i = 0; i < list.length; i++) replaceNode(list[i]);\n" +
+  "  }\n" +
+  "  function run(){\n" +
+  "    if (!document.body) return;\n" +
+  "    walk();\n" +
+  "  }\n" +
+  "  if (document.readyState === 'loading') {\n" +
+  "    document.addEventListener('DOMContentLoaded', run);\n" +
+  "  } else {\n" +
+  "    run();\n" +
+  "  }\n" +
+  "  var scheduled = false;\n" +
+  "  var obs = new MutationObserver(function(){\n" +
+  "    if (scheduled) return;\n" +
+  "    scheduled = true;\n" +
+  "    setTimeout(function(){ scheduled = false; run(); }, 50);\n" +
+  "  });\n" +
+  "  if (document.body) obs.observe(document.body, { childList: true, subtree: true });\n" +
+  "})();</script>";
+
+let insert = "";
+if (!html.includes("convertapk-download-helper")) {
+  insert += downloadScript + "\\n";
+}
+if (!html.includes("convertapk-newline-fix")) {
+  insert += newlineScript + "\\n";
+}
+if (!insert) {
+  process.exit(0);
+}
+
+if (html.includes("</body>")) {
+  html = html.replace("</body>", insert + "</body>");
+} else {
+  html += "\\n" + insert;
+}
+
+writeText(indexHtml, html);
+NODE
+
 # ============================================
 # 步骤 2: 初始化 Capacitor
 # ============================================
@@ -304,6 +899,24 @@ if ! grep -q "@capacitor/cli" package.json; then
     log_info "安装 @capacitor/cli..."
     npm install -D @capacitor/cli --legacy-peer-deps
     check_error "安装 @capacitor/cli 失败"
+fi
+
+if ! grep -q "@capacitor/filesystem" package.json; then
+    log_info "安装 @capacitor/filesystem..."
+    npm install @capacitor/filesystem --legacy-peer-deps
+    check_error "安装 @capacitor/filesystem 失败"
+fi
+
+if ! grep -q "@capacitor/browser" package.json; then
+    log_info "安装 @capacitor/browser..."
+    npm install @capacitor/browser --legacy-peer-deps
+    check_error "安装 @capacitor/browser 失败"
+fi
+
+if ! grep -q "@capacitor/share" package.json; then
+    log_info "安装 @capacitor/share..."
+    npm install @capacitor/share --legacy-peer-deps
+    check_error "安装 @capacitor/share 失败"
 fi
 
 # 创建 capacitor.config.ts
@@ -403,25 +1016,831 @@ check_error "代码同步失败"
 
 log_success "代码同步完成"
 
+# 注入下载处理（外部浏览器下载）
+log_info "注入 Android 下载处理..."
+fi
+export ANDROID_DIR="$ANDROID_DIR"
+node << 'NODE'
+const fs = require("fs");
+const path = require("path");
+
+function readText(file) {
+  try {
+    return fs.readFileSync(file, "utf8");
+  } catch (err) {
+    return fs.readFileSync(file, "latin1");
+  }
+}
+
+function writeText(file, text) {
+  fs.writeFileSync(file, text, "utf8");
+}
+
+function findMainActivity(javaRoot) {
+  const stack = [javaRoot];
+  while (stack.length) {
+    const dir = stack.pop();
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(full);
+      } else if (
+        entry.isFile() &&
+        (entry.name === "MainActivity.java" || entry.name === "MainActivity.kt")
+      ) {
+        return full;
+      }
+    }
+  }
+  return null;
+}
+
+const projectRoot = process.cwd();
+const androidDir = path.resolve(process.env.ANDROID_DIR || path.join(projectRoot, "android"));
+const javaRoot = path.join(androidDir, "app", "src", "main", "java");
+if (!fs.existsSync(javaRoot)) {
+  process.exit(0);
+}
+
+const mainActivity = findMainActivity(javaRoot);
+if (!mainActivity) {
+  process.exit(0);
+}
+
+let text = readText(mainActivity);
+const originalText = text;
+const isKotlin = mainActivity.endsWith(".kt");
+const packageNameRaw = String(process.env.PACKAGE_NAME || "").trim();
+const doubleClickExit =
+  String(process.env.DOUBLE_CLICK_EXIT || "").trim().toLowerCase() === "true";
+const taskMode = String(process.env.TASK_MODE || "").trim().toLowerCase();
+const allowKotlinPatch = taskMode === "convert";
+const packageLineMatch = text.match(/^package\s+[^\s]+/m);
+const packageLine = packageNameRaw
+  ? `package ${packageNameRaw}`
+  : (packageLineMatch ? packageLineMatch[0] : "package com.example.app");
+let replacedKotlin = false;
+
+if (
+  isKotlin &&
+  allowKotlinPatch &&
+  text.includes("BridgeActivity") &&
+  !text.includes("ConvertAPK: enhanced main")
+) {
+  text = `${packageLine}
+
+// ConvertAPK: enhanced main
+import android.app.Activity
+import android.app.DownloadManager
+import android.content.Intent
+import android.net.Uri
+import android.os.Bundle
+import android.os.Environment
+import android.webkit.CookieManager
+import android.webkit.URLUtil
+import android.webkit.ValueCallback
+import android.webkit.WebChromeClient
+import android.webkit.WebChromeClient.FileChooserParams
+import android.webkit.WebView
+import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import android.view.View
+import android.view.WindowManager
+import com.getcapacitor.BridgeActivity
+
+class MainActivity : BridgeActivity() {
+    private var lastBackPressedAt: Long = 0L
+    private val doubleClickExitEnabled = ${doubleClickExit ? "true" : "false"}
+    private var filePathCallback: ValueCallback<Array<Uri>>? = null
+    private val fileChooserLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val callback = filePathCallback
+        if (callback == null) return@registerForActivityResult
+        val uris = if (result.resultCode == Activity.RESULT_OK) {
+            val data = result.data
+            val clipData = data?.clipData
+            when {
+                clipData != null -> Array(clipData.itemCount) { idx -> clipData.getItemAt(idx).uri }
+                data?.data != null -> arrayOf(data.data!!)
+                else -> emptyArray()
+            }
+        } else {
+            emptyArray()
+        }
+        callback.onReceiveValue(uris)
+        filePathCallback = null
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        applySystemBars()
+        setupWebView()
+        if (doubleClickExitEnabled) {
+            onBackPressedDispatcher.addCallback(
+                this,
+                object : OnBackPressedCallback(true) {
+                    override fun handleOnBackPressed() {
+                        handleBackPressed()
+                    }
+                }
+            )
+        }
+    }
+
+    private fun setupWebView() {
+        val webView = bridge?.webView ?: return
+        webView.clipToPadding = false
+        val root = window.decorView
+        ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
+            val nav = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
+            webView.setPadding(nav.left, webView.paddingTop, nav.right, nav.bottom)
+            webView.post {
+                val script = "(function(){var b=" + nav.bottom +
+                    ";var root=document.documentElement;" +
+                    "root.style.boxSizing='border-box';root.style.paddingBottom=b+'px';" +
+                    "if(document.body){document.body.style.boxSizing='border-box';document.body.style.paddingBottom=b+'px';}" +
+                    "})();"
+                webView.evaluateJavascript(script, null)
+            }
+            insets
+        }
+        ViewCompat.requestApplyInsets(root)
+        webView.webChromeClient = object : WebChromeClient() {
+            override fun onShowFileChooser(
+                webView: WebView?,
+                filePathCallback: ValueCallback<Array<Uri>>?,
+                fileChooserParams: FileChooserParams?
+            ): Boolean {
+                this@MainActivity.filePathCallback?.onReceiveValue(null)
+                this@MainActivity.filePathCallback = filePathCallback
+                val intent = try {
+                    fileChooserParams?.createIntent()
+                } catch (_: Exception) {
+                    null
+                }
+                val fallback = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    type = "*/*"
+                    val allowMultiple = fileChooserParams?.mode == FileChooserParams.MODE_OPEN_MULTIPLE
+                    putExtra(Intent.EXTRA_ALLOW_MULTIPLE, allowMultiple)
+                }
+                val chooserTitle = fileChooserParams?.title ?: "Select file"
+                val chooser = Intent.createChooser(intent ?: fallback, chooserTitle)
+                return try {
+                    fileChooserLauncher.launch(chooser)
+                    true
+                } catch (_: Exception) {
+                    this@MainActivity.filePathCallback = null
+                    false
+                }
+            }
+        }
+        webView.setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
+            try {
+                val request = DownloadManager.Request(Uri.parse(url))
+                request.setMimeType(mimeType)
+                request.addRequestHeader("User-Agent", userAgent)
+                val cookie = CookieManager.getInstance().getCookie(url)
+                if (cookie != null) {
+                    request.addRequestHeader("cookie", cookie)
+                }
+                val filename = URLUtil.guessFileName(url, contentDisposition, mimeType)
+                request.setTitle(filename)
+                request.setDescription(url)
+                request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, filename)
+                val dm = getSystemService(DOWNLOAD_SERVICE) as DownloadManager
+                dm.enqueue(request)
+            } catch (_: Exception) {
+                Toast.makeText(this, "Download failed", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) {
+            applySystemBars()
+        }
+    }
+
+    override fun onBackPressed() {
+        if (!doubleClickExitEnabled) {
+            val webView = bridge?.webView
+            if (webView != null && webView.canGoBack()) {
+                webView.goBack()
+                return
+            }
+            super.onBackPressed()
+            return
+        }
+        handleBackPressed()
+    }
+
+    private fun handleBackPressed() {
+        val webView = bridge?.webView
+        if (webView != null && webView.canGoBack()) {
+            webView.goBack()
+            return
+        }
+        if (!doubleClickExitEnabled) {
+            finish()
+            return
+        }
+        val now = System.currentTimeMillis()
+        if (now - lastBackPressedAt <= 2000) {
+            finish()
+        } else {
+            lastBackPressedAt = now
+            Toast.makeText(this@MainActivity, "Press back again to exit", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun applySystemBars() {
+        val statusBarBackground = BuildConfig.STATUS_BAR_BACKGROUND.trim().lowercase()
+        val drawBehind = statusBarBackground == "transparent"
+        WindowCompat.setDecorFitsSystemWindows(window, !drawBehind)
+        @Suppress("DEPRECATION")
+        window.statusBarColor = if (drawBehind) android.graphics.Color.TRANSPARENT else android.graphics.Color.WHITE
+        val controller = WindowInsetsControllerCompat(window, window.decorView)
+        controller.isAppearanceLightStatusBars = BuildConfig.LIGHT_STATUS_BAR_ICONS
+        if (BuildConfig.HIDE_STATUS_BAR) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+            window.clearFlags(WindowManager.LayoutParams.FLAG_FORCE_NOT_FULLSCREEN)
+            @Suppress("DEPRECATION")
+            window.decorView.systemUiVisibility =
+                View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+            controller.systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller.hide(WindowInsetsCompat.Type.statusBars())
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+            window.addFlags(WindowManager.LayoutParams.FLAG_FORCE_NOT_FULLSCREEN)
+            @Suppress("DEPRECATION")
+            window.decorView.systemUiVisibility =
+                if (BuildConfig.LIGHT_STATUS_BAR_ICONS) {
+                    View.SYSTEM_UI_FLAG_VISIBLE or View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+                } else {
+                    View.SYSTEM_UI_FLAG_VISIBLE
+                }
+            controller.show(WindowInsetsCompat.Type.statusBars())
+        }
+    }
+}
+`;
+  replacedKotlin = true;
+}
+
+const statusBarHidden =
+  String(process.env.STATUS_BAR_HIDDEN || "").trim().toLowerCase() === "true";
+const statusBarColorRaw = String(process.env.STATUS_BAR_COLOR || "transparent").trim();
+const statusBarColorLower = statusBarColorRaw.toLowerCase();
+const statusBarIsWhite =
+  statusBarColorLower === "white" ||
+  statusBarColorLower === "#ffffff" ||
+  statusBarColorLower === "#ffffffff";
+
+if (!replacedKotlin && !(isKotlin && !allowKotlinPatch)) {
+  const importSuffix = isKotlin ? "" : ";";
+  const imports = [
+    `import android.content.Intent${importSuffix}`,
+    `import android.net.Uri${importSuffix}`,
+    `import android.os.Bundle${importSuffix}`,
+    `import android.webkit.WebView${importSuffix}`,
+  ];
+  if (!isKotlin) {
+    imports.push(`import android.view.View${importSuffix}`);
+    imports.push(`import androidx.core.view.ViewCompat${importSuffix}`);
+    imports.push(`import androidx.core.view.WindowInsetsCompat${importSuffix}`);
+    imports.push(`import androidx.core.graphics.Insets${importSuffix}`);
+  }
+  if (statusBarHidden || statusBarIsWhite) {
+    imports.push(`import android.os.Build${importSuffix}`);
+    imports.push(`import android.view.View${importSuffix}`);
+    imports.push(`import android.view.WindowInsets${importSuffix}`);
+  }
+  if (doubleClickExit) {
+    imports.push(`import android.widget.Toast${importSuffix}`);
+    imports.push(`import androidx.activity.OnBackPressedCallback${importSuffix}`);
+  }
+
+  const lines = text.split(/\r?\n/);
+  let insertAt = 1;
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].startsWith("import ")) {
+      insertAt = i + 1;
+    }
+  }
+  for (const imp of imports) {
+    if (!lines.includes(imp)) {
+      lines.splice(insertAt, 0, imp);
+      insertAt++;
+    }
+  }
+  text = lines.join("\n");
+}
+
+if (isKotlin && !replacedKotlin && allowKotlinPatch) {
+  const hasBackPress = text.includes("ConvertAPK: back-press dispatcher");
+  const backPressSnippet = doubleClickExit && !hasBackPress
+    ? "        // ConvertAPK: back-press dispatcher\n" +
+      "        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {\n" +
+      "            override fun handleOnBackPressed() {\n" +
+      "                val webView = bridge?.webView\n" +
+      "                if (webView != null && webView.canGoBack()) {\n" +
+      "                    webView.goBack()\n" +
+      "                    return\n" +
+      "                }\n" +
+      "                val now = System.currentTimeMillis()\n" +
+      "                if (now - lastBackPressedAt < 2000) {\n" +
+      "                    finish()\n" +
+      "                } else {\n" +
+      "                    lastBackPressedAt = now\n" +
+      "                    Toast.makeText(this@MainActivity, \"Press back again to exit\", Toast.LENGTH_SHORT).show()\n" +
+      "                }\n" +
+      "            }\n" +
+      "        })\n"
+    : "";
+
+  const hasBackPressField = originalText.includes("lastBackPressedAt");
+  if (doubleClickExit && !originalText.includes("ConvertAPK: back-press state") && !hasBackPressField) {
+    const result = insertAfterClassOpen(
+      text,
+      "    // ConvertAPK: back-press state\n" +
+        "    private var lastBackPressedAt: Long = 0L\n"
+    );
+    text = result.text;
+  }
+
+  if (text.includes("override fun onCreate(")) {
+    const marker = "super.onCreate(savedInstanceState)";
+    if (text.includes(marker) && backPressSnippet.trim().length) {
+      text = text.replace(marker, marker + "\n" + backPressSnippet.trimEnd());
+    }
+  } else if (backPressSnippet.trim().length) {
+    const insert =
+      "    override fun onCreate(savedInstanceState: Bundle?) {\n" +
+      "        super.onCreate(savedInstanceState)\n" +
+      backPressSnippet +
+      "    }\n\n";
+    const idx = text.lastIndexOf("}");
+    if (idx !== -1) {
+      text = text.slice(0, idx) + insert + text.slice(idx);
+    }
+  }
+}
+
+if (!isKotlin) {
+  const hasDownloadListener = text.includes("setDownloadListener");
+  const snippet = hasDownloadListener
+    ? ""
+    :
+    "        WebView webView = getBridge().getWebView();\n" +
+    "        if (webView != null) {\n" +
+    "            webView.setDownloadListener((url, userAgent, contentDisposition, mimeType, contentLength) -> {\n" +
+    "                try {\n" +
+    "                    Intent intent = new Intent(Intent.ACTION_VIEW);\n" +
+    "                    intent.setData(Uri.parse(url));\n" +
+    "                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);\n" +
+    "                    startActivity(intent);\n" +
+    "                } catch (Exception ignored) {\n" +
+    "                }\n" +
+    "            });\n" +
+    "            webView.setClipToPadding(false);\n" +
+    "            View decor = getWindow().getDecorView();\n" +
+    "            ViewCompat.setOnApplyWindowInsetsListener(decor, (v, insets) -> {\n" +
+    "                Insets nav = insets.getInsets(WindowInsetsCompat.Type.navigationBars());\n" +
+    "                webView.setPadding(nav.left, webView.getPaddingTop(), nav.right, nav.bottom);\n" +
+    "                webView.post(() -> webView.evaluateJavascript(\n" +
+    "                    \"(function(){var b=\" + nav.bottom + \";\" +\n" +
+    "                    \"var root=document.documentElement;\" +\n" +
+    "                    \"root.style.boxSizing='border-box';root.style.paddingBottom=b+'px';\" +\n" +
+    "                    \"if(document.body){document.body.style.boxSizing='border-box';document.body.style.paddingBottom=b+'px';}\" +\n" +
+    "                    \"})();\", null));\n" +
+    "                return insets;\n" +
+    "            });\n" +
+    "            ViewCompat.requestApplyInsets(decor);\n" +
+    "        }\n";
+
+  const hasStatusSnippet = text.includes("ConvertAPK: status bar");
+  const statusSnippet = !hasStatusSnippet
+    ? statusBarHidden
+      ? "        // ConvertAPK: status bar\n" +
+        "        applyStatusBarHidden();\n"
+      : statusBarIsWhite
+        ? "        // ConvertAPK: status bar\n" +
+          "        applyStatusBarVisibleWhite();\n"
+        : ""
+    : "";
+
+  const backPressSnippet = doubleClickExit && !text.includes("ConvertAPK: back-press dispatcher")
+    ? "        // ConvertAPK: back-press dispatcher\n" +
+      "        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {\n" +
+      "            @Override\n" +
+      "            public void handleOnBackPressed() {\n" +
+      "                android.webkit.WebView webView = getBridge() != null ? getBridge().getWebView() : null;\n" +
+      "                if (webView != null && webView.canGoBack()) {\n" +
+      "                    webView.goBack();\n" +
+      "                    return;\n" +
+      "                }\n" +
+      "                long now = System.currentTimeMillis();\n" +
+      "                if (now - lastBackPressedAt < 2000) {\n" +
+      "                    finish();\n" +
+      "                } else {\n" +
+      "                    lastBackPressedAt = now;\n" +
+      "                    Toast.makeText(MainActivity.this, \"Press back again to exit\", Toast.LENGTH_SHORT).show();\n" +
+      "                }\n" +
+      "            }\n" +
+      "        });\n"
+    : "";
+
+  if (text.includes("protected void onCreate(Bundle savedInstanceState)")) {
+    const marker = "super.onCreate(savedInstanceState);";
+    if (text.includes(marker)) {
+      const injected = snippet.trimEnd() +
+        (statusSnippet ? "\n" + statusSnippet.trimEnd() : "") +
+        (backPressSnippet ? "\n" + backPressSnippet.trimEnd() : "");
+      if (injected.trim().length) {
+        text = text.replace(marker, marker + "\n" + injected);
+      }
+    }
+  } else {
+    const insert =
+      "    @Override\n" +
+      "    protected void onCreate(Bundle savedInstanceState) {\n" +
+      "        super.onCreate(savedInstanceState);\n" +
+      snippet +
+      statusSnippet +
+      backPressSnippet +
+      "    }\n\n";
+    const idx = text.lastIndexOf("}");
+    if (idx !== -1) {
+      if ((snippet + statusSnippet).trim().length) {
+        text = text.slice(0, idx) + insert + text.slice(idx);
+      }
+    }
+  }
+}
+
+function insertAfterClassOpen(src, insert) {
+  const re = /class\s+MainActivity\b[^{]*\{/m;
+  const match = src.match(re);
+  if (match) {
+    const idx = src.indexOf(match[0]) + match[0].length;
+    return { text: src.slice(0, idx) + "\n" + insert + src.slice(idx), inserted: true };
+  }
+  const idx = src.lastIndexOf("}");
+  if (idx !== -1) {
+    return { text: src.slice(0, idx) + insert + src.slice(idx), inserted: true };
+  }
+  return { text: src, inserted: false };
+}
+
+if (!isKotlin) {
+  let hasBackPressField = originalText.includes("lastBackPressedAt");
+  if (doubleClickExit && !originalText.includes("ConvertAPK: back-press state") && !hasBackPressField) {
+    const result = insertAfterClassOpen(
+      text,
+      "    // ConvertAPK: back-press state\n" +
+        "    private long lastBackPressedAt = 0L;\n"
+    );
+    text = result.text;
+    if (result.inserted) {
+      hasBackPressField = true;
+    }
+  }
+
+  if (statusBarHidden && !originalText.includes("ConvertAPK: status bar helper")) {
+    const helper = 
+      "    // ConvertAPK: status bar helper\n" +
+      "    private void applyStatusBarHidden() {\n" +
+      "        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {\n" +
+      "            getWindow().setDecorFitsSystemWindows(false);\n" +
+      "            android.view.WindowInsetsController controller = getWindow().getInsetsController();\n" +
+      "            if (controller != null) {\n" +
+      "                controller.hide(android.view.WindowInsets.Type.statusBars());\n" +
+      "                controller.setSystemBarsBehavior(android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);\n" +
+      "            }\n" +
+      "        } else {\n" +
+      "            android.view.View decorView = getWindow().getDecorView();\n" +
+      "            int flags = android.view.View.SYSTEM_UI_FLAG_FULLSCREEN\n" +
+      "                | android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN\n" +
+      "                | android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE\n" +
+      "                | android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY;\n" +
+      "            decorView.setSystemUiVisibility(flags);\n" +
+      "        }\n" +
+      "    }\n";
+    const result = insertAfterClassOpen(text, helper);
+    text = result.text;
+  }
+
+  if (!statusBarHidden && statusBarIsWhite && !originalText.includes("ConvertAPK: status bar white")) {
+    const helper =
+      "    // ConvertAPK: status bar white\n" +
+      "    private void applyStatusBarVisibleWhite() {\n" +
+      "        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {\n" +
+      "            getWindow().setDecorFitsSystemWindows(true);\n" +
+      "            android.view.WindowInsetsController controller = getWindow().getInsetsController();\n" +
+      "            if (controller != null) {\n" +
+      "                controller.setSystemBarsAppearance(android.view.WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS,\n" +
+      "                    android.view.WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS);\n" +
+      "            }\n" +
+      "        } else {\n" +
+      "            android.view.View decorView = getWindow().getDecorView();\n" +
+      "            int flags = android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR\n" +
+      "                | android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE;\n" +
+      "            decorView.setSystemUiVisibility(flags);\n" +
+      "        }\n" +
+      "        getWindow().setStatusBarColor(android.graphics.Color.parseColor(\"#FFFFFF\"));\n" +
+      "    }\n";
+    const result = insertAfterClassOpen(text, helper);
+    text = result.text;
+  }
+
+  if (statusBarHidden && !text.includes("ConvertAPK: status bar focus")) {
+    const focusHandler =
+      "    // ConvertAPK: status bar focus\n" +
+      "    @Override\n" +
+      "    public void onWindowFocusChanged(boolean hasFocus) {\n" +
+      "        super.onWindowFocusChanged(hasFocus);\n" +
+      "        if (hasFocus) {\n" +
+      "            applyStatusBarHidden();\n" +
+      "        }\n" +
+      "    }\n\n";
+    const idx = text.lastIndexOf("}");
+    if (idx !== -1) {
+      text = text.slice(0, idx) + focusHandler + text.slice(idx);
+    }
+  }
+
+  if (!statusBarHidden && statusBarIsWhite && !text.includes("ConvertAPK: status bar focus white")) {
+    const focusHandler =
+      "    // ConvertAPK: status bar focus white\n" +
+      "    @Override\n" +
+      "    public void onWindowFocusChanged(boolean hasFocus) {\n" +
+      "        super.onWindowFocusChanged(hasFocus);\n" +
+      "        if (hasFocus) {\n" +
+      "            applyStatusBarVisibleWhite();\n" +
+      "        }\n" +
+      "    }\n\n";
+    const idx = text.lastIndexOf("}");
+    if (idx !== -1) {
+      text = text.slice(0, idx) + focusHandler + text.slice(idx);
+    }
+  }
+
+  if (doubleClickExit && hasBackPressField && !text.includes("ConvertAPK: double-click-exit")) {
+    const onBackPressed =
+      "    // ConvertAPK: double-click-exit\n" +
+      "    @Override\n" +
+      "    public void onBackPressed() {\n" +
+      "        android.webkit.WebView webView = getBridge() != null ? getBridge().getWebView() : null;\n" +
+      "        if (webView != null && webView.canGoBack()) {\n" +
+      "            webView.goBack();\n" +
+      "            return;\n" +
+      "        }\n" +
+      "        long now = System.currentTimeMillis();\n" +
+      "        if (now - lastBackPressedAt < 2000) {\n" +
+      "            super.onBackPressed();\n" +
+      "        } else {\n" +
+      "            lastBackPressedAt = now;\n" +
+      "            Toast.makeText(this, \"Press back again to exit\", Toast.LENGTH_SHORT).show();\n" +
+      "        }\n" +
+      "    }\n\n";
+    const idx = text.lastIndexOf("}");
+    if (idx !== -1) {
+      text = text.slice(0, idx) + onBackPressed + text.slice(idx);
+    }
+  }
+}
+
+writeText(mainActivity, text);
+
+let themeNames = [];
+const manifest = path.join(androidDir, "app", "src", "main", "AndroidManifest.xml");
+if (fs.existsSync(manifest)) {
+  let mtext = readText(manifest);
+  let changed = false;
+
+  // Ensure INTERNET permission (required for WebView apps)
+  if (!mtext.includes("android.permission.INTERNET")) {
+    const insertLine = "    <uses-permission android:name=\"android.permission.INTERNET\" />\n";
+    if (mtext.includes("<application")) {
+      mtext = mtext.replace("<application", insertLine + "<application");
+    } else {
+      const manifestTag = mtext.match(/<manifest\b[^>]*>/);
+      const idx = manifestTag ? mtext.indexOf(manifestTag[0]) + manifestTag[0].length : mtext.indexOf(">");
+      if (idx !== -1) {
+        mtext = mtext.slice(0, idx + 1) + "\n" + insertLine + mtext.slice(idx + 1);
+      }
+    }
+    changed = true;
+  }
+
+  // Screen orientation: portrait / landscape -> force on MainActivity, auto -> remove/skip.
+  const orientationRaw = String(process.env.SCREEN_ORIENTATION || process.env.ORIENTATION || "")
+    .trim()
+    .toLowerCase();
+  const desired =
+    orientationRaw === "portrait" || orientationRaw === "landscape" ? orientationRaw : "auto";
+
+  // Permissions: comma-separated, supports both short and full names.
+  const permsRaw = String(process.env.PERMISSIONS || "").trim();
+  const perms = permsRaw
+    ? permsRaw.split(",").map((item) => item.trim()).filter(Boolean)
+    : [];
+  const fullPerms = perms.map((perm) => {
+    if (perm.startsWith("android.permission.")) return perm;
+    if (perm.includes(".")) return perm;
+    return `android.permission.${perm}`;
+  });
+
+  const activityRe = /<activity\b[^>]*\bandroid:name="([^"]*MainActivity)"[^>]*>/g;
+  mtext = mtext.replace(activityRe, (tag) => {
+    let updated = tag;
+    if (desired === "auto") {
+      updated = updated.replace(/\sandroid:screenOrientation="[^"]*"/g, "");
+    } else if (/\bandroid:screenOrientation=/.test(updated)) {
+      updated = updated.replace(
+        /\bandroid:screenOrientation="[^"]*"/,
+        `android:screenOrientation="${desired}"`
+      );
+    } else {
+      // Insert before the closing '>' (keep '/>' if it exists).
+      updated = updated.replace(/\s*\/?>$/, (end) => {
+        const suffix = end.includes("/>") ? " />" : ">";
+        return ` android:screenOrientation="${desired}"${suffix}`;
+      });
+    }
+    if (updated !== tag) changed = true;
+    return updated;
+  });
+
+  // Insert requested permissions before <application> (without duplicates).
+  const toAdd = [];
+  for (const perm of fullPerms) {
+    if (!perm) continue;
+    if (mtext.includes(`android:name="${perm}"`)) continue;
+    toAdd.push(`    <uses-permission android:name="${perm}" />`);
+  }
+  if (toAdd.length) {
+    const block = toAdd.join("\n") + "\n";
+    if (mtext.includes("<application")) {
+      mtext = mtext.replace("<application", block + "<application", 1);
+    } else {
+      const manifestTag = mtext.match(/<manifest\b[^>]*>/);
+      const idx = manifestTag ? mtext.indexOf(manifestTag[0]) + manifestTag[0].length : mtext.indexOf(">");
+      if (idx !== -1) {
+        mtext = mtext.slice(0, idx + 1) + "\n" + block + mtext.slice(idx + 1);
+      }
+    }
+    changed = true;
+  }
+
+  themeNames = [];
+  const themeRe = /android:theme="@(android:)?style\/([^"]+)"/g;
+  let themeMatch;
+  while ((themeMatch = themeRe.exec(mtext)) !== null) {
+    if (themeMatch[2]) themeNames.push(themeMatch[2]);
+  }
+
+  if (changed) {
+    writeText(manifest, mtext);
+  }
+}
+
+// Status bar configuration (styles.xml/themes.xml)
+// - STATUS_BAR_HIDDEN=true  -> fullscreen
+// - STATUS_BAR_COLOR=transparent|#FFFFFF
+// - STATUS_BAR_STYLE=dark|light (dark = dark icons for light background)
+const styleFiles = [];
+const resDir = path.join(androidDir, "app", "src", "main", "res");
+if (fs.existsSync(resDir)) {
+  const entries = fs.readdirSync(resDir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    if (!entry.name.startsWith("values")) continue;
+    for (const name of ["styles.xml", "themes.xml"]) {
+      const candidate = path.join(resDir, entry.name, name);
+      if (fs.existsSync(candidate)) {
+        styleFiles.push(candidate);
+      }
+    }
+  }
+}
+
+const hidden = String(process.env.STATUS_BAR_HIDDEN || "")
+  .trim()
+  .toLowerCase() === "true";
+const style = String(process.env.STATUS_BAR_STYLE || "light").trim().toLowerCase(); // dark | light
+let colorRaw = String(process.env.STATUS_BAR_COLOR || "transparent").trim();
+if (!colorRaw) colorRaw = "transparent";
+const colorLower = colorRaw.toLowerCase();
+const statusBarColor =
+  colorLower === "transparent" || colorLower === "@android:color/transparent"
+    ? "@android:color/transparent"
+    : colorLower === "white"
+      ? "#FFFFFF"
+      : colorRaw;
+const lightStatusBar = style === "dark"; // windowLightStatusBar=true => dark icons
+const styleNames = ["AppTheme", "AppTheme.NoActionBar", "Theme.App", "Theme.App.NoActionBar"];
+if (typeof themeNames !== "undefined" && themeNames.length) {
+  for (const name of themeNames) {
+    if (!styleNames.includes(name)) {
+      styleNames.push(name);
+    }
+  }
+}
+
+function escapeRegExp(str) {
+  return String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function patchStylesFile(filePath) {
+  if (!fs.existsSync(filePath)) return false;
+  let stext = readText(filePath);
+  const original = stext;
+
+  function patchStyleBlock(styleName, items) {
+    const re = new RegExp(
+      `(<style\\\\b[^>]*\\\\bname="${escapeRegExp(styleName)}"[^>]*>)([\\\\s\\\\S]*?)(</style>)`
+    );
+    const match = stext.match(re);
+    if (!match) return false;
+    let inner = match[2] || "";
+    inner = inner.replace(/\s*<item\s+name="android:windowFullscreen">[\s\S]*?<\/item>\s*/g, "\n");
+    inner = inner.replace(/\s*<item\s+name="android:windowTranslucentStatus">[\s\S]*?<\/item>\s*/g, "\n");
+    inner = inner.replace(/\s*<item\s+name="android:statusBarColor">[\s\S]*?<\/item>\s*/g, "\n");
+    inner = inner.replace(/\s*<item\s+name="android:windowLightStatusBar">[\s\S]*?<\/item>\s*/g, "\n");
+    const insert = items.length ? "\n        " + items.join("\n        ") + "\n" : "\n";
+    const updated = match[1] + insert + inner.replace(/^\n+/, "\n") + match[3];
+    stext = stext.replace(match[0], updated);
+    return true;
+  }
+
+  const items = [];
+  if (hidden) {
+    items.push('<item name="android:windowFullscreen">true</item>');
+  } else {
+    items.push('<item name="android:windowFullscreen">false</item>');
+    items.push('<item name="android:windowTranslucentStatus">false</item>');
+    items.push(`<item name="android:statusBarColor">${statusBarColor}</item>`);
+    items.push(
+      `<item name="android:windowLightStatusBar">${lightStatusBar ? "true" : "false"}</item>`
+    );
+  }
+
+  let patched = false;
+  for (const name of styleNames) {
+    if (patchStyleBlock(name, items)) patched = true;
+  }
+  if (patched && stext !== original) {
+    writeText(filePath, stext);
+  }
+  return patched;
+}
+
+for (const filePath of styleFiles) {
+  patchStylesFile(filePath);
+}
+
+// Layout patch removed: rely on theme + window flags to avoid status bar overlap.
+NODE
+
 # ============================================
 # 步骤 6: 配置 Android 项目
 # ============================================
 log_info "Step 6: 配置 Android 项目..."
 
 # 创建 local.properties
-cat > android/local.properties << EOF
+cat > "$ANDROID_DIR/local.properties" << EOF
 sdk.dir=$ANDROID_HOME
 EOF
 
 log_info "已创建 local.properties"
 
 # 修改版本号
-GRADLE_FILE="android/app/build.gradle"
+GRADLE_FILE="$ANDROID_DIR/app/build.gradle"
+if [ ! -f "$GRADLE_FILE" ]; then
+    GRADLE_FILE="$ANDROID_DIR/app/build.gradle.kts"
+fi
 if [ -f "$GRADLE_FILE" ]; then
-    # 更新 versionName 和 versionCode
-    sed -i "s/versionName \".*\"/versionName \"$VERSION_NAME\"/" $GRADLE_FILE
-    sed -i "s/versionCode .*/versionCode $VERSION_CODE/" $GRADLE_FILE
-    log_info "已更新版本信息"
+    if echo "$GRADLE_FILE" | grep -q '\.kts$'; then
+        sed -i "s/versionName[[:space:]]*=[[:space:]]*\".*\"/versionName = \"$VERSION_NAME\"/" "$GRADLE_FILE"
+        sed -i "s/versionCode[[:space:]]*=[[:space:]]*[0-9]\+/versionCode = $VERSION_CODE/" "$GRADLE_FILE"
+    else
+        sed -i "s/versionName \".*\"/versionName \"$VERSION_NAME\"/" "$GRADLE_FILE"
+        sed -i "s/versionCode .*/versionCode $VERSION_CODE/" "$GRADLE_FILE"
+    fi
+    log_info "???????"
 fi
 
 log_success "Android 项目配置完成"
@@ -441,7 +1860,25 @@ else
     log_info "Step 7: 构建 Release APK..."
 fi
 
-cd android
+cd "$ANDROID_DIR"
+
+# Ensure gradlew exists (web mode may miss wrapper if template copy failed)
+if [ ! -f "gradlew" ]; then
+    TEMPLATE_DIR="/workspace/templates/Tubbim"
+    if [ -f "$TEMPLATE_DIR/gradlew" ]; then
+        log_warning "gradlew missing; restoring from template"
+        cp "$TEMPLATE_DIR/gradlew" .
+        if [ -d "$TEMPLATE_DIR/gradle" ] && [ ! -d "gradle" ]; then
+            cp -R "$TEMPLATE_DIR/gradle" .
+        fi
+    fi
+fi
+if [ ! -f "gradlew" ]; then
+    log_error "gradlew not found in $ANDROID_DIR"
+    exit 1
+fi
+
+
 
 # 给 gradlew 执行权限
 chmod +x gradlew
@@ -452,12 +1889,15 @@ ensure_gradle_wrapper_dist
 # 配置国内 Maven 镜像（降低 Maven Central 卡住的概率）
 GRADLE_INIT_SCRIPT="/tmp/gradle-mirrors.init.gradle"
 cat > "$GRADLE_INIT_SCRIPT" << 'EOF'
+settingsEvaluated {
+    it.dependencyResolutionManagement.repositoriesMode.set(RepositoriesMode.PREFER_PROJECT)
+}
 allprojects {
     repositories {
-        maven { url 'https://maven.aliyun.com/repository/google' }
-        maven { url 'https://maven.aliyun.com/repository/central' }
-        maven { url 'https://maven.aliyun.com/repository/gradle-plugin' }
-        maven { url 'https://maven.aliyun.com/repository/public' }
+        maven { url = uri('https://maven.aliyun.com/repository/google') }
+        maven { url = uri('https://maven.aliyun.com/repository/central') }
+        maven { url = uri('https://maven.aliyun.com/repository/gradle-plugin') }
+        maven { url = uri('https://maven.aliyun.com/repository/public') }
         google()
         mavenCentral()
     }
@@ -505,14 +1945,19 @@ else
     check_error "APK 构建失败"
 
     # 找到生成的 APK
-    APK_PATH=$(find . -name "*.apk" -path "*/release/*" | head -n 1)
-
+    APK_OUT_DIR="$(pwd)/app/build/outputs/apk/release"
+    APK_PATH=$(find "$APK_OUT_DIR" -maxdepth 1 -name "*.apk" -type f 2>/dev/null | head -n 1)
     if [ -z "$APK_PATH" ]; then
-        log_error "未找到生成的APK文件"
+        APK_PATH=$(find . -name "*.apk" -path "*/release/*" -type f | head -n 1)
+    fi
+
+    if [ -z "$APK_PATH" ] || [ ! -f "$APK_PATH" ]; then
+        log_error "??????APK??"
+        ls -la "$APK_OUT_DIR" 2>/dev/null || true
         exit 1
     fi
 
-    log_success "APK 构建完成: $APK_PATH"
+    log_success "APK ????: $APK_PATH"
 fi
 
 cd ..
@@ -579,7 +2024,7 @@ else
     log_info "Step 9: 对齐 APK (zipalign)..."
 fi
 
-cd android
+cd "$ANDROID_DIR"
 
 FINAL_OUTPUT=""
 
@@ -620,7 +2065,23 @@ if [ "$OUTPUT_FORMAT" = "aab" ]; then
         -signedjar "$SIGNED_AAB" \
         "$UNSIGNED_AAB" \
         "$KEY_ALIAS"
-    check_error "AAB 签名失败"
+    if [ $? -ne 0 ]; then
+        # PKCS12 通常要求 keypass == storepass；如果用户填了不同的 keypass，keytool 可能会忽略，
+        # 这里做一次兼容重试，避免“Wrong password”。
+        if [ "$KEY_PASSWORD" != "$KEYSTORE_PASSWORD" ]; then
+            log_warning "AAB 签名失败，尝试使用 key 密码=keystore 密码重试..."
+            jarsigner \
+                -digestalg SHA-256 \
+                -sigalg SHA256withRSA \
+                -keystore "$KEYSTORE_FILE" \
+                -storepass "$KEYSTORE_PASSWORD" \
+                -keypass "$KEYSTORE_PASSWORD" \
+                -signedjar "$SIGNED_AAB" \
+                "$UNSIGNED_AAB" \
+                "$KEY_ALIAS"
+        fi
+        check_error "AAB 签名失败"
+    fi
 
     # 验证签名
     log_info "验证 AAB 签名..."
@@ -642,7 +2103,24 @@ else
         --v3-signing-enabled true \
         --out "$SIGNED_APK" \
         "$ALIGNED_APK"
-    check_error "APK 签名失败"
+    if [ $? -ne 0 ]; then
+        # PKCS12 通常要求 keypass == storepass；如果用户填了不同的 keypass，keytool 可能会忽略，
+        # 这里做一次兼容重试，避免“Wrong password”。
+        if [ "$KEY_PASSWORD" != "$KEYSTORE_PASSWORD" ]; then
+            log_warning "APK 签名失败，尝试使用 key 密码=keystore 密码重试..."
+            apksigner sign \
+                --ks "$KEYSTORE_FILE" \
+                --ks-key-alias "$KEY_ALIAS" \
+                --ks-pass pass:"$KEYSTORE_PASSWORD" \
+                --key-pass pass:"$KEYSTORE_PASSWORD" \
+                --v1-signing-enabled true \
+                --v2-signing-enabled true \
+                --v3-signing-enabled true \
+                --out "$SIGNED_APK" \
+                "$ALIGNED_APK"
+        fi
+        check_error "APK 签名失败"
+    fi
 
     # 验证签名
     log_info "验证 APK 签名..."

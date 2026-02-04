@@ -143,6 +143,7 @@ RUN mkdir -p /workspace/input \
 # 复制构建脚本
 # ============================================
 COPY scripts/ /workspace/scripts/
+COPY templates/ /workspace/templates/
 
 # 转换Windows换行符为Unix格式并设置执行权限
 RUN dos2unix /workspace/scripts/*.sh && chmod +x /workspace/scripts/*.sh
@@ -156,4 +157,3 @@ ENV KEYSTORE_DIR=/workspace/keystore
 
 # 入口点
 ENTRYPOINT ["/workspace/scripts/entrypoint.sh"]
-
