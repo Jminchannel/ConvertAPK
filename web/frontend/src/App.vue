@@ -2349,13 +2349,14 @@ onUnmounted(() => {
   right: 0;
   margin-top: 6px;
   min-width: 140px;
+  max-width: min(240px, calc(100vw - 32px));
   background: var(--bg-surface);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-md);
   padding: 6px;
   display: none;
-  z-index: 10;
+  z-index: 50;
 }
 
 .download-dropdown.open .dropdown-menu {
@@ -2374,6 +2375,19 @@ onUnmounted(() => {
 
 .download-dropdown .dropdown-item:hover {
   background: var(--bg-hover);
+}
+
+@media (max-width: 640px) {
+  /* On mobile, open upward and align to the trigger's left to avoid viewport clipping. */
+  .download-dropdown .dropdown-menu {
+    top: auto;
+    bottom: 100%;
+    margin-top: 0;
+    margin-bottom: 8px;
+    left: 0;
+    right: auto;
+    max-width: calc(100vw - 32px);
+  }
 }
 
 .keystore-upload {
