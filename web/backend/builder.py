@@ -337,9 +337,12 @@ class APKBuilder:
             "VERSION_CODE": str(version_code),
             "TASK_MODE": task_mode_normalized,
             "WEB_URL": web_url or "",
+            # NOTE: PKCS12 (Java default) typically uses the same password for store + key.
+            # If the user doesn't provide key_password explicitly, fall back to keystore_password
+            # to reduce "Wrong password" signing failures.
             "KEYSTORE_PASSWORD": keystore_password or "android",
             "KEY_ALIAS": key_alias or "key0",
-            "KEY_PASSWORD": key_password or "android",
+            "KEY_PASSWORD": key_password or (keystore_password or "android"),
             "OUTPUT_FORMAT": output_format_normalized,
             "SCREEN_ORIENTATION": (screen_orientation or "auto").strip().lower(),
             "DOUBLE_CLICK_EXIT": "true" if double_click_exit else "false",
