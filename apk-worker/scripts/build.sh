@@ -154,10 +154,28 @@ log_info "PACKAGE_NAME: '${PACKAGE_NAME:-未设置}'"
 log_info "=================================="
 
 TASK_MODE=${TASK_MODE:-convert}
-# Normalize and trim TASK_MODE to avoid hidden whitespace/CRLF causing mismatches.
-TASK_MODE="$(printf '%s' "$TASK_MODE" | tr '[:upper:]' '[:lower:]' | tr -d '\r\n\t ')"
+# Normalize TASK_MODE aggressively to avoid hidden chars/CRLF causing mismatches.
+TASK_MODE="$(printf '%s' "$TASK_MODE" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z')"
 ANDROID_DIR="android"
 PROJECT_DIR="${PROJECT_DIR:-/workspace/project}"
+
+# Fallback inference if TASK_MODE is missing or unrecognized.
+case "$TASK_MODE" in
+    web|html|convert) ;;
+    *)
+        if [ -n "$INPUT_DIR" ] && find "$INPUT_DIR" -maxdepth 1 -type f \( -name "*.html" -o -name "*.htm" \) | head -n 1 | grep -q .; then
+            log_warning "TASK_MODE '$TASK_MODE' unrecognized; falling back to html (HTML file found in input)"
+            TASK_MODE="html"
+        elif [ -n "$WEB_URL" ]; then
+            log_warning "TASK_MODE '$TASK_MODE' unrecognized; falling back to web (WEB_URL provided)"
+            TASK_MODE="web"
+        else
+            log_warning "TASK_MODE '$TASK_MODE' unrecognized; falling back to convert"
+            TASK_MODE="convert"
+        fi
+        ;;
+esac
+
 log_info "TASK_MODE: '${TASK_MODE}'"
 
 # ============================================
