@@ -156,6 +156,7 @@ class BuildTask(BaseModel):
 class BuildTaskCreate(BaseModel):
     """创建构建任务的请求"""
     client_id: str  # 客户端ID
+    quick_generate: bool = False
     mode: str = "convert"
     web_url: Optional[str] = None
     filename: Optional[str] = None
@@ -170,6 +171,7 @@ class BuildTaskResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
     client_id: str = ""
+    quick_generate: bool = False
     mode: str = "convert"
     web_url: Optional[str] = None
     filename: Optional[str] = None

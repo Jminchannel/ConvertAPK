@@ -492,9 +492,7 @@ async def create_task(task_data: BuildTaskCreate):
         if not web_url:
             raise HTTPException(status_code=400, detail="web_url is required for web mode")
 
-    quick_generate = bool(getattr(task_data, "quick_generate", False))
-    if quick_generate and mode != "convert":
-        raise HTTPException(status_code=400, detail="quick_generate is only supported for convert mode")
+    quick_generate = bool(task_data.quick_generate)
     
     # 验证复用的任务是否存在
     reuse_from = None if quick_generate else task_data.reuse_keystore_from
@@ -527,24 +525,24 @@ async def create_task(task_data: BuildTaskCreate):
         dst_zip = task_input_dir / "project.zip"
         shutil.move(str(src_zip), str(dst_zip))
 
-        if quick_generate:
-            version_name, version_code = _alloc_quick_generate_versions()
-            effective_config = AppConfig(
-                app_name=QUICK_GENERATE_APP_NAME,
-                package_name=QUICK_GENERATE_PACKAGE_NAME,
-                version_name=version_name,
-                version_code=version_code,
-                output_format="apk",
-                orientation="portrait",
-                double_click_exit=True,
-                status_bar_hidden=True,
-                status_bar_style="light",
-                status_bar_color="transparent",
-                permissions=QUICK_GENERATE_PERMISSIONS,
-                keystore_alias=QUICK_GENERATE_KEY_ALIAS,
-                keystore_password=QUICK_GENERATE_KEYSTORE_PASSWORD,
-                key_password=QUICK_GENERATE_KEY_PASSWORD,
-            )
+    if quick_generate:
+        version_name, version_code = _alloc_quick_generate_versions()
+        effective_config = AppConfig(
+            app_name=QUICK_GENERATE_APP_NAME,
+            package_name=QUICK_GENERATE_PACKAGE_NAME,
+            version_name=version_name,
+            version_code=version_code,
+            output_format="apk",
+            orientation="portrait",
+            double_click_exit=True,
+            status_bar_hidden=True,
+            status_bar_style="light",
+            status_bar_color="transparent",
+            permissions=QUICK_GENERATE_PERMISSIONS,
+            keystore_alias=QUICK_GENERATE_KEY_ALIAS,
+            keystore_password=QUICK_GENERATE_KEYSTORE_PASSWORD,
+            key_password=QUICK_GENERATE_KEY_PASSWORD,
+        )
     
     # 移动图标文件到任务目录（如果有）
     icon_in_task = None
@@ -592,6 +590,7 @@ async def create_task(task_data: BuildTaskCreate):
     task = BuildTask(
         id=task_id,
         client_id=client_id,
+        quick_generate=quick_generate,
         mode=mode,
         web_url=web_url,
         filename="project.zip" if mode == "convert" else None,

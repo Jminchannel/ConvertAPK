@@ -271,7 +271,7 @@
                 </div>
                 <div class="card-header-actions">
                   <div
-                    v-if="mode === 'convert'"
+                    v-if="mode === 'convert' || mode === 'web'"
                     class="quickgen-switch"
                     :class="{ disabled: updatingTaskId }"
                     :title="t('config.quickGenerateHint')"
@@ -1221,7 +1221,7 @@ const restoreQuickGenerateState = () => {
 
 const enterQuickGenerate = () => {
   if (quickGenerate.value) return
-  if (mode.value !== 'convert' || updatingTaskId.value) return
+  if ((mode.value !== 'convert' && mode.value !== 'web') || updatingTaskId.value) return
   stashQuickGenerateState()
   quickGenerate.value = true
   applyQuickGenerateDefaults()
@@ -1321,7 +1321,7 @@ const isKeystoreUploaded = computed(() => Boolean(uploadedKeystore.value))
 
 const canCreateTask = computed(() => {
   const shouldCheckKeystore = !isKeystoreUploaded.value
-  const hasIcon = quickGenerate.value && mode.value === 'convert' && !updatingTaskId.value
+  const hasIcon = quickGenerate.value && (mode.value === 'convert' || mode.value === 'web') && !updatingTaskId.value
     ? true
     : (appIcon.value || uploadedIcon.value)
   const common =
@@ -1342,7 +1342,7 @@ const canCreateTask = computed(() => {
 })
 
 watch(() => mode.value, (value) => {
-  if (value !== 'convert' && quickGenerate.value) {
+  if (value !== 'convert' && value !== 'web' && quickGenerate.value) {
     exitQuickGenerate()
   }
 })
@@ -1706,7 +1706,7 @@ const createTask = async () => {
       }
     }
 
-    const isQuickGenerate = quickGenerate.value && mode.value === 'convert' && !updatingTaskId.value
+    const isQuickGenerate = quickGenerate.value && (mode.value === 'convert' || mode.value === 'web') && !updatingTaskId.value
 
   if (updatingTaskId.value) {
       if (compareVersion(config.value.version_name, previousVersionName.value) < 0) {
@@ -1815,7 +1815,7 @@ const resetForm = (options = {}) => {
     keystore_password: '',
     key_password: ''
   }
-  if (preserveQuickGenerate && quickGenerate.value && mode.value === 'convert') {
+  if (preserveQuickGenerate && quickGenerate.value && (mode.value === 'convert' || mode.value === 'web')) {
     applyQuickGenerateDefaults()
   }
   currentStep.value = 1
