@@ -13,6 +13,9 @@ import sys
 import os
 import json
 import shutil
+import binascii
+import struct
+import zlib
 import threading
 import threading
 import urllib.request
@@ -296,6 +299,74 @@ def _resolve_quick_generate_icon_path() -> Path | None:
     return None
 
 
+def _png_chunk(chunk_type: bytes, data: bytes) -> bytes:
+    crc = binascii.crc32(chunk_type)
+    crc = binascii.crc32(data, crc)
+    return (
+        struct.pack(">I", len(data))
+        + chunk_type
+        + data
+        + struct.pack(">I", crc & 0xFFFFFFFF)
+    )
+
+
+def _write_quick_generate_placeholder_icon(path: Path, size: int = 1024) -> None:
+    """
+    Fallback icon when demoLogo.png is missing.
+    Generates a simple 1024x1024 RGBA PNG using only stdlib.
+    """
+    w = int(size)
+    h = int(size)
+    if w < 1 or h < 1:
+        w = h = 1
+
+    cx = (w - 1) / 2.0
+    cy = (h - 1) / 2.0
+    radius = min(w, h) * 0.36
+    r2 = radius * radius
+    x2 = [(x - cx) ** 2 for x in range(w)]
+
+    rows: list[bytes] = []
+    denom = max(1, h - 1)
+    for y in range(h):
+        dy2 = (y - cy) ** 2
+        base = 22 + int(40 * y / denom)
+        row = bytearray(1 + w * 4)
+        row[0] = 0  # filter: None
+        idx = 1
+        for x in range(w):
+            dist2 = x2[x] + dy2
+            if dist2 < r2:
+                # Subtle highlight (a soft "badge" look).
+                dist = (dist2 / r2) ** 0.5
+                bump = int(130 * (1.0 - dist))
+                r = min(255, base + bump)
+                g = min(255, base + bump + 6)
+                b = min(255, base + bump + 34)
+            else:
+                r = base
+                g = base
+                b = min(255, base + 10)
+            row[idx] = r
+            row[idx + 1] = g
+            row[idx + 2] = b
+            row[idx + 3] = 255
+            idx += 4
+        rows.append(bytes(row))
+
+    raw = b"".join(rows)
+    compressed = zlib.compress(raw, level=9)
+
+    png = b"\x89PNG\r\n\x1a\n"
+    ihdr = struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0)  # 8-bit RGBA
+    png += _png_chunk(b"IHDR", ihdr)
+    png += _png_chunk(b"IDAT", compressed)
+    png += _png_chunk(b"IEND", b"")
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(png)
+
+
 def _bump_patch_version(value: str) -> str:
     raw = str(value or "").strip()
     if not raw:
@@ -498,7 +569,13 @@ async def quick_generate_icon():
     """Quick Generate default icon preview."""
     icon_path = _resolve_quick_generate_icon_path()
     if not icon_path:
-        raise HTTPException(status_code=404, detail="Not Found")
+        # Provide a deterministic placeholder icon instead of failing hard.
+        icon_path = TASKS_DIR / "quick-generate-placeholder.png"
+        if not icon_path.exists():
+            try:
+                _write_quick_generate_placeholder_icon(icon_path)
+            except Exception:
+                raise HTTPException(status_code=404, detail="Not Found")
     return FileResponse(
         path=str(icon_path),
         filename="demoLogo.png",
@@ -554,8 +631,6 @@ async def create_task(task_data: BuildTaskCreate):
     quick_icon_path = None
     if quick_generate:
         quick_icon_path = _resolve_quick_generate_icon_path()
-        if not quick_icon_path:
-            raise HTTPException(status_code=500, detail="一键生成默认图标缺失：demoLogo.png")
     
     # 验证复用的任务是否存在
     reuse_from = None if quick_generate else task_data.reuse_keystore_from
@@ -611,10 +686,11 @@ async def create_task(task_data: BuildTaskCreate):
     icon_in_task = None
     if quick_generate:
         icon_path = quick_icon_path
-        if not icon_path:
-            raise HTTPException(status_code=500, detail="一键生成默认图标缺失：demoLogo.png")
         dst_icon = task_input_dir / "logo.png"
-        shutil.copy2(str(icon_path), str(dst_icon))
+        if icon_path and icon_path.exists():
+            shutil.copy2(str(icon_path), str(dst_icon))
+        else:
+            _write_quick_generate_placeholder_icon(dst_icon)
         icon_in_task = "logo.png"
     elif task_data.icon_filename:
         src_icon = BACKEND_UPLOAD_DIR / task_data.icon_filename
