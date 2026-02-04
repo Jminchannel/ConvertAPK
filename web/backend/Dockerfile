@@ -38,6 +38,7 @@ RUN set -e; \
     python -m pip install --no-cache-dir --retries 10 --timeout 100 -r requirements.txt
 
 COPY web/backend/ /app/web/backend/
+COPY templates/ /app/templates/
 COPY apk-worker/ /app/apk-worker/
 
 ENV PYTHONUNBUFFERED=1

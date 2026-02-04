@@ -26,6 +26,8 @@ services:
       - ./output:/workspace/output
       # 密钥目录 - 可选，放置自定义keystore
       - ./keystore:/workspace/keystore
+      # 模板目录 - 使用仓库根目录下的 templates
+      - ../templates:/workspace/templates:ro
       # Gradle 缓存 - 复用已下载的 Gradle/依赖，避免每次构建重复下载
       - gradle-cache:/root/.gradle
     

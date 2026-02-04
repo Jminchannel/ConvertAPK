@@ -208,7 +208,8 @@ TASKS_STATE_LOCK = threading.Lock()
 # One-click (Quick) generate defaults (client-side shortcut).
 QUICK_GENERATE_STATE_PATH = TASKS_DIR / "quick-generate.json"
 QUICK_GENERATE_STATE_LOCK = threading.Lock()
-QUICK_GENERATE_ICON_PATH = APK_WORKER_DIR / "templates" / "demoLogo.png"
+TEMPLATES_DIR = APK_WORKER_DIR.parent / "templates"
+QUICK_GENERATE_ICON_PATH = TEMPLATES_DIR / "demoLogo.png"
 QUICK_GENERATE_APP_NAME = "demo"
 QUICK_GENERATE_PACKAGE_NAME = "com.convertapk.demo"
 QUICK_GENERATE_KEY_ALIAS = "key0"
@@ -255,11 +256,13 @@ def _resolve_quick_generate_icon_path() -> Path | None:
     # Based on backend file location (repo layout: <root>/web/backend/main.py).
     try:
         root_from_file = Path(__file__).resolve().parent.parent.parent
+        candidates.append(root_from_file / "templates" / "demoLogo.png")
         candidates.append(root_from_file / "apk-worker" / "templates" / "demoLogo.png")
     except Exception:
         pass
 
     # Current working directory.
+    candidates.append(Path.cwd() / "templates" / "demoLogo.png")
     candidates.append(Path.cwd() / "apk-worker" / "templates" / "demoLogo.png")
 
     # Packaged apps (PyInstaller).
@@ -271,11 +274,17 @@ def _resolve_quick_generate_icon_path() -> Path | None:
     # Next to executable / resources.
     try:
         exe_dir = Path(sys.executable).resolve().parent
+        candidates.append(exe_dir / "templates" / "demoLogo.png")
         candidates.append(exe_dir / "apk-worker" / "templates" / "demoLogo.png")
+        candidates.append(exe_dir.parent / "templates" / "demoLogo.png")
         candidates.append(exe_dir.parent / "apk-worker" / "templates" / "demoLogo.png")
+        candidates.append(exe_dir.parent.parent / "templates" / "demoLogo.png")
         candidates.append(exe_dir.parent.parent / "apk-worker" / "templates" / "demoLogo.png")
+        candidates.append(exe_dir / "resources" / "templates" / "demoLogo.png")
         candidates.append(exe_dir / "resources" / "apk-worker" / "templates" / "demoLogo.png")
+        candidates.append(exe_dir.parent / "resources" / "templates" / "demoLogo.png")
         candidates.append(exe_dir.parent / "resources" / "apk-worker" / "templates" / "demoLogo.png")
+        candidates.append(exe_dir.parent.parent / "resources" / "templates" / "demoLogo.png")
         candidates.append(exe_dir.parent.parent / "resources" / "apk-worker" / "templates" / "demoLogo.png")
     except Exception:
         pass

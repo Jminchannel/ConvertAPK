@@ -53,6 +53,15 @@ else:
 # 并在调用 apk-builder 容器时把该数据卷挂载进去（避免宿主路径映射问题）
 DATA_VOLUME = os.getenv("APK_BUILDER_DATA_VOLUME", "").strip()
 
+_templates_dir_raw = os.getenv("APK_BUILDER_TEMPLATES_DIR", "").strip()
+if _templates_dir_raw:
+    TEMPLATES_DIR = os.path.expanduser(_templates_dir_raw)
+elif not DATA_VOLUME:
+    _templates_candidate = PROJECT_ROOT / "templates"
+    TEMPLATES_DIR = str(_templates_candidate) if _templates_candidate.exists() else ""
+else:
+    TEMPLATES_DIR = ""
+
 UPLOAD_DIR = DATA_DIR / "uploads"
 BACKEND_OUTPUT_DIR = DATA_DIR / "outputs"
 LOGS_DIR = DATA_DIR / "logs"
@@ -465,6 +474,8 @@ class APKBuilder:
             # 使用docker run直接运行，挂载任务专属目录
             cmd = ["docker", "run", "--rm"]
             cmd += task_mount_args
+            if TEMPLATES_DIR:
+                cmd += ["-v", f"{TEMPLATES_DIR}:/workspace/templates:ro"]
             cmd += ["-v", gradle_mount]  # Gradle缓存
             # 资源限制（Gradle构建需要较大内存）
             cmd += ["--memory=6g", "--cpus=4"]

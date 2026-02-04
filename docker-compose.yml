@@ -10,6 +10,7 @@ services:
       - APK_BUILDER_DATA_VOLUME=convertapk-data
       - APK_BUILDER_GRADLE_CACHE_MODE=volume
       - APK_BUILDER_GRADLE_CACHE_VOLUME=convertapk-gradle-cache
+      - APK_BUILDER_TEMPLATES_DIR=${APK_BUILDER_TEMPLATES_DIR:-/data/ConvertAPK-Desktop/templates}
       - ADMIN_API_URL=http://admin-backend:9001
       - ADMIN_CLIENT_TOKEN=client-secret
     volumes:
