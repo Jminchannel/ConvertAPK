@@ -239,6 +239,63 @@ QUICK_GENERATE_PERMISSIONS = [
 ]
 
 
+def _resolve_quick_generate_icon_path() -> Path | None:
+    """
+    Quick-generate icon may live in different locations depending on how the backend
+    is launched (source tree, packaged executable, etc.). Resolve it robustly.
+    """
+    candidates: list[Path] = []
+
+    # Source tree / normal path.
+    candidates.append(QUICK_GENERATE_ICON_PATH)
+
+    # Based on backend file location (repo layout: <root>/web/backend/main.py).
+    try:
+        root_from_file = Path(__file__).resolve().parent.parent.parent
+        candidates.append(root_from_file / "apk-worker" / "templates" / "demoLogo.png")
+    except Exception:
+        pass
+
+    # Current working directory.
+    candidates.append(Path.cwd() / "apk-worker" / "templates" / "demoLogo.png")
+
+    # Packaged apps (PyInstaller).
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidates.append(Path(meipass) / "apk-worker" / "templates" / "demoLogo.png")
+        candidates.append(Path(meipass) / "templates" / "demoLogo.png")
+
+    # Next to executable / resources.
+    try:
+        exe_dir = Path(sys.executable).resolve().parent
+        candidates.append(exe_dir / "apk-worker" / "templates" / "demoLogo.png")
+        candidates.append(exe_dir.parent / "apk-worker" / "templates" / "demoLogo.png")
+        candidates.append(exe_dir.parent.parent / "apk-worker" / "templates" / "demoLogo.png")
+        candidates.append(exe_dir / "resources" / "apk-worker" / "templates" / "demoLogo.png")
+        candidates.append(exe_dir.parent / "resources" / "apk-worker" / "templates" / "demoLogo.png")
+        candidates.append(exe_dir.parent.parent / "resources" / "apk-worker" / "templates" / "demoLogo.png")
+    except Exception:
+        pass
+
+    seen = set()
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve()
+        except Exception:
+            resolved = candidate
+        key = str(resolved)
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            if resolved.exists():
+                return resolved
+        except Exception:
+            continue
+
+    return None
+
+
 def _bump_patch_version(value: str) -> str:
     raw = str(value or "").strip()
     if not raw:
@@ -439,10 +496,11 @@ async def upload_icon(file: UploadFile = File(...)):
 @app.get("/api/quick-generate/icon", include_in_schema=False)
 async def quick_generate_icon():
     """Quick Generate default icon preview."""
-    if not QUICK_GENERATE_ICON_PATH.exists():
+    icon_path = _resolve_quick_generate_icon_path()
+    if not icon_path:
         raise HTTPException(status_code=404, detail="Not Found")
     return FileResponse(
-        path=str(QUICK_GENERATE_ICON_PATH),
+        path=str(icon_path),
         filename="demoLogo.png",
         media_type="image/png",
     )
@@ -493,6 +551,11 @@ async def create_task(task_data: BuildTaskCreate):
             raise HTTPException(status_code=400, detail="web_url is required for web mode")
 
     quick_generate = bool(task_data.quick_generate)
+    quick_icon_path = None
+    if quick_generate:
+        quick_icon_path = _resolve_quick_generate_icon_path()
+        if not quick_icon_path:
+            raise HTTPException(status_code=500, detail="一键生成默认图标缺失：demoLogo.png")
     
     # 验证复用的任务是否存在
     reuse_from = None if quick_generate else task_data.reuse_keystore_from
@@ -547,10 +610,11 @@ async def create_task(task_data: BuildTaskCreate):
     # 移动图标文件到任务目录（如果有）
     icon_in_task = None
     if quick_generate:
-        if not QUICK_GENERATE_ICON_PATH.exists():
-            raise HTTPException(status_code=500, detail="Quick generate icon is missing")
+        icon_path = quick_icon_path
+        if not icon_path:
+            raise HTTPException(status_code=500, detail="一键生成默认图标缺失：demoLogo.png")
         dst_icon = task_input_dir / "logo.png"
-        shutil.copy2(str(QUICK_GENERATE_ICON_PATH), str(dst_icon))
+        shutil.copy2(str(icon_path), str(dst_icon))
         icon_in_task = "logo.png"
     elif task_data.icon_filename:
         src_icon = BACKEND_UPLOAD_DIR / task_data.icon_filename
