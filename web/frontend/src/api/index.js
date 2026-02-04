@@ -50,6 +50,28 @@ export const uploadIcon = async (file) => {
   return response.data
 }
 
+// 上传HTML文件
+export const uploadHtml = async (file, onProgress) => {
+  const formData = new FormData()
+  formData.append('file', file)
+
+  const response = await api.post('/upload-html', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data'
+    },
+    onUploadProgress: (progressEvent) => {
+      if (onProgress) {
+        const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total)
+        onProgress(percent)
+      }
+    }
+  })
+  return response.data
+}
+
+// 上传libs资源ZIP
+export const uploadLibs = async (file, onProgress) => uploadFile(file, onProgress)
+
 // 上传签名文件（.jks / .keystore）
 export const uploadKeystore = async (file) => {
   const formData = new FormData()

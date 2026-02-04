@@ -293,12 +293,16 @@ class APKBuilder:
         if not task_dir.exists():
             raise FileNotFoundError(f"任务目录不存在: {task_id}")
         
-        # 验证ZIP文件存在（仅 convert 模式）
+        # 验证输入文件存在
         task_mode_normalized = (task_mode or "convert").strip().lower()
-        if task_mode_normalized != "web":
+        if task_mode_normalized == "convert":
             zip_file = task_input_dir / "project.zip"
             if not zip_file.exists():
                 raise FileNotFoundError(f"ZIP文件不存在: {zip_file}")
+        elif task_mode_normalized == "html":
+            html_file = task_input_dir / "index.html"
+            if not html_file.exists():
+                raise FileNotFoundError(f"HTML文件不存在: {html_file}")
         
         # task 模式：创建 Gradle 缓存目录并复用全局 wrapper 缓存（避免重复下载 Gradle）
         # volume 模式：Gradle 缓存由 Docker volume 持久化，不需要在这里做任何拷贝

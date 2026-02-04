@@ -89,13 +89,19 @@
             <span class="mode-icon">🌐</span>
             {{ t('mode.web') }}
           </button>
+          <button class="mode-tab" :class="{ active: mode === 'html' }" @click="mode = 'html'; resetForm()">
+            <span class="mode-icon">📄</span>
+            {{ t('mode.html') }}
+          </button>
         </div>
 
         <!-- Steps -->
         <div class="steps">
           <div class="step" :class="{ active: currentStep === 1, completed: currentStep > 1 }">
             <div class="step-number">{{ currentStep > 1 ? '✓' : '1' }}</div>
-            <div class="step-text">{{ mode === 'web' ? t('web.url') : t('steps.upload') }}</div>
+            <div class="step-text">
+              {{ mode === 'web' ? t('web.url') : (mode === 'html' ? t('html.upload') : t('steps.upload')) }}
+            </div>
           </div>
           <div class="step" :class="{ active: currentStep === 2, completed: currentStep > 2 }">
             <div class="step-number">{{ currentStep > 2 ? '✓' : '2' }}</div>
@@ -193,6 +199,88 @@
               </div>
             </div>
 
+            <!-- HTML Upload (html only) -->
+            <div class="card" v-if="mode === 'html'">
+              <div class="card-header">
+                <div class="card-icon">📄</div>
+                <div>
+                  <div class="card-title">{{ t('html.title') }}</div>
+                  <div class="card-subtitle">{{ t('html.subtitle') }}</div>
+                </div>
+              </div>
+
+              <div
+                class="upload-zone"
+                :class="{ dragover: isHtmlDragging, 'has-file': uploadedHtmlFile }"
+                @dragover.prevent="isHtmlDragging = true"
+                @dragleave.prevent="isHtmlDragging = false"
+                @drop.prevent="handleHtmlDrop"
+              >
+                <input
+                  type="file"
+                  class="file-input-overlay"
+                  ref="htmlInput"
+                  @change="handleHtmlSelect"
+                  accept=".html,.htm"
+                />
+
+                <template v-if="!uploadedHtmlFile">
+                  <div class="upload-icon">📄</div>
+                  <div class="upload-text">{{ t('html.dragDrop') }}</div>
+                  <div class="upload-hint">{{ t('html.hint') }}</div>
+                </template>
+                <template v-else>
+                  <div class="upload-icon">✅</div>
+                  <div class="upload-text">{{ t('html.ready') }}</div>
+                  <div class="upload-file-info">
+                    <span class="upload-file-name">{{ uploadedHtmlFile.original_name }}</span>
+                    <span class="upload-file-size">{{ formatFileSize(uploadedHtmlFile.size) }}</span>
+                  </div>
+                </template>
+
+                <div v-if="htmlUploadProgress > 0 && htmlUploadProgress < 100" class="progress-bar" style="margin-top: 16px;">
+                  <div class="progress-fill" :style="{ width: htmlUploadProgress + '%' }"></div>
+                </div>
+              </div>
+
+              <div class="divider"></div>
+              <div class="form-hint" style="margin-bottom: 8px;">{{ t('html.libsHint') }}</div>
+
+              <div
+                class="upload-zone"
+                :class="{ dragover: isLibsDragging, 'has-file': uploadedLibsFile }"
+                @dragover.prevent="isLibsDragging = true"
+                @dragleave.prevent="isLibsDragging = false"
+                @drop.prevent="handleLibsDrop"
+              >
+                <input
+                  type="file"
+                  class="file-input-overlay"
+                  ref="libsInput"
+                  @change="handleLibsSelect"
+                  accept=".zip"
+                />
+
+                <template v-if="!uploadedLibsFile">
+                  <div class="upload-icon">🧩</div>
+                  <div class="upload-text">{{ t('html.libsDragDrop') }}</div>
+                  <div class="upload-hint">{{ t('html.libsOptional') }}</div>
+                </template>
+                <template v-else>
+                  <div class="upload-icon">✅</div>
+                  <div class="upload-text">{{ t('html.libsReady') }}</div>
+                  <div class="upload-file-info">
+                    <span class="upload-file-name">{{ uploadedLibsFile.original_name }}</span>
+                    <span class="upload-file-size">{{ formatFileSize(uploadedLibsFile.size) }}</span>
+                  </div>
+                </template>
+
+                <div v-if="libsUploadProgress > 0 && libsUploadProgress < 100" class="progress-bar" style="margin-top: 16px;">
+                  <div class="progress-fill" :style="{ width: libsUploadProgress + '%' }"></div>
+                </div>
+              </div>
+            </div>
+
             <!-- Web URL (web only) -->
             <div class="card" v-if="mode === 'web'">
               <div class="card-header">
@@ -271,7 +359,7 @@
                 </div>
                 <div class="card-header-actions">
                   <div
-                    v-if="mode === 'convert' || mode === 'web'"
+                    v-if="mode === 'convert' || mode === 'web' || mode === 'html'"
                     class="quickgen-switch"
                     :class="{ disabled: updatingTaskId }"
                     :title="t('config.quickGenerateHint')"
@@ -950,7 +1038,7 @@ const handleClickOutside = (e) => {
 }
 
 // Modes & feature state
-const mode = ref('convert') // convert | web
+const mode = ref('convert') // convert | web | html
 const webUrl = ref('')
 const enableAds = ref(false)
 const adConfig = ref({ appId: '', appKey: '', placementId: '' })
@@ -1065,13 +1153,21 @@ const normalizePermissionsForUi = (permissions) => {
 // Task flow
 const currentStep = ref(1)
 const isDragging = ref(false)
+const isHtmlDragging = ref(false)
+const isLibsDragging = ref(false)
 const fileInput = ref(null)
+const htmlInput = ref(null)
+const libsInput = ref(null)
 const iconInput = ref(null)
 const keystoreInput = ref(null)
 const uploadedKeystore = ref(null)
 const keystoreUploadError = ref('')
 const uploadedFile = ref(null)
+const uploadedHtmlFile = ref(null)
+const uploadedLibsFile = ref(null)
 const uploadProgress = ref(0)
+const htmlUploadProgress = ref(0)
+const libsUploadProgress = ref(0)
 const isCreating = ref(false)
 
 // Tasks & queue
@@ -1221,7 +1317,7 @@ const restoreQuickGenerateState = () => {
 
 const enterQuickGenerate = () => {
   if (quickGenerate.value) return
-  if ((mode.value !== 'convert' && mode.value !== 'web') || updatingTaskId.value) return
+  if ((mode.value !== 'convert' && mode.value !== 'web' && mode.value !== 'html') || updatingTaskId.value) return
   stashQuickGenerateState()
   quickGenerate.value = true
   applyQuickGenerateDefaults()
@@ -1321,7 +1417,7 @@ const isKeystoreUploaded = computed(() => Boolean(uploadedKeystore.value))
 
 const canCreateTask = computed(() => {
   const shouldCheckKeystore = !isKeystoreUploaded.value
-  const hasIcon = quickGenerate.value && (mode.value === 'convert' || mode.value === 'web') && !updatingTaskId.value
+  const hasIcon = quickGenerate.value && (mode.value === 'convert' || mode.value === 'web' || mode.value === 'html') && !updatingTaskId.value
     ? true
     : (appIcon.value || uploadedIcon.value)
   const common =
@@ -1334,6 +1430,9 @@ const canCreateTask = computed(() => {
   if (mode.value === 'convert') {
     return common && uploadedFile.value
   }
+  if (mode.value === 'html') {
+    return common && uploadedHtmlFile.value
+  }
   const basicWeb = common && webUrl.value && !webUrlError.value
   if (enableAds.value) {
     return basicWeb && adConfig.value.appId && adConfig.value.appKey && adConfig.value.placementId
@@ -1342,7 +1441,7 @@ const canCreateTask = computed(() => {
 })
 
 watch(() => mode.value, (value) => {
-  if (value !== 'convert' && value !== 'web' && quickGenerate.value) {
+  if (value !== 'convert' && value !== 'web' && value !== 'html' && quickGenerate.value) {
     exitQuickGenerate()
   }
 })
@@ -1465,6 +1564,49 @@ const uploadFile = async (file) => {
     const result = await api.uploadFile(file, (progress) => (uploadProgress.value = progress))
     uploadedFile.value = result
     currentStep.value = 2
+    showToast(t('toast.uploadSuccess'), 'success')
+  } catch (error) {
+    showToast(t('toast.uploadFailed') + ': ' + (error.response?.data?.detail || error.message), 'error')
+  }
+}
+
+const handleHtmlSelect = async (event) => {
+  const file = event.target.files[0]
+  if (file) await uploadHtml(file)
+}
+const handleHtmlDrop = async (event) => {
+  isHtmlDragging.value = false
+  const file = event.dataTransfer.files[0]
+  if (file && /\.(html|htm)$/i.test(file.name)) await uploadHtml(file)
+  else showToast(t('html.htmlRequired'), 'error')
+}
+const uploadHtml = async (file) => {
+  try {
+    htmlUploadProgress.value = 0
+    const result = await api.uploadHtml(file, (progress) => (htmlUploadProgress.value = progress))
+    uploadedHtmlFile.value = result
+    currentStep.value = 2
+    showToast(t('toast.uploadSuccess'), 'success')
+  } catch (error) {
+    showToast(t('toast.uploadFailed') + ': ' + (error.response?.data?.detail || error.message), 'error')
+  }
+}
+
+const handleLibsSelect = async (event) => {
+  const file = event.target.files[0]
+  if (file) await uploadLibs(file)
+}
+const handleLibsDrop = async (event) => {
+  isLibsDragging.value = false
+  const file = event.dataTransfer.files[0]
+  if (file && file.name.endsWith('.zip')) await uploadLibs(file)
+  else showToast(t('toast.zipRequired'), 'error')
+}
+const uploadLibs = async (file) => {
+  try {
+    libsUploadProgress.value = 0
+    const result = await api.uploadLibs(file, (progress) => (libsUploadProgress.value = progress))
+    uploadedLibsFile.value = result
     showToast(t('toast.uploadSuccess'), 'success')
   } catch (error) {
     showToast(t('toast.uploadFailed') + ': ' + (error.response?.data?.detail || error.message), 'error')
@@ -1672,8 +1814,24 @@ const useTaskConfig = (task) => {
   keystoreUploadError.value = ''
   if (keystoreInput.value) keystoreInput.value.value = ''
 
-  uploadedFile.value = { filename: 'project.zip', reused: true, original_name: '使用上一版本的项目文件', size: 0 }
-  uploadProgress.value = 100
+  uploadedFile.value = null
+  uploadProgress.value = 0
+  uploadedHtmlFile.value = null
+  uploadedLibsFile.value = null
+  htmlUploadProgress.value = 0
+  libsUploadProgress.value = 0
+
+  if (mode.value === 'convert') {
+    uploadedFile.value = { filename: 'project.zip', reused: true, original_name: '使用上一版本的项目文件', size: 0 }
+    uploadProgress.value = 100
+  } else if (mode.value === 'html') {
+    uploadedHtmlFile.value = { filename: 'index.html', reused: true, original_name: t('html.reuseHtml'), size: 0 }
+    htmlUploadProgress.value = 100
+    if (task.libs_filename) {
+      uploadedLibsFile.value = { filename: 'libs.zip', reused: true, original_name: t('html.reuseLibs'), size: 0 }
+      libsUploadProgress.value = 100
+    }
+  }
   currentStep.value = 1
 }
 
@@ -1706,7 +1864,7 @@ const createTask = async () => {
       }
     }
 
-    const isQuickGenerate = quickGenerate.value && (mode.value === 'convert' || mode.value === 'web') && !updatingTaskId.value
+    const isQuickGenerate = quickGenerate.value && (mode.value === 'convert' || mode.value === 'web' || mode.value === 'html') && !updatingTaskId.value
 
   if (updatingTaskId.value) {
       if (compareVersion(config.value.version_name, previousVersionName.value) < 0) {
@@ -1715,6 +1873,8 @@ const createTask = async () => {
       }
       const updateData = {
         filename: uploadedFile.value?.reused ? null : uploadedFile.value?.filename || null,
+        html_filename: uploadedHtmlFile.value?.reused ? null : uploadedHtmlFile.value?.filename || null,
+        libs_filename: uploadedLibsFile.value?.reused ? null : uploadedLibsFile.value?.filename || null,
         icon_filename: uploadedIcon.value?.reused ? null : uploadedIcon.value?.filename || null,
         version_name: config.value.version_name,
         version_code: config.value.version_code,
@@ -1736,6 +1896,8 @@ const createTask = async () => {
         web_url: mode.value === 'web' ? normalizedWebUrl : null,
         ad_config: mode.value === 'web' && enableAds.value ? adConfig.value : null,
         filename: mode.value === 'convert' ? uploadedFile.value.filename : null,
+        html_filename: mode.value === 'html' ? uploadedHtmlFile.value.filename : null,
+        libs_filename: mode.value === 'html' ? (uploadedLibsFile.value?.filename || null) : null,
         icon_filename: isQuickGenerate ? null : (uploadedIcon.value?.filename || null),
         keystore_filename: isQuickGenerate ? null : (uploadedKeystore.value?.filename || null),
         config: {
@@ -1783,6 +1945,12 @@ const resetForm = (options = {}) => {
   adConfig.value = { appId: '', appKey: '', placementId: '' }
   uploadedFile.value = null
   uploadProgress.value = 0
+  uploadedHtmlFile.value = null
+  uploadedLibsFile.value = null
+  htmlUploadProgress.value = 0
+  libsUploadProgress.value = 0
+  if (htmlInput.value) htmlInput.value.value = ''
+  if (libsInput.value) libsInput.value.value = ''
   if (appIcon.value && !appIcon.value.startsWith('/api/')) URL.revokeObjectURL(appIcon.value)
   appIcon.value = null
   appIconFile.value = null
@@ -1815,7 +1983,7 @@ const resetForm = (options = {}) => {
     keystore_password: '',
     key_password: ''
   }
-  if (preserveQuickGenerate && quickGenerate.value && (mode.value === 'convert' || mode.value === 'web')) {
+  if (preserveQuickGenerate && quickGenerate.value && (mode.value === 'convert' || mode.value === 'web' || mode.value === 'html')) {
     applyQuickGenerateDefaults()
   }
   currentStep.value = 1

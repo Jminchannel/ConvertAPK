@@ -15,7 +15,8 @@ export const messages = {
     mode: {
       title: 'Conversion Mode',
       apk: 'Project to APK',
-      web: 'Website to APK'
+      web: 'Website to APK',
+      html: 'HTML to APK'
     },
     // Guide
     guide: {
@@ -56,6 +57,21 @@ export const messages = {
       jsIntegration: 'JS Integration Guide',
       copyCode: 'Copy Code',
       codeCopied: 'Copied!'
+    },
+    html: {
+      title: 'HTML File',
+      subtitle: 'Upload your HTML entry file',
+      upload: 'Upload HTML',
+      dragDrop: 'Drag & drop HTML file here, or click to select',
+      hint: 'HTML entry file is required',
+      ready: 'HTML Ready',
+      libsHint: 'Optional: upload a ZIP of js/css dependencies',
+      libsDragDrop: 'Drag & drop libs ZIP here, or click to select',
+      libsOptional: 'Optional resource package (js/css)',
+      libsReady: 'Libs Ready',
+      htmlRequired: 'Please upload an HTML file',
+      reuseHtml: 'Use previous HTML file',
+      reuseLibs: 'Use previous libs package'
     },
     // Config
     config: {
@@ -348,7 +364,8 @@ export const messages = {
     mode: {
       title: '转换模式',
       apk: '项目转 APK',
-      web: '网页转 APK'
+      web: '网页转 APK',
+      html: 'HTML 转 APK'
     },
     // Guide
     guide: {
@@ -389,6 +406,21 @@ export const messages = {
       jsIntegration: 'JS 集成代码示例',
       copyCode: '复制代码',
       codeCopied: '已复制!'
+    },
+    html: {
+      title: 'HTML 文件',
+      subtitle: '上传入口 HTML 文件',
+      upload: '上传 HTML',
+      dragDrop: '拖拽 HTML 文件到此处，或点击选择',
+      hint: '必须包含入口 HTML 文件',
+      ready: 'HTML 已就绪',
+      libsHint: '可选：上传包含 js/css 资源的 ZIP 包',
+      libsDragDrop: '拖拽 libs ZIP 到此处，或点击选择',
+      libsOptional: '可选资源包（js/css）',
+      libsReady: '资源包已就绪',
+      htmlRequired: '请上传 HTML 文件',
+      reuseHtml: '使用上一版本的 HTML 文件',
+      reuseLibs: '使用上一版本的资源包'
     },
     // Config
     config: {
@@ -676,7 +708,8 @@ export const messages = {
     mode: {
       title: '轉換模式',
       apk: '專案轉 APK',
-      web: '網頁轉 APK'
+      web: '網頁轉 APK',
+      html: 'HTML 轉 APK'
     },
     // Guide
     guide: {
@@ -717,6 +750,21 @@ export const messages = {
       jsIntegration: 'JS 整合程式碼範例',
       copyCode: '複製程式碼',
       codeCopied: '已複製!'
+    },
+    html: {
+      title: 'HTML 檔案',
+      subtitle: '上傳入口 HTML 檔案',
+      upload: '上傳 HTML',
+      dragDrop: '拖拽 HTML 檔案到此處，或點擊選擇',
+      hint: '必須包含入口 HTML 檔案',
+      ready: 'HTML 已就緒',
+      libsHint: '可選：上傳包含 js/css 資源的 ZIP 包',
+      libsDragDrop: '拖拽 libs ZIP 到此處，或點擊選擇',
+      libsOptional: '可選資源包（js/css）',
+      libsReady: '資源包已就緒',
+      htmlRequired: '請上傳 HTML 檔案',
+      reuseHtml: '使用上一版本的 HTML 檔案',
+      reuseLibs: '使用上一版本的資源包'
     },
     // Config
     config: {

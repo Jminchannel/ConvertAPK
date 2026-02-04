@@ -240,6 +240,106 @@ NODE
 
     cd "$PROJECT_ROOT"
     log_success "Step 0 done"
+elif [ "$TASK_MODE" = "html" ]; then
+    log_info "Step 1: ?? HTML ??..."
+    TEMPLATE_DIR="/workspace/templates/HTML2APK"
+    if [ ! -d "$TEMPLATE_DIR" ]; then
+        log_error "HTML template not found: $TEMPLATE_DIR"
+        exit 1
+    fi
+    rm -rf "$PROJECT_DIR"
+    mkdir -p "$PROJECT_DIR"
+    cp -R "$TEMPLATE_DIR"/. "$PROJECT_DIR"/
+    PROJECT_ROOT="$PROJECT_DIR"
+    ANDROID_DIR="."
+
+    HTML_FILE="$INPUT_DIR/index.html"
+    if [ ! -f "$HTML_FILE" ]; then
+        HTML_FILE=$(find "$INPUT_DIR" -maxdepth 1 -type f \( -name "*.html" -o -name "*.htm" \) | head -n 1)
+    fi
+    if [ -z "$HTML_FILE" ]; then
+        log_error "HTML file not found in $INPUT_DIR"
+        exit 1
+    fi
+
+    HTML_ROOT="$PROJECT_ROOT/html2apkdemo"
+    rm -rf "$HTML_ROOT"
+    mkdir -p "$HTML_ROOT"
+    cp "$HTML_FILE" "$HTML_ROOT/index.html"
+
+    LIBS_ZIP="$INPUT_DIR/libs.zip"
+    if [ -f "$LIBS_ZIP" ]; then
+        mkdir -p "$HTML_ROOT/libs"
+        TMP_LIBS_DIR="/tmp/html_libs_$$"
+        rm -rf "$TMP_LIBS_DIR"
+        mkdir -p "$TMP_LIBS_DIR"
+        unzip -q "$LIBS_ZIP" -d "$TMP_LIBS_DIR"
+        if [ $(find "$TMP_LIBS_DIR" -mindepth 1 -maxdepth 1 -type d | wc -l) -eq 1 ] && [ $(find "$TMP_LIBS_DIR" -mindepth 1 -maxdepth 1 -type f | wc -l) -eq 0 ]; then
+            SRC_DIR=$(find "$TMP_LIBS_DIR" -mindepth 1 -maxdepth 1 -type d | head -n 1)
+            cp -R "$SRC_DIR"/. "$HTML_ROOT/libs/"
+        else
+            cp -R "$TMP_LIBS_DIR"/. "$HTML_ROOT/libs/"
+        fi
+        rm -rf "$TMP_LIBS_DIR"
+    fi
+
+    PROJECT_ROOT="$PROJECT_ROOT" node << 'NODE'
+const fs = require('fs');
+const path = require('path');
+
+const projectRoot = process.env.PROJECT_ROOT || process.cwd();
+const appName = process.env.APP_NAME || 'MyApp';
+const packageName = process.env.PACKAGE_NAME || 'com.example.app';
+const versionName = process.env.VERSION_NAME || '1.0.0';
+const versionCode = process.env.VERSION_CODE || '1';
+const statusBarHidden = String(process.env.STATUS_BAR_HIDDEN || '').trim().toLowerCase() === 'true';
+const statusBarColorRaw = String(process.env.STATUS_BAR_COLOR || 'transparent').trim().toLowerCase();
+const statusBarStyle = String(process.env.STATUS_BAR_STYLE || 'light').trim().toLowerCase();
+const lightStatusBarIcons = statusBarStyle === 'dark';
+const statusBarBackground =
+  statusBarColorRaw === '#ffffff' || statusBarColorRaw === 'white' || statusBarColorRaw === '#ffffffff'
+    ? 'white'
+    : 'transparent';
+const doubleClickExit = String(process.env.DOUBLE_CLICK_EXIT || '').trim().toLowerCase() !== 'false';
+const orientationRaw = String(process.env.SCREEN_ORIENTATION || '').trim().toLowerCase();
+const screenOrientation = orientationRaw === 'portrait' || orientationRaw === 'landscape' ? orientationRaw : 'auto';
+
+const stringsFile = path.join(projectRoot, 'app', 'src', 'main', 'res', 'values', 'strings.xml');
+if (fs.existsSync(stringsFile)) {
+  let text = fs.readFileSync(stringsFile, 'utf8');
+  text = text.replace(/(<string\s+name="app_name">)(.*?)(<\/string>)/, `$1${appName}$3`);
+  fs.writeFileSync(stringsFile, text, 'utf8');
+}
+
+let gradleFile = path.join(projectRoot, 'app', 'build.gradle.kts');
+if (!fs.existsSync(gradleFile)) {
+  gradleFile = path.join(projectRoot, 'app', 'build.gradle');
+}
+if (fs.existsSync(gradleFile)) {
+  let gtext = fs.readFileSync(gradleFile, 'utf8');
+  gtext = gtext.replace(/applicationId\s*=\s*"[^"]+"/, `applicationId = "${packageName}"`);
+  gtext = gtext.replace(/versionCode[[:space:]]*=[[:space:]]*\d+/, `versionCode = ${versionCode}`);
+  gtext = gtext.replace(/versionName[[:space:]]*=[[:space:]]*"[^"]+"/, `versionName = "${versionName}"`);
+  gtext = gtext.replace(/buildConfigField\(\s*"boolean"\s*,\s*"HIDE_STATUS_BAR"[\s\S]*?\)/, `buildConfigField("boolean", "HIDE_STATUS_BAR", "${statusBarHidden}")`);
+  gtext = gtext.replace(/buildConfigField\(\s*"String"\s*,\s*"STATUS_BAR_BACKGROUND"[\s\S]*?\)/, `buildConfigField("String", "STATUS_BAR_BACKGROUND", "\\"${statusBarBackground}\\"")`);
+  gtext = gtext.replace(/buildConfigField\(\s*"boolean"\s*,\s*"LIGHT_STATUS_BAR_ICONS"[\s\S]*?\)/, `buildConfigField("boolean", "LIGHT_STATUS_BAR_ICONS", "${lightStatusBarIcons}")`);
+  gtext = gtext.replace(/buildConfigField\(\s*"boolean"\s*,\s*"DOUBLE_CLICK_EXIT"[\s\S]*?\)/, `buildConfigField("boolean", "DOUBLE_CLICK_EXIT", "${doubleClickExit}")`);
+  gtext = gtext.replace(/buildConfigField\(\s*"String"\s*,\s*"SCREEN_ORIENTATION"[\s\S]*?\)/, `buildConfigField("String", "SCREEN_ORIENTATION", "\\"${screenOrientation}\\"")`);
+  fs.writeFileSync(gradleFile, gtext, 'utf8');
+}
+NODE
+
+    if [ -f "$INPUT_DIR/logo.png" ]; then
+        drawable_dir="$PROJECT_ROOT/app/src/main/res/drawable"
+        if [ -d "$drawable_dir" ]; then
+            rm -f "$drawable_dir/ic_launcher_foreground.xml"
+            cp "$INPUT_DIR/logo.png" "$drawable_dir/ic_launcher_foreground.png"
+            log_info "Template launcher icon updated"
+        fi
+    fi
+
+    cd "$PROJECT_ROOT"
+    log_success "Step 0 done"
 else
     # check zip for convert mode
     ZIP_FILE=$(find "$INPUT_DIR" -name "*.zip" -type f | head -n 1)
@@ -325,7 +425,7 @@ EOF
 
     log_success "Step 0 done"
 fi
-if [ "$TASK_MODE" != "web" ]; then
+if [ "$TASK_MODE" = "convert" ]; then
 # ============================================
 log_info "Step 1: 构建 Web 项目..."
 
@@ -956,7 +1056,7 @@ const packageNameRaw = String(process.env.PACKAGE_NAME || "").trim();
 const doubleClickExit =
   String(process.env.DOUBLE_CLICK_EXIT || "").trim().toLowerCase() === "true";
 const taskMode = String(process.env.TASK_MODE || "").trim().toLowerCase();
-const allowKotlinPatch = taskMode !== "web";
+const allowKotlinPatch = taskMode === "convert";
 const packageLineMatch = text.match(/^package\s+[^\s]+/m);
 const packageLine = packageNameRaw
   ? `package ${packageNameRaw}`

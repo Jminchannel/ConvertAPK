@@ -410,6 +410,9 @@ def _patch_android_build_config(build_gradle: Path, env: Dict[str, str], on_log=
     status_bar_style = str(env.get("STATUS_BAR_STYLE", "light")).strip().lower()
     light_status_bar_icons = "true" if status_bar_style == "dark" else "false"
     double_click_exit = "true" if str(env.get("DOUBLE_CLICK_EXIT", "true")).lower() == "true" else "false"
+    screen_orientation = str(env.get("SCREEN_ORIENTATION", "auto")).strip().lower()
+    if screen_orientation not in {"portrait", "landscape", "auto"}:
+        screen_orientation = "auto"
 
     def _insert_after_default_config(line: str) -> None:
         nonlocal text
@@ -436,6 +439,7 @@ def _patch_android_build_config(build_gradle: Path, env: Dict[str, str], on_log=
         _ensure_kts("STATUS_BAR_BACKGROUND", f'\\"{status_bar_background}\\"')
         _ensure_kts("LIGHT_STATUS_BAR_ICONS", light_status_bar_icons)
         _ensure_kts("DOUBLE_CLICK_EXIT", double_click_exit)
+        _ensure_kts("SCREEN_ORIENTATION", f'\\"{screen_orientation}\\"')
 
         if "buildFeatures" not in text:
             text = re.sub(
@@ -461,6 +465,7 @@ def _patch_android_build_config(build_gradle: Path, env: Dict[str, str], on_log=
         _ensure_groovy("STATUS_BAR_BACKGROUND", f'\\"{status_bar_background}\\"')
         _ensure_groovy("LIGHT_STATUS_BAR_ICONS", light_status_bar_icons)
         _ensure_groovy("DOUBLE_CLICK_EXIT", double_click_exit)
+        _ensure_groovy("SCREEN_ORIENTATION", f'\\"{screen_orientation}\\"')
 
         if "buildFeatures" not in text:
             text = re.sub(
@@ -719,6 +724,7 @@ def run_local_build(
 
     task_mode = (env.get("TASK_MODE") or "convert").strip().lower()
     is_web_task = task_mode == "web"
+    is_html_task = task_mode == "html"
 
     if is_web_task:
         progress(25, "Step 1: 准备 Web 模板...")
@@ -801,6 +807,80 @@ def run_local_build(
                 gradle_text,
             )
             gradle_file.write_text(gradle_text, encoding="utf-8")
+    elif is_html_task:
+        progress(25, "Step 1: ?? HTML ??...")
+        _log(on_log, "Step 1: ?? HTML ??...")
+
+        template_dir = _resolve_templates_root() / "HTML2APK"
+        if not template_dir.exists():
+            raise RuntimeError(f"???HTML??: {template_dir}")
+
+        if project_dir.exists():
+            shutil.rmtree(project_dir)
+        shutil.copytree(template_dir, project_dir)
+        project_root = project_dir
+
+        html_source = task_input_dir / "index.html"
+        if not html_source.exists():
+            raise RuntimeError("HTML ????: index.html")
+        html_root = project_root / "html2apkdemo"
+        if html_root.exists():
+            shutil.rmtree(html_root)
+        html_root.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(html_source, html_root / "index.html")
+
+        libs_zip = task_input_dir / "libs.zip"
+        if libs_zip.exists():
+            libs_dir = html_root / "libs"
+            if libs_dir.exists():
+                shutil.rmtree(libs_dir)
+            libs_dir.mkdir(parents=True, exist_ok=True)
+            temp_dir = task_dir / "_libs_extract"
+            if temp_dir.exists():
+                shutil.rmtree(temp_dir)
+            temp_dir.mkdir(parents=True, exist_ok=True)
+            with zipfile.ZipFile(libs_zip, "r") as zf:
+                zf.extractall(temp_dir)
+            entries = [p for p in temp_dir.iterdir() if p.name not in {".DS_Store", "__MACOSX"}]
+            source_root = temp_dir
+            if len(entries) == 1 and entries[0].is_dir():
+                source_root = entries[0]
+            shutil.copytree(source_root, libs_dir, dirs_exist_ok=True)
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+        strings_file = project_root / "app" / "src" / "main" / "res" / "values" / "strings.xml"
+        if strings_file.exists():
+            strings_text = strings_file.read_text(encoding="utf-8")
+            strings_text = re.sub(
+                r'(<string\s+name="app_name">)(.*?)(</string>)',
+                rf"\1{env.get('APP_NAME', 'MyApp')}\3",
+                strings_text,
+            )
+            strings_file.write_text(strings_text, encoding="utf-8")
+
+        logo = task_input_dir / "logo.png"
+        _replace_template_launcher_icon(project_root, logo, on_log=on_log)
+
+        gradle_file = project_root / "app" / "build.gradle.kts"
+        if gradle_file.exists():
+            gradle_text = gradle_file.read_text(encoding="utf-8")
+            package_name = env.get("PACKAGE_NAME", "com.example.app")
+            gradle_text = re.sub(
+                r'(?m)^\s*applicationId\s*=\s*"[^\"]+"',
+                f'        applicationId = "{package_name}"',
+                gradle_text,
+            )
+            gradle_text = re.sub(
+                r'(?m)^\s*versionCode\s*=\s*\d+',
+                f'        versionCode = {env.get("VERSION_CODE", "1")}',
+                gradle_text,
+            )
+            gradle_text = re.sub(
+                r'(?m)^\s*versionName\s*=\s*"[^\"]+"',
+                f'        versionName = "{env.get("VERSION_NAME", "1.0.0")}"',
+                gradle_text,
+            )
+            gradle_file.write_text(gradle_text, encoding="utf-8")
     else:
         zip_files = list(task_input_dir.glob("*.zip"))
         if not zip_files:
@@ -873,7 +953,7 @@ def run_local_build(
         _log(on_log, "Step 5: 同步 Android 配置...")
         _run_cmd([npx_cmd, "cap", "sync", "android"], cwd=project_root, env=process_env, on_log=on_log)
 
-    android_project_root = project_root if is_web_task else project_root / "android"
+    android_project_root = project_root if (is_web_task or is_html_task) else project_root / "android"
     android_app_dir = android_project_root / "app"
 
     permissions_raw = str(env.get("PERMISSIONS", "")).strip()
@@ -891,7 +971,7 @@ def run_local_build(
         _patch_android_build_config(build_gradle_kts, env, on_log=on_log)
     elif build_gradle.exists():
         _patch_android_build_config(build_gradle, env, on_log=on_log)
-    if not is_web_task:
+    if not is_web_task and not is_html_task:
         package_name = str(env.get("PACKAGE_NAME", "")).strip()
         main_candidates = list(android_app_dir.rglob("MainActivity.kt")) + list(
             android_app_dir.rglob("MainActivity.java")
@@ -907,7 +987,7 @@ def run_local_build(
     local_props = android_project_root / "local.properties"
     local_props.write_text(f"sdk.dir={android_home.as_posix()}\n", encoding="utf-8")
 
-    if not is_web_task:
+    if not is_web_task and not is_html_task:
         gradle_file = android_app_dir / "build.gradle"
         if gradle_file.exists():
             gradle_text = gradle_file.read_text(encoding="utf-8")
