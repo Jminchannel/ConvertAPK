@@ -64,7 +64,7 @@
     </header>
 
     <!-- Main Content -->
-    <main class="main">
+    <main class="main" ref="mainRef">
       <div class="container">
         <div v-if="activeAnnouncement" class="card no-drag" style="margin-bottom: 16px;">
           <div class="card-header">
@@ -81,15 +81,15 @@
 
         <!-- Mode Tabs -->
         <div class="mode-tabs">
-          <button class="mode-tab" :class="{ active: mode === 'convert' }" @click="mode = 'convert'; resetForm()">
+          <button class="mode-tab" :class="{ active: mode === 'convert' }" @click="handleModeChange('convert')">
             <span class="mode-icon">📦</span>
             {{ t('mode.apk') }}
           </button>
-          <button class="mode-tab" :class="{ active: mode === 'web' }" @click="mode = 'web'; resetForm()">
+          <button class="mode-tab" :class="{ active: mode === 'web' }" @click="handleModeChange('web')">
             <span class="mode-icon">🌐</span>
             {{ t('mode.web') }}
           </button>
-          <button class="mode-tab" :class="{ active: mode === 'html' }" @click="mode = 'html'; resetForm()">
+          <button class="mode-tab" :class="{ active: mode === 'html' }" @click="handleModeChange('html')">
             <span class="mode-icon">📄</span>
             {{ t('mode.html') }}
           </button>
@@ -155,7 +155,7 @@
             </div>
 
             <!-- Upload (convert only) -->
-            <div class="card" v-if="mode === 'convert'">
+            <div class="card" v-if="mode === 'convert'" ref="convertUploadSection">
               <div class="card-header">
                 <div class="card-icon">📦</div>
                 <div>
@@ -200,7 +200,7 @@
             </div>
 
             <!-- HTML Upload (html only) -->
-            <div class="card" v-if="mode === 'html'">
+            <div class="card" v-if="mode === 'html'" ref="htmlUploadSection">
               <div class="card-header">
                 <div class="card-icon">📄</div>
                 <div>
@@ -282,7 +282,7 @@
             </div>
 
             <!-- Web URL (web only) -->
-            <div class="card" v-if="mode === 'web'">
+            <div class="card" v-if="mode === 'web'" ref="webUrlSection">
               <div class="card-header">
                 <div class="card-icon">🌐</div>
                 <div>
@@ -980,7 +980,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { Cropper } from 'vue-advanced-cropper'
 import 'vue-advanced-cropper/dist/style.css'
 import * as api from './api'
@@ -1039,6 +1039,10 @@ const handleClickOutside = (e) => {
 
 // Modes & feature state
 const mode = ref('convert') // convert | web | html
+const mainRef = ref(null)
+const convertUploadSection = ref(null)
+const htmlUploadSection = ref(null)
+const webUrlSection = ref(null)
 const webUrl = ref('')
 const enableAds = ref(false)
 const adConfig = ref({ appId: '', appKey: '', placementId: '' })
@@ -1047,6 +1051,36 @@ const useCustomKeystore = ref(false)
 const quickGenerate = ref(false)
 const quickGenerateStash = ref(null)
 const codeCopied = ref(false)
+
+const isMobileViewport = () => {
+  if (typeof window === 'undefined') return false
+  if (window.matchMedia) return window.matchMedia('(max-width: 640px)').matches
+  return window.innerWidth <= 640
+}
+
+const scrollToProjectSection = async () => {
+  if (!isMobileViewport()) return
+  await nextTick()
+  const target = mode.value === 'convert'
+    ? convertUploadSection.value
+    : (mode.value === 'html' ? htmlUploadSection.value : webUrlSection.value)
+  if (!target) return
+  if (mainRef.value) {
+    const container = mainRef.value
+    const containerRect = container.getBoundingClientRect()
+    const targetRect = target.getBoundingClientRect()
+    const offset = targetRect.top - containerRect.top + container.scrollTop - 12
+    container.scrollTo({ top: Math.max(0, offset), behavior: 'smooth' })
+    return
+  }
+  target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+const handleModeChange = (value) => {
+  mode.value = value
+  resetForm()
+  scrollToProjectSection()
+}
 
 const jsTemplate = `// 1. 定义广告API (h5api) - 需添加到您的网页中
 window.h5api = {
@@ -2211,6 +2245,29 @@ onUnmounted(() => {
   box-shadow: var(--shadow-sm);
 }
 .mode-icon { font-size: 16px; }
+
+@media (max-width: 640px) {
+  .mode-tabs {
+    width: 100%;
+    max-width: 100%;
+    padding: 6px;
+    gap: 8px;
+  }
+
+  .mode-tab {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 10px 6px;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    font-size: 12px;
+    line-height: 1.15;
+  }
+
+  .mode-icon { font-size: 18px; }
+}
 
 /* Card Header Actions */
 .card-header-actions {
