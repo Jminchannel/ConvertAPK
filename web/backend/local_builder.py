@@ -839,25 +839,6 @@ def run_local_build(
         html_root.mkdir(parents=True, exist_ok=True)
         shutil.copy2(html_source, html_root / "index.html")
 
-        libs_zip = task_input_dir / "libs.zip"
-        if libs_zip.exists():
-            libs_dir = html_root / "libs"
-            if libs_dir.exists():
-                shutil.rmtree(libs_dir)
-            libs_dir.mkdir(parents=True, exist_ok=True)
-            temp_dir = task_dir / "_libs_extract"
-            if temp_dir.exists():
-                shutil.rmtree(temp_dir)
-            temp_dir.mkdir(parents=True, exist_ok=True)
-            with zipfile.ZipFile(libs_zip, "r") as zf:
-                zf.extractall(temp_dir)
-            entries = [p for p in temp_dir.iterdir() if p.name not in {".DS_Store", "__MACOSX"}]
-            source_root = temp_dir
-            if len(entries) == 1 and entries[0].is_dir():
-                source_root = entries[0]
-            shutil.copytree(source_root, libs_dir, dirs_exist_ok=True)
-            shutil.rmtree(temp_dir, ignore_errors=True)
-
         strings_file = project_root / "app" / "src" / "main" / "res" / "values" / "strings.xml"
         if strings_file.exists():
             strings_text = strings_file.read_text(encoding="utf-8")

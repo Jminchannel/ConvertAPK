@@ -243,42 +243,6 @@
                 </div>
               </div>
 
-              <div class="divider"></div>
-              <div class="form-hint" style="margin-bottom: 8px;">{{ t('html.libsHint') }}</div>
-
-              <div
-                class="upload-zone"
-                :class="{ dragover: isLibsDragging, 'has-file': uploadedLibsFile }"
-                @dragover.prevent="isLibsDragging = true"
-                @dragleave.prevent="isLibsDragging = false"
-                @drop.prevent="handleLibsDrop"
-              >
-                <input
-                  type="file"
-                  class="file-input-overlay"
-                  ref="libsInput"
-                  @change="handleLibsSelect"
-                  accept=".zip"
-                />
-
-                <template v-if="!uploadedLibsFile">
-                  <div class="upload-icon">🧩</div>
-                  <div class="upload-text">{{ t('html.libsDragDrop') }}</div>
-                  <div class="upload-hint">{{ t('html.libsOptional') }}</div>
-                </template>
-                <template v-else>
-                  <div class="upload-icon">✅</div>
-                  <div class="upload-text">{{ t('html.libsReady') }}</div>
-                  <div class="upload-file-info">
-                    <span class="upload-file-name">{{ uploadedLibsFile.original_name }}</span>
-                    <span class="upload-file-size">{{ formatFileSize(uploadedLibsFile.size) }}</span>
-                  </div>
-                </template>
-
-                <div v-if="libsUploadProgress > 0 && libsUploadProgress < 100" class="progress-bar" style="margin-top: 16px;">
-                  <div class="progress-fill" :style="{ width: libsUploadProgress + '%' }"></div>
-                </div>
-              </div>
             </div>
 
             <!-- Web URL (web only) -->
@@ -1198,20 +1162,16 @@ const normalizePermissionsForUi = (permissions) => {
 const currentStep = ref(1)
 const isDragging = ref(false)
 const isHtmlDragging = ref(false)
-const isLibsDragging = ref(false)
 const fileInput = ref(null)
 const htmlInput = ref(null)
-const libsInput = ref(null)
 const iconInput = ref(null)
 const keystoreInput = ref(null)
 const uploadedKeystore = ref(null)
 const keystoreUploadError = ref('')
 const uploadedFile = ref(null)
 const uploadedHtmlFile = ref(null)
-const uploadedLibsFile = ref(null)
 const uploadProgress = ref(0)
 const htmlUploadProgress = ref(0)
-const libsUploadProgress = ref(0)
 const isCreating = ref(false)
 
 // Tasks & queue
@@ -1637,27 +1597,6 @@ const uploadHtml = async (file) => {
   }
 }
 
-const handleLibsSelect = async (event) => {
-  const file = event.target.files[0]
-  if (file) await uploadLibs(file)
-}
-const handleLibsDrop = async (event) => {
-  isLibsDragging.value = false
-  const file = event.dataTransfer.files[0]
-  if (file && file.name.endsWith('.zip')) await uploadLibs(file)
-  else showToast(t('toast.zipRequired'), 'error')
-}
-const uploadLibs = async (file) => {
-  try {
-    libsUploadProgress.value = 0
-    const result = await api.uploadLibs(file, (progress) => (libsUploadProgress.value = progress))
-    uploadedLibsFile.value = result
-    showToast(t('toast.uploadSuccess'), 'success')
-  } catch (error) {
-    showToast(t('toast.uploadFailed') + ': ' + (error.response?.data?.detail || error.message), 'error')
-  }
-}
-
 const triggerKeystoreInput = () => {
   if (isKeystoreUploaded.value || updatingTaskId.value) return
   keystoreInput.value?.click?.()
@@ -1863,9 +1802,7 @@ const useTaskConfig = (task) => {
   uploadedFile.value = null
   uploadProgress.value = 0
   uploadedHtmlFile.value = null
-  uploadedLibsFile.value = null
   htmlUploadProgress.value = 0
-  libsUploadProgress.value = 0
 
   if (mode.value === 'convert') {
     uploadedFile.value = { filename: 'project.zip', reused: true, original_name: '使用上一版本的项目文件', size: 0 }
@@ -1873,10 +1810,6 @@ const useTaskConfig = (task) => {
   } else if (mode.value === 'html') {
     uploadedHtmlFile.value = { filename: 'index.html', reused: true, original_name: t('html.reuseHtml'), size: 0 }
     htmlUploadProgress.value = 100
-    if (task.libs_filename) {
-      uploadedLibsFile.value = { filename: 'libs.zip', reused: true, original_name: t('html.reuseLibs'), size: 0 }
-      libsUploadProgress.value = 100
-    }
   }
   currentStep.value = 1
 }
@@ -1920,7 +1853,6 @@ const createTask = async () => {
       const updateData = {
         filename: uploadedFile.value?.reused ? null : uploadedFile.value?.filename || null,
         html_filename: uploadedHtmlFile.value?.reused ? null : uploadedHtmlFile.value?.filename || null,
-        libs_filename: uploadedLibsFile.value?.reused ? null : uploadedLibsFile.value?.filename || null,
         icon_filename: uploadedIcon.value?.reused ? null : uploadedIcon.value?.filename || null,
         version_name: config.value.version_name,
         version_code: config.value.version_code,
@@ -1944,7 +1876,6 @@ const createTask = async () => {
         ad_config: mode.value === 'web' && enableAds.value ? adConfig.value : null,
         filename: mode.value === 'convert' ? uploadedFile.value.filename : null,
         html_filename: mode.value === 'html' ? uploadedHtmlFile.value.filename : null,
-        libs_filename: mode.value === 'html' ? (uploadedLibsFile.value?.filename || null) : null,
         icon_filename: isQuickGenerate ? null : (uploadedIcon.value?.filename || null),
         keystore_filename: isQuickGenerate ? null : (uploadedKeystore.value?.filename || null),
         config: {
@@ -1994,11 +1925,8 @@ const resetForm = (options = {}) => {
   uploadedFile.value = null
   uploadProgress.value = 0
   uploadedHtmlFile.value = null
-  uploadedLibsFile.value = null
   htmlUploadProgress.value = 0
-  libsUploadProgress.value = 0
   if (htmlInput.value) htmlInput.value.value = ''
-  if (libsInput.value) libsInput.value.value = ''
   if (appIcon.value && !appIcon.value.startsWith('/api/')) URL.revokeObjectURL(appIcon.value)
   appIcon.value = null
   appIconFile.value = null
@@ -2154,6 +2082,7 @@ const closeDonation = () => {
 }
 const taskStatusCache = ref(new Map())
 const taskStatusReady = ref(false)
+const shouldAutoShowDonation = () => Math.random() < 0.1
 watch(
   tasks,
   (next) => {
@@ -2169,7 +2098,7 @@ watch(
       }
     }
     taskStatusCache.value = updates
-    if (taskStatusReady.value && newSuccess && !showDonation.value) {
+    if (taskStatusReady.value && newSuccess && !showDonation.value && shouldAutoShowDonation()) {
       openDonation(true)
     }
     taskStatusReady.value = true

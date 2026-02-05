@@ -65,13 +65,8 @@ export const messages = {
       dragDrop: 'Drag & drop HTML file here, or click to select',
       hint: 'HTML entry file is required',
       ready: 'HTML Ready',
-      libsHint: 'Optional: upload a ZIP of js/css dependencies',
-      libsDragDrop: 'Drag & drop libs ZIP here, or click to select',
-      libsOptional: 'Optional resource package (js/css)',
-      libsReady: 'Libs Ready',
       htmlRequired: 'Please upload an HTML file',
       reuseHtml: 'Use previous HTML file',
-      reuseLibs: 'Use previous libs package'
     },
     // Config
     config: {
@@ -243,7 +238,6 @@ export const messages = {
       feedbackCooldown: 'Please wait before sending again',
       feedbackDailyLimit: 'Daily feedback limit reached',
         saved: 'Saved',
-        zipRequired: 'Please upload a ZIP file',
         iconSet: 'Icon updated',
         iconUploadFailed: 'Icon upload failed'
     },
@@ -417,13 +411,8 @@ export const messages = {
       dragDrop: '拖拽 HTML 文件到此处，或点击选择',
       hint: '必须包含入口 HTML 文件',
       ready: 'HTML 已就绪',
-      libsHint: '可选：上传包含 js/css 资源的 ZIP 包',
-      libsDragDrop: '拖拽 libs ZIP 到此处，或点击选择',
-      libsOptional: '可选资源包（js/css）',
-      libsReady: '资源包已就绪',
       htmlRequired: '请上传 HTML 文件',
       reuseHtml: '使用上一版本的 HTML 文件',
-      reuseLibs: '使用上一版本的资源包'
     },
     // Config
     config: {
@@ -764,13 +753,8 @@ export const messages = {
       dragDrop: '拖拽 HTML 檔案到此處，或點擊選擇',
       hint: '必須包含入口 HTML 檔案',
       ready: 'HTML 已就緒',
-      libsHint: '可選：上傳包含 js/css 資源的 ZIP 包',
-      libsDragDrop: '拖拽 libs ZIP 到此處，或點擊選擇',
-      libsOptional: '可選資源包（js/css）',
-      libsReady: '資源包已就緒',
       htmlRequired: '請上傳 HTML 檔案',
       reuseHtml: '使用上一版本的 HTML 檔案',
-      reuseLibs: '使用上一版本的資源包'
     },
     // Config
     config: {

@@ -69,8 +69,6 @@ export const uploadHtml = async (file, onProgress) => {
   return response.data
 }
 
-// 上传libs资源ZIP
-export const uploadLibs = async (file, onProgress) => uploadFile(file, onProgress)
 
 // 上传签名文件（.jks / .keystore）
 export const uploadKeystore = async (file) => {

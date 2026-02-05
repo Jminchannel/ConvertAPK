@@ -150,7 +150,6 @@ class BuildTask(BaseModel):
     web_url: Optional[str] = None
     filename: Optional[str] = None
     html_filename: Optional[str] = None
-    libs_filename: Optional[str] = None
     icon_filename: Optional[str] = None
     keystore_filename: Optional[str] = None
     config: AppConfig
@@ -173,7 +172,6 @@ class BuildTaskCreate(BaseModel):
     web_url: Optional[str] = None
     filename: Optional[str] = None
     html_filename: Optional[str] = None
-    libs_filename: Optional[str] = None
     icon_filename: Optional[str] = None
     keystore_filename: Optional[str] = None
     config: AppConfig
@@ -190,7 +188,6 @@ class BuildTaskResponse(BaseModel):
     web_url: Optional[str] = None
     filename: Optional[str] = None
     html_filename: Optional[str] = None
-    libs_filename: Optional[str] = None
     icon_filename: Optional[str] = None
     keystore_filename: Optional[str] = None
     config: AppConfig
@@ -210,7 +207,6 @@ class UpdateTaskRequest(BaseModel):
     client_id: str  # 客户端ID（用于验证所有权）
     filename: Optional[str] = None  # 新的ZIP文件名（可选）
     html_filename: Optional[str] = None  # ??HTML???????
-    libs_filename: Optional[str] = None  # ??libs ZIP?????
     icon_filename: Optional[str] = None  # 新的图标文件名（可选）
     version_name: str
     version_code: int

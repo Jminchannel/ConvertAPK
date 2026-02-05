@@ -663,12 +663,10 @@ async def create_task(task_data: BuildTaskCreate):
         if not web_url:
             raise HTTPException(status_code=400, detail="web_url is required for web mode")
     html_filename = None
-    libs_filename = None
     if mode == "html":
         html_filename = str(task_data.html_filename or "").strip()
         if not html_filename:
             raise HTTPException(status_code=400, detail="html_filename is required for html mode")
-        libs_filename = str(task_data.libs_filename or "").strip() or None
 
     quick_generate = bool(task_data.quick_generate)
     quick_icon_path = None
@@ -711,12 +709,6 @@ async def create_task(task_data: BuildTaskCreate):
             raise HTTPException(status_code=400, detail="HTML文件不存在，请重新上传")
         dst_html = task_input_dir / "index.html"
         shutil.move(str(src_html), str(dst_html))
-        if libs_filename:
-            src_libs = BACKEND_UPLOAD_DIR / libs_filename
-            if not src_libs.exists():
-                raise HTTPException(status_code=400, detail="libs ZIP不存在，请重新上传")
-            dst_libs = task_input_dir / "libs.zip"
-            shutil.move(str(src_libs), str(dst_libs))
 
     if quick_generate:
         version_name, version_code = _alloc_quick_generate_versions()
@@ -790,7 +782,6 @@ async def create_task(task_data: BuildTaskCreate):
         web_url=web_url,
         filename="project.zip" if mode == "convert" else None,
         html_filename="index.html" if mode == "html" else None,
-        libs_filename="libs.zip" if (mode == "html" and libs_filename) else None,
         icon_filename=icon_in_task,
         keystore_filename=keystore_in_task,
         config=effective_config,
@@ -1136,7 +1127,7 @@ async def update_task(task_id: str, update_data: UpdateTaskRequest):
                 dst_zip.unlink()
             shutil.move(str(src_zip), str(dst_zip))
 
-    # HTML 模式：替换 HTML / libs 资源
+    # HTML 模式：替换 HTML 资源
     if task.mode == "html":
         if update_data.html_filename:
             src_html = BACKEND_UPLOAD_DIR / update_data.html_filename
@@ -1146,14 +1137,6 @@ async def update_task(task_id: str, update_data: UpdateTaskRequest):
                     dst_html.unlink()
                 shutil.move(str(src_html), str(dst_html))
                 task.html_filename = "index.html"
-        if update_data.libs_filename:
-            src_libs = BACKEND_UPLOAD_DIR / update_data.libs_filename
-            if src_libs.exists():
-                dst_libs = task_input_dir / "libs.zip"
-                if dst_libs.exists():
-                    dst_libs.unlink()
-                shutil.move(str(src_libs), str(dst_libs))
-                task.libs_filename = "libs.zip"
     
     # 如果有新的图标，替换旧的
     if update_data.icon_filename:
