@@ -1,9 +1,11 @@
 package osa.cosa.html2apk
 
+import android.app.Activity
 import android.content.ActivityNotFoundException
-import android.content.ContentValues
+import android.content.Intent
 import android.os.Bundle
-import android.os.Environment
+import android.os.Handler
+import android.os.Looper
 import android.graphics.Color
 import android.view.View
 import android.view.ViewGroup
@@ -15,8 +17,6 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
-import android.provider.MediaStore
-import java.util.Locale
 import android.content.pm.ActivityInfo
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -102,6 +102,7 @@ fun Html2ApkWebView(startUrl: String, modifier: Modifier = Modifier) {
     var canGoBack by remember { mutableStateOf(false) }
     var lastBackPressTime by remember { mutableStateOf(0L) }
     var pendingFileCallback by remember { mutableStateOf<ValueCallback<Array<android.net.Uri>>?>(null) }
+    var pendingDownload by remember { mutableStateOf<PendingDownload?>(null) }
     val orientationMode = AppConfig.orientationMode
 
     val fileChooserLauncher = rememberLauncherForActivityResult(
@@ -110,6 +111,29 @@ fun Html2ApkWebView(startUrl: String, modifier: Modifier = Modifier) {
         val uris = WebChromeClient.FileChooserParams.parseResult(result.resultCode, result.data)
         pendingFileCallback?.onReceiveValue(uris)
         pendingFileCallback = null
+    }
+
+    val saveDocumentLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        val pending = pendingDownload
+        pendingDownload = null
+        if (pending == null) return@rememberLauncherForActivityResult
+        if (result.resultCode != Activity.RESULT_OK) {
+            Toast.makeText(context, "已取消保存", Toast.LENGTH_SHORT).show()
+            return@rememberLauncherForActivityResult
+        }
+        val uri = result.data?.data
+        if (uri == null) {
+            Toast.makeText(context, "保存失败: 未选择文件位置", Toast.LENGTH_SHORT).show()
+            return@rememberLauncherForActivityResult
+        }
+        try {
+            context.contentResolver.openOutputStream(uri)?.use { it.write(pending.bytes) }
+            Toast.makeText(context, "已保存: ${pending.filename}", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Toast.makeText(context, "保存失败: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
     }
 
     val webView = remember {
@@ -129,7 +153,20 @@ fun Html2ApkWebView(startUrl: String, modifier: Modifier = Modifier) {
             settings.allowUniversalAccessFromFileURLs = false
             setInitialScale(0)
 
-            addJavascriptInterface(DownloadBridge(context), "AndroidDownload")
+            addJavascriptInterface(
+                DownloadBridge(context) { filename, mimeType, bytes ->
+                    val safeName = filename.ifBlank { "download_${System.currentTimeMillis()}" }
+                    val pending = PendingDownload(safeName, mimeType, bytes)
+                    pendingDownload = pending
+                    val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                        addCategory(Intent.CATEGORY_OPENABLE)
+                        type = if (mimeType.isBlank()) "application/octet-stream" else mimeType
+                        putExtra(Intent.EXTRA_TITLE, safeName)
+                    }
+                    saveDocumentLauncher.launch(intent)
+                },
+                "AndroidDownload"
+            )
 
             webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView, url: String) {
@@ -229,7 +266,16 @@ private const val INJECT_DOWNLOAD_HOOK = """
 })();
 """
 
-private class DownloadBridge(private val context: android.content.Context) {
+private data class PendingDownload(
+    val filename: String,
+    val mimeType: String,
+    val bytes: ByteArray,
+)
+
+private class DownloadBridge(
+    private val context: android.content.Context,
+    private val onSaveRequested: (String, String, ByteArray) -> Unit,
+) {
     @JavascriptInterface
     fun saveBlob(filename: String, dataUrl: String?) {
         if (dataUrl.isNullOrBlank()) return
@@ -242,21 +288,8 @@ private class DownloadBridge(private val context: android.content.Context) {
             val mimeType = mimeMatch?.groupValues?.get(1) ?: "application/octet-stream"
             val bytes = android.util.Base64.decode(base64Data, android.util.Base64.DEFAULT)
 
-            val resolver = context.contentResolver
-            val values = ContentValues().apply {
-                put(MediaStore.Downloads.DISPLAY_NAME, filename)
-                put(MediaStore.Downloads.MIME_TYPE, mimeType)
-                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
-            }
-            val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-            if (uri != null) {
-                resolver.openOutputStream(uri)?.use { it.write(bytes) }
-                @Suppress("DEPRECATION")
-                val downloadDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-                val displayPath = "${downloadDir.absolutePath}/$filename"
-                Toast.makeText(context, "已保存到: $displayPath", Toast.LENGTH_SHORT).show()
-            } else {
-                Toast.makeText(context, "保存失败: 无法创建文件", Toast.LENGTH_SHORT).show()
+            Handler(Looper.getMainLooper()).post {
+                onSaveRequested(filename, mimeType, bytes)
             }
         } catch (e: Exception) {
             Toast.makeText(context, "保存失败: ${e.message}", Toast.LENGTH_SHORT).show()
