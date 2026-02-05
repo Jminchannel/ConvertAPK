@@ -781,9 +781,19 @@ def run_local_build(
             status_bar_style = str(env.get("STATUS_BAR_STYLE", "light")).strip().lower()
             light_status_bar_icons = "true" if status_bar_style == "dark" else "false"
             double_click_exit = "true" if str(env.get("DOUBLE_CLICK_EXIT", "true")).lower() == "true" else "false"
+            webview_ua = str(env.get("WEBVIEW_UA", "android")).strip().lower()
+            if webview_ua in {"pc", "desktop", "windows"}:
+                webview_ua = "pc"
+            else:
+                webview_ua = "android"
             gradle_text = re.sub(
                 r'buildConfigField\(\s*"String"\s*,\s*"WEBVIEW_URL"\s*,\s*"(?:\\.|[^"])*"\s*\)',
                 f'buildConfigField("String", "WEBVIEW_URL", "\\"{web_url}\\"")',
+                gradle_text,
+            )
+            gradle_text = re.sub(
+                r'buildConfigField\(\s*"String"\s*,\s*"WEBVIEW_UA"\s*,\s*"(?:\\.|[^"])*"\s*\)',
+                f'buildConfigField("String", "WEBVIEW_UA", "\\"{webview_ua}\\"")',
                 gradle_text,
             )
             gradle_text = re.sub(

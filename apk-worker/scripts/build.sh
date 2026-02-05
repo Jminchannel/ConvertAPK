@@ -213,6 +213,8 @@ const packageName = process.env.PACKAGE_NAME || 'com.example.app';
 const versionName = process.env.VERSION_NAME || '1.0.0';
 const versionCode = process.env.VERSION_CODE || '1';
 const webUrl = (process.env.WEB_URL || '').trim();
+const webViewUaRaw = String(process.env.WEBVIEW_UA || 'android').trim().toLowerCase();
+const webViewUa = (webViewUaRaw === 'pc' || webViewUaRaw === 'desktop' || webViewUaRaw === 'windows') ? 'pc' : 'android';
 const statusBarHidden = String(process.env.STATUS_BAR_HIDDEN || '').trim().toLowerCase() === 'true';
 const statusBarColorRaw = String(process.env.STATUS_BAR_COLOR || 'transparent').trim().toLowerCase();
 const statusBarStyle = String(process.env.STATUS_BAR_STYLE || 'light').trim().toLowerCase();
@@ -240,6 +242,7 @@ if (fs.existsSync(gradleFile)) {
   gtext = gtext.replace(/versionCode[[:space:]]*=[[:space:]]*\d+/, `versionCode = ${versionCode}`);
   gtext = gtext.replace(/versionName[[:space:]]*=[[:space:]]*"[^"]+"/, `versionName = "${versionName}"`);
   gtext = gtext.replace(/buildConfigField\(\s*"String"\s*,\s*"WEBVIEW_URL"[\s\S]*?\)/, `buildConfigField("String", "WEBVIEW_URL", "\\"${webUrl}\\"")`);
+  gtext = gtext.replace(/buildConfigField\(\s*"String"\s*,\s*"WEBVIEW_UA"[\s\S]*?\)/, `buildConfigField("String", "WEBVIEW_UA", "\\"${webViewUa}\\"")`);
   gtext = gtext.replace(/buildConfigField\(\s*"boolean"\s*,\s*"HIDE_STATUS_BAR"[\s\S]*?\)/, `buildConfigField("boolean", "HIDE_STATUS_BAR", "${statusBarHidden}")`);
   gtext = gtext.replace(/buildConfigField\(\s*"String"\s*,\s*"STATUS_BAR_BACKGROUND"[\s\S]*?\)/, `buildConfigField("String", "STATUS_BAR_BACKGROUND", "\\"${statusBarBackground}\\"")`);
   gtext = gtext.replace(/buildConfigField\(\s*"boolean"\s*,\s*"LIGHT_STATUS_BAR_ICONS"[\s\S]*?\)/, `buildConfigField("boolean", "LIGHT_STATUS_BAR_ICONS", "${lightStatusBarIcons}")`);

@@ -36,6 +36,8 @@ class AppConfig(BaseModel):
     status_bar_hidden: bool = False
     status_bar_style: str = "light"  # light | dark
     status_bar_color: str = "transparent"  # transparent | #FFFFFF
+    # WebView UA (web mode)
+    webview_user_agent: str = "android"  # android | pc
     # Frontend sends short names (e.g. INTERNET) or full names (android.permission.INTERNET)
     permissions: List[str] = []
 
@@ -118,6 +120,14 @@ class AppConfig(BaseModel):
             return raw.upper()
         # fallback: keep as-is (lets advanced users pass custom references)
         return raw
+
+    @field_validator("webview_user_agent")
+    @classmethod
+    def validate_webview_user_agent(cls, value: str) -> str:
+        raw = (value or "").strip().lower()
+        if raw in {"pc", "desktop", "windows"}:
+            return "pc"
+        return "android"
 
     @field_validator("output_format")
     @classmethod
@@ -211,4 +221,5 @@ class UpdateTaskRequest(BaseModel):
     status_bar_hidden: Optional[bool] = None
     status_bar_style: Optional[str] = None  # light | dark
     status_bar_color: Optional[str] = None  # transparent | #FFFFFF
+    webview_user_agent: Optional[str] = None  # android | pc (web mode)
     permissions: Optional[List[str]] = None

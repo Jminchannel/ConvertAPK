@@ -508,6 +508,16 @@
                 </div>
               </div>
 
+              <div class="grid grid-2" v-if="mode === 'web'">
+                <div class="form-group">
+                  <label class="form-label">{{ t('config.webviewUserAgent') }}</label>
+                  <select class="form-input form-select" v-model="config.webview_user_agent">
+                    <option value="android">{{ t('config.webviewUserAgentAndroid') }}</option>
+                    <option value="pc">{{ t('config.webviewUserAgentPc') }}</option>
+                  </select>
+                </div>
+              </div>
+
               <div class="form-group" style="margin-bottom: 12px;">
                 <label class="settings-checkbox">
                   <input type="checkbox" v-model="config.status_bar_hidden" />
@@ -1266,6 +1276,7 @@ const config = ref({
   status_bar_hidden: false,
   status_bar_style: 'light',
   status_bar_color: 'transparent',
+  webview_user_agent: 'android',
   permissions: ['INTERNET', 'ACCESS_NETWORK_STATE'],
   keystore_alias: '',
   keystore_password: '',
@@ -1825,6 +1836,7 @@ const useTaskConfig = (task) => {
     status_bar_hidden: task.config.status_bar_hidden ?? false,
     status_bar_style: task.config.status_bar_style ?? 'light',
     status_bar_color: task.config.status_bar_color ?? 'transparent',
+    webview_user_agent: task.config.webview_user_agent ?? 'android',
     permissions: normalizedPermissions.length ? normalizedPermissions : ['INTERNET', 'ACCESS_NETWORK_STATE'],
     keystore_alias: task.config.keystore_alias || '',
     keystore_password: task.config.keystore_password || '',
@@ -1918,6 +1930,7 @@ const createTask = async () => {
         status_bar_hidden: config.value.status_bar_hidden,
         status_bar_style: config.value.status_bar_style,
         status_bar_color: config.value.status_bar_color,
+        webview_user_agent: config.value.webview_user_agent,
         permissions: enablePermissions.value ? config.value.permissions : []
       }
       await api.updateTask(updatingTaskId.value, updateData)
@@ -1945,6 +1958,7 @@ const createTask = async () => {
           status_bar_hidden: config.value.status_bar_hidden,
           status_bar_style: config.value.status_bar_style,
           status_bar_color: config.value.status_bar_color,
+          webview_user_agent: config.value.webview_user_agent,
           permissions: enablePermissions.value ? config.value.permissions : [],
           keystore_alias: config.value.keystore_alias || null,
           keystore_password: config.value.keystore_password || null,
@@ -2012,6 +2026,7 @@ const resetForm = (options = {}) => {
     status_bar_hidden: false,
     status_bar_style: 'light',
     status_bar_color: 'transparent',
+    webview_user_agent: 'android',
     permissions: ['INTERNET', 'ACCESS_NETWORK_STATE'],
     keystore_alias: '',
     keystore_password: '',
