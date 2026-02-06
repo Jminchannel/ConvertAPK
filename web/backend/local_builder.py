@@ -318,6 +318,19 @@ def _resolve_templates_root() -> Path:
         return Path(sys._MEIPASS) / "templates"
     return Path(__file__).resolve().parents[2] / "templates"
 
+def _offlineize_html_assets(entry_html: Path, env: Dict[str, str], on_log=None) -> None:
+    if not entry_html.exists():
+        return
+    script_path = Path(__file__).resolve().parents[2] / "apk-worker" / "scripts" / "offlineize_html_assets.mjs"
+    if not script_path.exists():
+        _log(on_log, f"[HTML] offlineize script not found: {script_path}")
+        return
+    node_cmd = _resolve_node_tool(env, "node")
+    try:
+        _run_cmd([node_cmd, str(script_path), str(entry_html)], cwd=entry_html.parent, env=env, on_log=on_log)
+    except Exception as exc:
+        _log(on_log, f"[HTML] offlineize failed, keep original links: {exc}")
+
 def _normalize_screen_orientation(raw: str) -> str:
     value = (raw or "").strip().lower()
     if value == "portrait":
@@ -846,6 +859,36 @@ def run_local_build(
             shutil.rmtree(html_root)
         html_root.mkdir(parents=True, exist_ok=True)
         shutil.copy2(html_source, html_root / "index.html")
+
+        libs_zip = task_input_dir / "libs.zip"
+        if libs_zip.exists():
+            libs_root = html_root / "libs"
+            libs_root.mkdir(parents=True, exist_ok=True)
+            temp_libs = task_dir / "_tmp_html_libs"
+            if temp_libs.exists():
+                shutil.rmtree(temp_libs)
+            temp_libs.mkdir(parents=True, exist_ok=True)
+            with zipfile.ZipFile(libs_zip, "r") as zf:
+                zf.extractall(temp_libs)
+            top_dirs = [d for d in temp_libs.iterdir() if d.is_dir()]
+            top_files = [f for f in temp_libs.iterdir() if f.is_file()]
+            if len(top_dirs) == 1 and len(top_files) == 0:
+                for item in top_dirs[0].iterdir():
+                    target = libs_root / item.name
+                    if item.is_dir():
+                        shutil.copytree(item, target, dirs_exist_ok=True)
+                    else:
+                        shutil.copy2(item, target)
+            else:
+                for item in temp_libs.iterdir():
+                    target = libs_root / item.name
+                    if item.is_dir():
+                        shutil.copytree(item, target, dirs_exist_ok=True)
+                    else:
+                        shutil.copy2(item, target)
+            shutil.rmtree(temp_libs, ignore_errors=True)
+
+        _offlineize_html_assets(html_root / "index.html", process_env, on_log=on_log)
 
         strings_file = project_root / "app" / "src" / "main" / "res" / "values" / "strings.xml"
         if strings_file.exists():

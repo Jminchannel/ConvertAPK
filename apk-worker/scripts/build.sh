@@ -306,6 +306,18 @@ elif [ "$TASK_MODE" = "html" ]; then
         rm -rf "$TMP_LIBS_DIR"
     fi
 
+    OFFLINEIZE_SCRIPT="/workspace/scripts/offlineize_html_assets.mjs"
+    if [ -f "$OFFLINEIZE_SCRIPT" ]; then
+        log_info "Step 1.5: offlineize remote assets..."
+        if node "$OFFLINEIZE_SCRIPT" "$HTML_ROOT/index.html"; then
+            log_info "Offlineize complete"
+        else
+            log_warning "Offlineize failed; keep original remote URLs"
+        fi
+    else
+        log_warning "Offlineize script not found: $OFFLINEIZE_SCRIPT"
+    fi
+
     PROJECT_ROOT="$PROJECT_ROOT" node << 'NODE'
 const fs = require('fs');
 const path = require('path');
