@@ -2,11 +2,17 @@ package osa.cosa.html2apk
 
 import android.app.Activity
 import android.content.ActivityNotFoundException
+import android.content.ContentValues
+import android.content.Context
 import android.content.Intent
+import android.content.pm.ActivityInfo
+import android.graphics.Color
+import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.os.Handler
 import android.os.Looper
-import android.graphics.Color
+import android.provider.MediaStore
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -17,18 +23,15 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
-import android.content.pm.ActivityInfo
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.systemBarsPadding
-import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowInsetsControllerCompat
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -38,7 +41,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import osa.cosa.html2apk.ui.theme.HTML2APKTheme
 
 private const val START_URL = "file:///android_asset/html2apkdemo/index.html"
@@ -157,15 +162,19 @@ fun Html2ApkWebView(startUrl: String, modifier: Modifier = Modifier) {
                 DownloadBridge(context) { filename, mimeType, bytes ->
                     val safeName = filename.ifBlank { "download_${System.currentTimeMillis()}" }
                     val pending = PendingDownload(safeName, mimeType, bytes)
-                    pendingDownload = pending
-                    val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
-                        addCategory(Intent.CATEGORY_OPENABLE)
-                        type = if (mimeType.isBlank()) "application/octet-stream" else mimeType
-                        putExtra(Intent.EXTRA_TITLE, safeName)
+                    if (AppConfig.useFilePickerForDownload) {
+                        pendingDownload = pending
+                        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                            addCategory(Intent.CATEGORY_OPENABLE)
+                            type = if (mimeType.isBlank()) "application/octet-stream" else mimeType
+                            putExtra(Intent.EXTRA_TITLE, safeName)
+                        }
+                        saveDocumentLauncher.launch(intent)
+                    } else {
+                        saveToDownloads(context, pending)
                     }
-                    saveDocumentLauncher.launch(intent)
                 },
-                "AndroidDownload"
+                "AndroidDownload",
             )
 
             webViewClient = object : WebViewClient() {
@@ -272,8 +281,40 @@ private data class PendingDownload(
     val bytes: ByteArray,
 )
 
+private fun saveToDownloads(context: Context, pending: PendingDownload) {
+    try {
+        val resolver = context.contentResolver
+        val mimeType = pending.mimeType.ifBlank { "application/octet-stream" }
+        val values = ContentValues().apply {
+            put(MediaStore.Downloads.DISPLAY_NAME, pending.filename)
+            put(MediaStore.Downloads.MIME_TYPE, mimeType)
+            put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                put(MediaStore.Downloads.IS_PENDING, 1)
+            }
+        }
+
+        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+            ?: throw IllegalStateException("无法创建下载条目")
+
+        resolver.openOutputStream(uri)?.use { it.write(pending.bytes) }
+            ?: throw IllegalStateException("无法打开输出流")
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val doneValues = ContentValues().apply {
+                put(MediaStore.Downloads.IS_PENDING, 0)
+            }
+            resolver.update(uri, doneValues, null, null)
+        }
+
+        Toast.makeText(context, "已保存到下载目录: Downloads/${pending.filename}", Toast.LENGTH_LONG).show()
+    } catch (e: Exception) {
+        Toast.makeText(context, "保存失败: ${e.message}", Toast.LENGTH_LONG).show()
+    }
+}
+
 private class DownloadBridge(
-    private val context: android.content.Context,
+    private val context: Context,
     private val onSaveRequested: (String, String, ByteArray) -> Unit,
 ) {
     @JavascriptInterface

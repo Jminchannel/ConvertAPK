@@ -38,6 +38,8 @@ class AppConfig(BaseModel):
     status_bar_color: str = "transparent"  # transparent | #FFFFFF
     # WebView UA (web mode)
     webview_user_agent: str = "android"  # android | pc
+    # HTML mode download behavior: silent (save directly) | picker (system file manager)
+    download_mode: str = "picker"
     # Frontend sends short names (e.g. INTERNET) or full names (android.permission.INTERNET)
     permissions: List[str] = []
 
@@ -129,6 +131,16 @@ class AppConfig(BaseModel):
             return "pc"
         return "android"
 
+    @field_validator("download_mode")
+    @classmethod
+    def validate_download_mode(cls, value: str) -> str:
+        raw = (value or "").strip().lower()
+        if raw in {"silent", "picker"}:
+            return raw
+        if raw in {"explorer", "file_manager", "resource_manager"}:
+            return "picker"
+        return "picker"
+
     @field_validator("output_format")
     @classmethod
     def validate_output_format(cls, value: str) -> str:
@@ -218,4 +230,5 @@ class UpdateTaskRequest(BaseModel):
     status_bar_style: Optional[str] = None  # light | dark
     status_bar_color: Optional[str] = None  # transparent | #FFFFFF
     webview_user_agent: Optional[str] = None  # android | pc (web mode)
+    download_mode: Optional[str] = None  # silent | picker (html mode)
     permissions: Optional[List[str]] = None

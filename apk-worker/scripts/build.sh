@@ -325,6 +325,8 @@ const statusBarBackground =
 const doubleClickExit = String(process.env.DOUBLE_CLICK_EXIT || '').trim().toLowerCase() !== 'false';
 const orientationRaw = String(process.env.SCREEN_ORIENTATION || '').trim().toLowerCase();
 const screenOrientation = orientationRaw === 'portrait' || orientationRaw === 'landscape' ? orientationRaw : 'auto';
+const downloadModeRaw = String(process.env.DOWNLOAD_MODE || '').trim().toLowerCase();
+const downloadMode = downloadModeRaw === 'silent' ? 'silent' : 'picker';
 
 const stringsFile = path.join(projectRoot, 'app', 'src', 'main', 'res', 'values', 'strings.xml');
 if (fs.existsSync(stringsFile)) {
@@ -347,6 +349,7 @@ if (fs.existsSync(gradleFile)) {
   gtext = gtext.replace(/buildConfigField\(\s*"boolean"\s*,\s*"LIGHT_STATUS_BAR_ICONS"[\s\S]*?\)/, `buildConfigField("boolean", "LIGHT_STATUS_BAR_ICONS", "${lightStatusBarIcons}")`);
   gtext = gtext.replace(/buildConfigField\(\s*"boolean"\s*,\s*"DOUBLE_CLICK_EXIT"[\s\S]*?\)/, `buildConfigField("boolean", "DOUBLE_CLICK_EXIT", "${doubleClickExit}")`);
   gtext = gtext.replace(/buildConfigField\(\s*"String"\s*,\s*"SCREEN_ORIENTATION"[\s\S]*?\)/, `buildConfigField("String", "SCREEN_ORIENTATION", "\\"${screenOrientation}\\"")`);
+  gtext = gtext.replace(/buildConfigField\(\s*"String"\s*,\s*"DOWNLOAD_MODE"[\s\S]*?\)/, `buildConfigField("String", "DOWNLOAD_MODE", "\\"${downloadMode}\\"")`);
   fs.writeFileSync(gradleFile, gtext, 'utf8');
 }
 NODE

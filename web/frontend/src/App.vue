@@ -545,6 +545,16 @@
                 </div>
               </div>
 
+              <div class="grid grid-2" v-if="mode === 'html'">
+                <div class="form-group">
+                  <label class="form-label">{{ t('config.downloadMode') }}</label>
+                  <select class="form-input form-select" v-model="config.download_mode">
+                    <option value="silent">{{ t('config.downloadModeSilent') }}</option>
+                    <option value="picker">{{ t('config.downloadModePicker') }}</option>
+                  </select>
+                </div>
+              </div>
+
               <div class="grid grid-2" v-if="mode === 'web'">
                 <div class="form-group">
                   <label class="form-label">{{ t('config.webviewUserAgent') }}</label>
@@ -1426,6 +1436,7 @@ const config = ref({
   status_bar_style: 'light',
   status_bar_color: 'transparent',
   webview_user_agent: 'android',
+  download_mode: 'picker',
   permissions: ['INTERNET', 'ACCESS_NETWORK_STATE'],
   keystore_alias: '',
   keystore_password: '',
@@ -1459,6 +1470,7 @@ const applyQuickGenerateDefaults = () => {
     status_bar_hidden: true,
     status_bar_style: 'light',
     status_bar_color: 'transparent',
+    download_mode: 'picker',
     permissions: [...permissionsList],
     keystore_alias: 'key0',
     keystore_password: '123456',
@@ -2442,6 +2454,7 @@ const useTaskConfig = (task) => {
     status_bar_style: task.config.status_bar_style ?? 'light',
     status_bar_color: task.config.status_bar_color ?? 'transparent',
     webview_user_agent: task.config.webview_user_agent ?? 'android',
+    download_mode: task.config.download_mode ?? 'picker',
     permissions: normalizedPermissions.length ? normalizedPermissions : ['INTERNET', 'ACCESS_NETWORK_STATE'],
     keystore_alias: task.config.keystore_alias || '',
     keystore_password: task.config.keystore_password || '',
@@ -2571,6 +2584,7 @@ const createTask = async () => {
         status_bar_style: config.value.status_bar_style,
         status_bar_color: config.value.status_bar_color,
         webview_user_agent: config.value.webview_user_agent,
+        download_mode: config.value.download_mode,
         permissions: enablePermissions.value ? config.value.permissions : []
       }
       await api.updateTask(updatingTaskId.value, updateData)
@@ -2603,6 +2617,7 @@ const createTask = async () => {
           status_bar_style: config.value.status_bar_style,
           status_bar_color: config.value.status_bar_color,
           webview_user_agent: config.value.webview_user_agent,
+          download_mode: config.value.download_mode,
           permissions: enablePermissions.value ? config.value.permissions : [],
           keystore_alias: config.value.keystore_alias || null,
           keystore_password: config.value.keystore_password || null,
@@ -2675,6 +2690,7 @@ const resetForm = (options = {}) => {
     status_bar_style: 'light',
     status_bar_color: 'transparent',
     webview_user_agent: 'android',
+    download_mode: 'picker',
     permissions: ['INTERNET', 'ACCESS_NETWORK_STATE'],
     keystore_alias: '',
     keystore_password: '',

@@ -413,6 +413,12 @@ def _patch_android_build_config(build_gradle: Path, env: Dict[str, str], on_log=
     screen_orientation = str(env.get("SCREEN_ORIENTATION", "auto")).strip().lower()
     if screen_orientation not in {"portrait", "landscape", "auto"}:
         screen_orientation = "auto"
+    download_mode = str(env.get("DOWNLOAD_MODE", "picker")).strip().lower()
+    if download_mode not in {"silent", "picker"}:
+        if download_mode in {"explorer", "file_manager", "resource_manager"}:
+            download_mode = "picker"
+        else:
+            download_mode = "picker"
 
     def _insert_after_default_config(line: str) -> None:
         nonlocal text
@@ -440,6 +446,7 @@ def _patch_android_build_config(build_gradle: Path, env: Dict[str, str], on_log=
         _ensure_kts("LIGHT_STATUS_BAR_ICONS", light_status_bar_icons)
         _ensure_kts("DOUBLE_CLICK_EXIT", double_click_exit)
         _ensure_kts("SCREEN_ORIENTATION", f'\\"{screen_orientation}\\"')
+        _ensure_kts("DOWNLOAD_MODE", f'\\"{download_mode}\\"')
 
         if "buildFeatures" not in text:
             text = re.sub(
@@ -466,6 +473,7 @@ def _patch_android_build_config(build_gradle: Path, env: Dict[str, str], on_log=
         _ensure_groovy("LIGHT_STATUS_BAR_ICONS", light_status_bar_icons)
         _ensure_groovy("DOUBLE_CLICK_EXIT", double_click_exit)
         _ensure_groovy("SCREEN_ORIENTATION", f'\\"{screen_orientation}\\"')
+        _ensure_groovy("DOWNLOAD_MODE", f'\\"{download_mode}\\"')
 
         if "buildFeatures" not in text:
             text = re.sub(

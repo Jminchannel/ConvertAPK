@@ -279,6 +279,7 @@ class APKBuilder:
         status_bar_style: str = "light",
         status_bar_color: str = "transparent",
         webview_user_agent: Optional[str] = None,
+        download_mode: Optional[str] = None,
         permissions: Optional[list[str]] = None,
         keystore_password: Optional[str] = None,
         key_alias: Optional[str] = None,
@@ -345,6 +346,12 @@ class APKBuilder:
             webview_ua = "pc"
         else:
             webview_ua = "android"
+        download_mode_normalized = str(download_mode or "picker").strip().lower()
+        if download_mode_normalized not in {"silent", "picker"}:
+            if download_mode_normalized in {"explorer", "file_manager", "resource_manager"}:
+                download_mode_normalized = "picker"
+            else:
+                download_mode_normalized = "picker"
 
         npm_cache_dir = os.getenv('NPM_CONFIG_CACHE', '').strip()
         if not npm_cache_dir:
@@ -369,6 +376,7 @@ class APKBuilder:
             "STATUS_BAR_STYLE": status_bar_style or "light",
             "STATUS_BAR_COLOR": status_bar_color or "transparent",
             "WEBVIEW_UA": webview_ua,
+            "DOWNLOAD_MODE": download_mode_normalized,
             # Comma-separated permissions (prefer full names, e.g. android.permission.CAMERA)
             "PERMISSIONS": ",".join([str(p).strip() for p in (permissions or []) if str(p).strip()]),
             "TASK_ID": task_id,
@@ -510,6 +518,8 @@ class APKBuilder:
                 f"STATUS_BAR_STYLE={env.get('STATUS_BAR_STYLE', 'light')}",
                 "-e",
                 f"STATUS_BAR_COLOR={env.get('STATUS_BAR_COLOR', 'transparent')}",
+                "-e",
+                f"DOWNLOAD_MODE={env.get('DOWNLOAD_MODE', 'picker')}",
                 "-e",
                 f"DOUBLE_CLICK_EXIT={env.get('DOUBLE_CLICK_EXIT', 'false')}",
                 "-e",
@@ -1086,6 +1096,7 @@ class BuildTaskRunner:
                 status_bar_style=getattr(task.config, "status_bar_style", "light"),
                 status_bar_color=getattr(task.config, "status_bar_color", "transparent"),
                 webview_user_agent=getattr(task.config, "webview_user_agent", "android"),
+                download_mode=getattr(task.config, "download_mode", "picker"),
                 permissions=getattr(task.config, "permissions", None),
                 keystore_password=task.config.keystore_password,
                 key_alias=task.config.keystore_alias,
