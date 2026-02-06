@@ -151,6 +151,7 @@ log_info "========== 环境变量调试 =========="
 log_info "OUTPUT_FORMAT 原始值: '${OUTPUT_FORMAT:-未设置}'"
 log_info "APP_NAME: '${APP_NAME:-未设置}'"
 log_info "PACKAGE_NAME: '${PACKAGE_NAME:-未设置}'"
+log_info "DOWNLOAD_MODE: '${DOWNLOAD_MODE:-未设置}'"
 log_info "=================================="
 
 TASK_MODE=${TASK_MODE:-convert}
@@ -322,6 +323,8 @@ const statusBarBackground =
 const doubleClickExit = String(process.env.DOUBLE_CLICK_EXIT || '').trim().toLowerCase() !== 'false';
 const orientationRaw = String(process.env.SCREEN_ORIENTATION || '').trim().toLowerCase();
 const screenOrientation = orientationRaw === 'portrait' || orientationRaw === 'landscape' ? orientationRaw : 'auto';
+const downloadModeRaw = String(process.env.DOWNLOAD_MODE || '').trim().toLowerCase();
+const downloadMode = downloadModeRaw === 'silent' ? 'silent' : 'picker';
 
 const stringsFile = path.join(projectRoot, 'app', 'src', 'main', 'res', 'values', 'strings.xml');
 if (fs.existsSync(stringsFile)) {
@@ -336,14 +339,40 @@ if (!fs.existsSync(gradleFile)) {
 }
 if (fs.existsSync(gradleFile)) {
   let gtext = fs.readFileSync(gradleFile, 'utf8');
+  const ensureBuildConfigField = (source, typeName, keyName, line, anchors = []) => {
+    const selfPattern = new RegExp(`buildConfigField\\(\\s*"${typeName}"\\s*,\\s*"${keyName}"[\\s\\S]*?\\)`);
+    if (selfPattern.test(source)) {
+      return source.replace(selfPattern, line);
+    }
+    for (const anchor of anchors) {
+      const anchorPattern = new RegExp(`buildConfigField\\(\\s*"[^"]+"\\s*,\\s*"${anchor}"[\\s\\S]*?\\)`);
+      if (anchorPattern.test(source)) {
+        return source.replace(anchorPattern, (m) => `${m}\n        ${line}`);
+      }
+    }
+    return source.replace(/defaultConfig\s*\{/, (m) => `${m}\n        ${line}`);
+  };
   gtext = gtext.replace(/applicationId\s*=\s*"[^"]+"/, `applicationId = "${packageName}"`);
-  gtext = gtext.replace(/versionCode[[:space:]]*=[[:space:]]*\d+/, `versionCode = ${versionCode}`);
-  gtext = gtext.replace(/versionName[[:space:]]*=[[:space:]]*"[^"]+"/, `versionName = "${versionName}"`);
+  gtext = gtext.replace(/versionCode\s*=\s*\d+/, `versionCode = ${versionCode}`);
+  gtext = gtext.replace(/versionName\s*=\s*"[^"]+"/, `versionName = "${versionName}"`);
   gtext = gtext.replace(/buildConfigField\(\s*"boolean"\s*,\s*"HIDE_STATUS_BAR"[\s\S]*?\)/, `buildConfigField("boolean", "HIDE_STATUS_BAR", "${statusBarHidden}")`);
   gtext = gtext.replace(/buildConfigField\(\s*"String"\s*,\s*"STATUS_BAR_BACKGROUND"[\s\S]*?\)/, `buildConfigField("String", "STATUS_BAR_BACKGROUND", "\\"${statusBarBackground}\\"")`);
   gtext = gtext.replace(/buildConfigField\(\s*"boolean"\s*,\s*"LIGHT_STATUS_BAR_ICONS"[\s\S]*?\)/, `buildConfigField("boolean", "LIGHT_STATUS_BAR_ICONS", "${lightStatusBarIcons}")`);
   gtext = gtext.replace(/buildConfigField\(\s*"boolean"\s*,\s*"DOUBLE_CLICK_EXIT"[\s\S]*?\)/, `buildConfigField("boolean", "DOUBLE_CLICK_EXIT", "${doubleClickExit}")`);
-  gtext = gtext.replace(/buildConfigField\(\s*"String"\s*,\s*"SCREEN_ORIENTATION"[\s\S]*?\)/, `buildConfigField("String", "SCREEN_ORIENTATION", "\\"${screenOrientation}\\"")`);
+  gtext = ensureBuildConfigField(
+    gtext,
+    "String",
+    "SCREEN_ORIENTATION",
+    `buildConfigField("String", "SCREEN_ORIENTATION", "\\"${screenOrientation}\\"")`,
+    ["DOUBLE_CLICK_EXIT", "LIGHT_STATUS_BAR_ICONS", "STATUS_BAR_BACKGROUND"]
+  );
+  gtext = ensureBuildConfigField(
+    gtext,
+    "String",
+    "DOWNLOAD_MODE",
+    `buildConfigField("String", "DOWNLOAD_MODE", "\\"${downloadMode}\\"")`,
+    ["SCREEN_ORIENTATION", "DOUBLE_CLICK_EXIT", "LIGHT_STATUS_BAR_ICONS"]
+  );
   fs.writeFileSync(gradleFile, gtext, 'utf8');
 }
 NODE

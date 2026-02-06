@@ -259,7 +259,11 @@ private const val INJECT_DOWNLOAD_HOOK = """
     try {
       const href = this.href || '';
       const filename = this.download || ('download_' + Date.now());
-      if (href.startsWith('blob:') && window.AndroidDownload && window.AndroidDownload.saveBlob) {
+      if ((href.startsWith('blob:') || href.startsWith('data:')) && window.AndroidDownload && window.AndroidDownload.saveBlob) {
+        if (href.startsWith('data:')) {
+          window.AndroidDownload.saveBlob(filename, href);
+          return;
+        }
         fetch(href).then(r => r.blob()).then(b => {
           const reader = new FileReader();
           reader.onloadend = () => {
