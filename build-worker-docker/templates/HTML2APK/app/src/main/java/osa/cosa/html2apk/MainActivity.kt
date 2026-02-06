@@ -162,7 +162,7 @@ fun Html2ApkWebView(startUrl: String, modifier: Modifier = Modifier) {
                 DownloadBridge(context) { filename, mimeType, bytes ->
                     val safeName = filename.ifBlank { "download_${System.currentTimeMillis()}" }
                     val pending = PendingDownload(safeName, mimeType, bytes)
-                    if (AppConfig.useFilePickerForDownload) {
+                    if (shouldUseFilePickerForDownload()) {
                         pendingDownload = pending
                         val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
                             addCategory(Intent.CATEGORY_OPENABLE)
@@ -280,6 +280,16 @@ private data class PendingDownload(
     val mimeType: String,
     val bytes: ByteArray,
 )
+
+private fun shouldUseFilePickerForDownload(): Boolean {
+    // Compatible with old templates that don't have AppConfig.useFilePickerForDownload
+    // or BuildConfig.DOWNLOAD_MODE.
+    val mode = runCatching {
+        val field = BuildConfig::class.java.getField("DOWNLOAD_MODE")
+        (field.get(null) as? String).orEmpty().trim().lowercase()
+    }.getOrElse { "" }
+    return mode != "silent"
+}
 
 private fun saveToDownloads(context: Context, pending: PendingDownload) {
     try {
