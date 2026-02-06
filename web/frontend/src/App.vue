@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="app" :class="{ 'light-theme': currentTheme === 'light' }">
     <!-- Header -->
     <header class="header">
@@ -55,9 +55,9 @@
           <div class="window-controls no-drag" v-if="windowControlsAvailable">
             <button class="window-btn" @click="minimizeWindow" aria-label="Minimize">-</button>
             <button class="window-btn window-maximize" @click="toggleMaximizeWindow" aria-label="Maximize">
-              {{ isMaximized ? '🗖' : '🗗' }}
+              {{ isMaximized ? '馃棖' : '馃棗' }}
             </button>
-            <button class="window-btn window-close" @click="closeWindow" aria-label="Close">✕</button>
+            <button class="window-btn window-close" @click="closeWindow" aria-label="Close">鉁?/button>
           </div>
         </div>
       </div>
@@ -68,7 +68,7 @@
       <div class="container">
         <div v-if="activeAnnouncement" class="card no-drag" style="margin-bottom: 16px;">
           <div class="card-header">
-            <div class="card-icon">📢</div>
+            <div class="card-icon">馃摙</div>
             <div>
               <div class="card-title">{{ t('announcement.title') }}</div>
               <div class="card-subtitle">{{ activeAnnouncement.title }} - {{ activeAnnouncement.body }}</div>
@@ -82,15 +82,15 @@
         <!-- Mode Tabs -->
         <div class="mode-tabs">
           <button class="mode-tab" :class="{ active: mode === 'convert' }" @click="handleModeChange('convert')">
-            <span class="mode-icon">📦</span>
+            <span class="mode-icon">馃摝</span>
             {{ t('mode.apk') }}
           </button>
           <button class="mode-tab" :class="{ active: mode === 'web' }" @click="handleModeChange('web')">
-            <span class="mode-icon">🌐</span>
+            <span class="mode-icon">馃寪</span>
             {{ t('mode.web') }}
           </button>
           <button class="mode-tab" :class="{ active: mode === 'html' }" @click="handleModeChange('html')">
-            <span class="mode-icon">📄</span>
+            <span class="mode-icon">馃搫</span>
             {{ t('mode.html') }}
           </button>
         </div>
@@ -98,17 +98,17 @@
         <!-- Steps -->
         <div class="steps">
           <div class="step" :class="{ active: currentStep === 1, completed: currentStep > 1 }">
-            <div class="step-number">{{ currentStep > 1 ? '✓' : '1' }}</div>
+            <div class="step-number">{{ currentStep > 1 ? '鉁? : '1' }}</div>
             <div class="step-text">
               {{ mode === 'web' ? t('web.url') : (mode === 'html' ? t('html.upload') : t('steps.upload')) }}
             </div>
           </div>
           <div class="step" :class="{ active: currentStep === 2, completed: currentStep > 2 }">
-            <div class="step-number">{{ currentStep > 2 ? '✓' : '2' }}</div>
+            <div class="step-number">{{ currentStep > 2 ? '鉁? : '2' }}</div>
             <div class="step-text">{{ t('steps.configure') }}</div>
           </div>
           <div class="step" :class="{ active: currentStep === 3, completed: currentStep > 3 }">
-            <div class="step-number">{{ currentStep > 3 ? '✓' : '3' }}</div>
+            <div class="step-number">{{ currentStep > 3 ? '鉁? : '3' }}</div>
             <div class="step-text">{{ t('steps.build') }}</div>
           </div>
         </div>
@@ -119,7 +119,7 @@
             <!-- Guide (convert only) -->
             <div class="card" v-if="mode === 'convert'">
               <div class="card-header">
-                <div class="card-icon">💡</div>
+                <div class="card-icon">馃挕</div>
                 <div>
                   <div class="card-title">{{ t('guide.title') }}</div>
                   <div class="card-subtitle">{{ t('guide.subtitle') }}</div>
@@ -130,7 +130,7 @@
                   class="btn btn-primary btn-sm"
                   style="margin-left: auto; text-decoration: none;"
                 >
-                  {{ t('guide.openAiStudio') }} ↗
+                  {{ t('guide.openAiStudio') }} 鈫?
                 </a>
               </div>
               <div class="guide-steps">
@@ -157,7 +157,7 @@
             <!-- Upload (convert only) -->
             <div class="card" v-if="mode === 'convert'" ref="convertUploadSection">
               <div class="card-header">
-                <div class="card-icon">📦</div>
+                <div class="card-icon">馃摝</div>
                 <div>
                   <div class="card-title">{{ t('upload.title') }}</div>
                   <div class="card-subtitle">{{ t('upload.subtitle') }}</div>
@@ -180,12 +180,12 @@
                 />
 
                 <template v-if="!uploadedFile">
-                  <div class="upload-icon">📁</div>
+                  <div class="upload-icon">馃搧</div>
                   <div class="upload-text">{{ t('upload.dragDrop') }}</div>
                   <div class="upload-hint">{{ t('upload.hint') }}</div>
                 </template>
                 <template v-else>
-                  <div class="upload-icon">✅</div>
+                  <div class="upload-icon">鉁?/div>
                   <div class="upload-text">{{ t('upload.ready') }}</div>
                   <div class="upload-file-info">
                     <span class="upload-file-name">{{ uploadedFile.original_name }}</span>
@@ -201,11 +201,19 @@
 
             <!-- HTML Upload (html only) -->
             <div class="card" v-if="mode === 'html'" ref="htmlUploadSection">
-              <div class="card-header">
-                <div class="card-icon">📄</div>
-                <div>
-                  <div class="card-title">{{ t('html.title') }}</div>
-                  <div class="card-subtitle">{{ t('html.subtitle') }}</div>
+              <div class="card-header html-upload-header">
+                <div class="html-header-main">
+                  <div class="card-icon">馃搫</div>
+                  <div>
+                    <div class="card-title">{{ t('html.title') }}</div>
+                    <div class="card-subtitle">{{ t('html.subtitle') }}</div>
+                  </div>
+                </div>
+                <div class="html-header-actions">
+                  <label class="html-localize-toggle" :title="t('html.localizeHint')">
+                    <input type="checkbox" v-model="config.html_localize_resources" />
+                    {{ t('html.localizeToggle') }}
+                  </label>
                 </div>
               </div>
 
@@ -243,12 +251,12 @@
                   />
 
                   <template v-if="!uploadedHtmlFile">
-                    <div class="upload-icon">📄</div>
+                    <div class="upload-icon">馃搫</div>
                     <div class="upload-text">{{ t('html.dragDrop') }}</div>
                     <div class="upload-hint">{{ t('html.hint') }}</div>
                   </template>
                   <template v-else>
-                    <div class="upload-icon">✅</div>
+                    <div class="upload-icon">鉁?/div>
                     <div class="upload-text">{{ t('html.ready') }}</div>
                     <div class="upload-file-info">
                       <span class="upload-file-name">{{ uploadedHtmlFile.original_name }}</span>
@@ -321,7 +329,7 @@
             <!-- Web URL (web only) -->
             <div class="card" v-if="mode === 'web'" ref="webUrlSection">
               <div class="card-header">
-                <div class="card-icon">🌐</div>
+                <div class="card-icon">馃寪</div>
                 <div>
                   <div class="card-title">{{ t('web.url') }}</div>
                   <div class="card-subtitle">{{ t('web.urlHint') }}</div>
@@ -348,7 +356,7 @@
 
               <div v-if="enableAds" class="ad-config-panel">
                 <div class="settings-section-title" style="border: none; padding: 0;">
-                  <span class="section-title-icon">📺</span>
+                  <span class="section-title-icon">馃摵</span>
                   {{ t('web.adConfig') }}
                 </div>
 
@@ -383,7 +391,7 @@
             <!-- App config -->
             <div class="card">
               <div class="card-header">
-                <div class="card-icon">⚙️</div>
+                <div class="card-icon">鈿欙笍</div>
                 <div>
                   <div class="card-title">{{ updatingTaskId ? t('config.updateTitle') : t('config.title') }}</div>
                   <div class="card-subtitle">
@@ -427,7 +435,7 @@
                     @click="resetForm"
                     :title="t('config.cancelUpdate')"
                   >
-                  ✕ {{ t('config.cancelUpdate') }}
+                  鉁?{{ t('config.cancelUpdate') }}
                 </button>
                 </div>
               </div>
@@ -453,7 +461,7 @@
                     />
                     <img v-if="appIcon" :src="appIcon" alt="App Icon" />
                 <div v-else class="icon-placeholder">
-                      <span class="icon-placeholder-icon">🖼️</span>
+                      <span class="icon-placeholder-icon">馃柤锔?/span>
                       <span class="icon-placeholder-text">{{ t('icon.uploadHint') }}</span>
                     </div>
                   </div>
@@ -522,7 +530,7 @@
 
               <!-- APK style -->
               <div class="card-header" style="margin-bottom: 16px; padding: 0;">
-                <div class="card-icon" style="width: 36px; height: 36px; font-size: 16px;">🎨</div>
+                <div class="card-icon" style="width: 36px; height: 36px; font-size: 16px;">馃帹</div>
                 <div>
                   <div class="card-title" style="font-size: 15px;">{{ t('config.styleTitle') }}</div>
                 </div>
@@ -582,7 +590,7 @@
 
               <div v-if="enablePermissions" class="permissions-panel">
                 <div class="card-header" style="margin-bottom: 16px; padding: 0; border: none;">
-                  <div class="card-icon" style="width: 36px; height: 36px; font-size: 16px;">🛡️</div>
+                  <div class="card-icon" style="width: 36px; height: 36px; font-size: 16px;">馃洝锔?/div>
                   <div>
                     <div class="card-title" style="font-size: 15px;">{{ t('config.permissionsTitle') }}</div>
                     <div class="card-subtitle" style="font-size: 12px;">{{ t('config.permissionsHint') }}</div>
@@ -598,7 +606,7 @@
                   >
                     <input type="checkbox" :value="perm" v-model="config.permissions" style="display: none;" />
                     <div class="perm-check">
-                      {{ config.permissions.includes(perm) ? '✓' : '' }}
+                      {{ config.permissions.includes(perm) ? '鉁? : '' }}
                     </div>
                     <div class="perm-info">
                       <div class="perm-name">{{ t('config.perm.' + perm) }}</div>
@@ -612,7 +620,7 @@
 
               <!-- Signing -->
               <div class="card-header" style="margin-bottom: 16px; padding: 0;">
-                <div class="card-icon" style="width: 36px; height: 36px; font-size: 16px;">🔐</div>
+                <div class="card-icon" style="width: 36px; height: 36px; font-size: 16px;">馃攼</div>
                 <div>
                   <div class="card-title" style="font-size: 15px;">{{ t('config.signConfig') }}</div>
                   <div class="card-subtitle" style="font-size: 12px; color: var(--text-muted);">{{ t('config.signConfigHint') }}</div>
@@ -639,7 +647,7 @@
                     :disabled="isKeystoreUploaded || !!updatingTaskId"
                   />
                   <div class="keystore-upload-main">
-                    <div class="keystore-icon">🔑</div>
+                    <div class="keystore-icon">馃攽</div>
                     <div class="keystore-meta">
                       <div class="keystore-subtitle">.jks / .keystore</div>
                     </div>
@@ -723,7 +731,7 @@
           <!-- Right -->
           <div class="card">
             <div class="card-header">
-              <div class="card-icon">📋</div>
+              <div class="card-icon">馃搵</div>
               <div>
                 <div class="card-title">{{ t('tasks.title') }}</div>
                 <div class="card-subtitle">{{ t('tasks.subtitle') }}</div>
@@ -773,7 +781,7 @@
                     @click="startTask(task.id)"
                     :title="t('tasks.start')"
                   >
-                    ▶
+                    鈻?
                   </button>
                   <span v-if="task.status === 'processing'" class="task-progress-badge">
                     {{ isQueuedTask(task) ? t('tasks.waiting') : `${task.progress}%` }}
@@ -801,7 +809,7 @@
                     @click="useTaskConfig(task)"
                     :title="t('tasks.useConfig')"
                   >
-                    🔄
+                    馃攧
                   </button>
                   <button
                     v-if="task.status === 'failed'"
@@ -809,13 +817,13 @@
                     @click="retryTask(task.id)"
                     :title="t('tasks.retry')"
                   >
-                    🔄
+                    馃攧
                   </button>
                   <button
                     v-if="isCancelableTask(task) && task.status !== 'processing' && !isQueuedTask(task)"
                     class="btn btn-warning btn-sm"
                     @click="cancelTask(task.id)"
-                    title="取消"
+                    title="鍙栨秷"
                   >
                     X
                   </button>
@@ -825,7 +833,7 @@
                     @click="viewLogs(task.id)"
                     :title="t('tasks.viewLogs')"
                   >
-                    📋
+                    馃搵
                   </button>
                   <button
                     class="btn btn-ghost btn-sm"
@@ -833,21 +841,21 @@
                     :title="t('tasks.delete')"
                     style="color: var(--error-start);"
                   >
-                    ✕
+                    鉁?
                   </button>
                 </div>
               </div>
             </div>
 
             <div v-else class="empty-state">
-              <div class="empty-icon">📭</div>
+              <div class="empty-icon">馃摥</div>
               <div class="empty-text">{{ t('tasks.noTasks') }}</div>
               <div class="empty-hint">{{ t('tasks.createFirst') }}</div>
             </div>
 
             <div v-if="totalTaskPages > 1" class="pagination">
               <button class="btn btn-ghost btn-sm" :disabled="currentTaskPage <= 1" @click="goToTaskPage(currentTaskPage - 1)">
-                ‹
+                鈥?
               </button>
               <button
                 v-for="page in taskPageNumbers"
@@ -863,7 +871,7 @@
                 :disabled="currentTaskPage >= totalTaskPages"
                 @click="goToTaskPage(currentTaskPage + 1)"
               >
-                ›
+                鈥?
               </button>
             </div>
           </div>
@@ -876,8 +884,8 @@
       <div v-if="showCropper" class="cropper-overlay" @click.self="closeCropper">
         <div class="cropper-dialog">
           <div class="cropper-dialog-header">
-            <h3>✂️ {{ t('cropper.title') }}</h3>
-            <button class="cropper-close-btn" @click="closeCropper">✕</button>
+            <h3>鉁傦笍 {{ t('cropper.title') }}</h3>
+            <button class="cropper-close-btn" @click="closeCropper">鉁?/button>
           </div>
           <div class="cropper-dialog-body">
             <Cropper
@@ -907,8 +915,8 @@
       <div v-if="showLogs" class="logs-overlay" @click.self="closeLogs">
         <div class="logs-dialog">
           <div class="logs-dialog-header">
-            <h3>📋 {{ t('logs.title') }}</h3>
-            <button class="logs-close-btn" @click="closeLogs">✕</button>
+            <h3>馃搵 {{ t('logs.title') }}</h3>
+            <button class="logs-close-btn" @click="closeLogs">鉁?/button>
           </div>
           <div class="logs-dialog-body" ref="logsContainer">
             <div v-if="taskLogs.length === 0" class="logs-empty">{{ t('logs.noLogs') }}</div>
@@ -917,14 +925,14 @@
                 v-for="(log, index) in taskLogs"
                 :key="index"
                 class="log-line"
-                :class="{ 'log-error': log.includes('ERROR') || log.includes('错误'), 'log-success': log.includes('成功') || log.includes('完成') }"
+                :class="{ 'log-error': log.includes('ERROR') || log.includes('閿欒'), 'log-success': log.includes('鎴愬姛') || log.includes('瀹屾垚') }"
               >
                 {{ log }}
               </div>
             </div>
           </div>
           <div class="logs-dialog-footer">
-            <button class="btn btn-secondary btn-sm" @click="refreshLogs">↻</button>
+            <button class="btn btn-secondary btn-sm" @click="refreshLogs">鈫?/button>
             <span class="logs-count">{{ taskLogs.length }}</span>
           </div>
         </div>
@@ -984,8 +992,8 @@
       <div v-if="showDonation" class="donation-overlay" @click.self="closeDonation">
         <div class="donation-dialog">
           <div class="donation-dialog-header">
-            <h3>💛 {{ t('donation.title') }}</h3>
-            <button class="donation-close-btn" @click="closeDonation">✕</button>
+            <h3>馃挍 {{ t('donation.title') }}</h3>
+            <button class="donation-close-btn" @click="closeDonation">鉁?/button>
           </div>
           <div class="donation-dialog-body">
             <div class="donation-message">{{ t('donation.message') }}</div>
@@ -1025,7 +1033,7 @@
             
             <div class="settings-section">
               <div class="settings-section-title">
-                <span class="section-title-icon">💬</span>
+                <span class="section-title-icon">馃挰</span>
                 {{ t('settings.feedbackSection') }}
               </div>
               <div class="settings-hint">
@@ -1116,8 +1124,8 @@ import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap } 
 import { lintGutter, setDiagnostics } from '@codemirror/lint'
 import { searchKeymap, highlightSelectionMatches } from '@codemirror/search'
 import * as api from './api'
-const alipayQr = new URL('./pics/支付宝.png', import.meta.url).href
-const wechatQr = new URL('./pics/微信.png', import.meta.url).href
+const alipayQr = new URL('./pics/鏀粯瀹?png', import.meta.url).href
+const wechatQr = new URL('./pics/寰俊.png', import.meta.url).href
 import { messages, getSavedLanguage, saveLanguage, getSavedTheme, saveTheme, createI18n } from './i18n'
 
 // Theme / Language
@@ -1127,8 +1135,8 @@ const showLangMenu = ref(false)
 const openDownloadMenu = ref(null)
 const languages = [
   { code: 'en', label: 'English' },
-  { code: 'zh-CN', label: '简体中文' },
-  { code: 'zh-TW', label: '繁體中文' }
+  { code: 'zh-CN', label: '绠€浣撲腑鏂? },
+  { code: 'zh-TW', label: '绻侀珨涓枃' }
 ]
 const currentLangLabel = computed(() => {
   const lang = languages.find((l) => l.code === currentLang.value)
@@ -1214,7 +1222,7 @@ const handleModeChange = (value) => {
   scrollToProjectSection()
 }
 
-const jsTemplate = `// 1. 定义广告API (h5api) - 需添加到您的网页中
+const jsTemplate = `// 1. 瀹氫箟骞垮憡API (h5api) - 闇€娣诲姞鍒版偍鐨勭綉椤典腑
 window.h5api = {
   canPlayAd: function(callback) {
     if (callback) callback({ canPlayAd: true });
@@ -1222,7 +1230,7 @@ window.h5api = {
   },
   playAd: function(callback) {
     if (window.adIsExecuting) {
-      callback({ code: 10006, message: "广告加载中" });
+      callback({ code: 10006, message: "骞垮憡鍔犺浇涓? });
       return;
     }
     window.adIsExecuting = true;
@@ -1230,7 +1238,7 @@ window.h5api = {
       let tm = setTimeout(() => {
         window.playAdBack = () => {};
         window.adIsExecuting = false;
-        callback({ code: 10005, message: "超时" });
+        callback({ code: 10005, message: "瓒呮椂" });
       }, 10000);
       window.playAdBack = function(msg) {
         clearTimeout(tm);
@@ -1241,7 +1249,7 @@ window.h5api = {
       window.sendToApp("playAd", "");
     } else {
       window.adIsExecuting = false;
-      callback({ code: 10004, message: "无环境，不支持广告" });
+      callback({ code: 10004, message: "鏃犵幆澧冿紝涓嶆敮鎸佸箍鍛? });
     }
   }
 };
@@ -1252,7 +1260,7 @@ var app = {
         if (res.code === 10001) {
           videoAdCallback(1);
         } else {
-          console.log("广告未完成: " + res.message);
+          console.log("骞垮憡鏈畬鎴? " + res.message);
         }
       });
     }
@@ -1436,6 +1444,7 @@ const config = ref({
   status_bar_style: 'light',
   status_bar_color: 'transparent',
   webview_user_agent: 'android',
+  html_localize_resources: true,
   download_mode: 'picker',
   permissions: ['INTERNET', 'ACCESS_NETWORK_STATE'],
   keystore_alias: '',
@@ -1470,6 +1479,7 @@ const applyQuickGenerateDefaults = () => {
     status_bar_hidden: true,
     status_bar_style: 'light',
     status_bar_color: 'transparent',
+    html_localize_resources: true,
     download_mode: 'picker',
     permissions: [...permissionsList],
     keystore_alias: 'key0',
@@ -1785,15 +1795,15 @@ const getStatusText = (status) => {
   return map[status] || status
 }
 const getTaskIcon = (status) => {
-  const map = { pending: '⏳', processing: '⚙️', success: '✅', failed: '❌' }
-  return map[status] || '📦'
+  const map = { pending: '鈴?, processing: '鈿欙笍', success: '鉁?, failed: '鉂? }
+  return map[status] || '馃摝'
 }
 const getDownloadUrl = (taskId) => api.getDownloadUrl(taskId)
 const getKeystoreUrl = (taskId) => api.getKeystoreUrl(taskId)
 const isQueuedTask = (task) => {
   if (task?.status === 'pending') return true
   if (task?.status !== 'processing') return false
-  return String(task?.message || '').includes('排队')
+  return String(task?.message || '').includes('鎺掗槦')
 }
 const isCancelableTask = (task) => task?.status === 'pending' || task?.status === 'processing'
 
@@ -1807,7 +1817,7 @@ const handleDrop = async (event) => {
   isDragging.value = false
   const file = event.dataTransfer.files[0]
   if (file && file.name.endsWith('.zip')) await uploadFile(file)
-  else showToast('请上传 ZIP 文件', 'error')
+  else showToast('璇蜂笂浼?ZIP 鏂囦欢', 'error')
 }
 const uploadFile = async (file) => {
   try {
@@ -2319,7 +2329,7 @@ const handleIconSelect = async (event) => {
   if (!file) return
   iconError.value = ''
   if (file.type !== 'image/png') {
-    iconError.value = '请上传 PNG 格式的图片'
+    iconError.value = '璇蜂笂浼?PNG 鏍煎紡鐨勫浘鐗?
     return
   }
   cropperImageSrc.value = URL.createObjectURL(file)
@@ -2351,9 +2361,9 @@ const cropImage = async () => {
     try {
       const result = await api.uploadIcon(croppedFile)
       uploadedIcon.value = result
-      showToast('图标设置成功', 'success')
+      showToast('鍥炬爣璁剧疆鎴愬姛', 'success')
     } catch (error) {
-      showToast('图标上传失败: ' + (error.response?.data?.detail || error.message), 'error')
+      showToast('鍥炬爣涓婁紶澶辫触: ' + (error.response?.data?.detail || error.message), 'error')
     }
     closeCropper()
   }, 'image/png', 1.0)
@@ -2394,7 +2404,7 @@ const startTask = async (taskId) => {
     await refreshTasks()
     startPolling()
   } catch (error) {
-    showToast('启动失败: ' + (error.response?.data?.detail || error.message), 'error')
+    showToast('鍚姩澶辫触: ' + (error.response?.data?.detail || error.message), 'error')
   }
 }
 const retryTask = async (taskId) => {
@@ -2403,27 +2413,27 @@ const retryTask = async (taskId) => {
     showToast(t('toast.taskRetried'), 'success')
     await refreshTasks()
   } catch (error) {
-    showToast('重试失败: ' + (error.response?.data?.detail || error.message), 'error')
+    showToast('閲嶈瘯澶辫触: ' + (error.response?.data?.detail || error.message), 'error')
   }
 }
 const cancelTask = async (taskId) => {
-  if (!confirm('确定要取消这个任务吗？')) return
+  if (!confirm('纭畾瑕佸彇娑堣繖涓换鍔″悧锛?)) return
   try {
     await api.cancelTask(taskId)
-    showToast('任务已取消', 'success')
+    showToast('浠诲姟宸插彇娑?, 'success')
     await refreshTasks()
   } catch (error) {
-    showToast('取消失败: ' + (error.response?.data?.detail || error.message), 'error')
+    showToast('鍙栨秷澶辫触: ' + (error.response?.data?.detail || error.message), 'error')
   }
 }
 const deleteTask = async (taskId) => {
-  if (!confirm('确定要删除这个任务吗？')) return
+  if (!confirm('纭畾瑕佸垹闄よ繖涓换鍔″悧锛?)) return
   try {
     await api.deleteTask(taskId)
     showToast(t('toast.taskDeleted'), 'success')
     await refreshTasks()
   } catch (error) {
-    showToast('删除失败: ' + (error.response?.data?.detail || error.message), 'error')
+    showToast('鍒犻櫎澶辫触: ' + (error.response?.data?.detail || error.message), 'error')
   }
 }
 
@@ -2454,6 +2464,7 @@ const useTaskConfig = (task) => {
     status_bar_style: task.config.status_bar_style ?? 'light',
     status_bar_color: task.config.status_bar_color ?? 'transparent',
     webview_user_agent: task.config.webview_user_agent ?? 'android',
+    html_localize_resources: task.config.html_localize_resources ?? true,
     download_mode: task.config.download_mode ?? 'picker',
     permissions: normalizedPermissions.length ? normalizedPermissions : ['INTERNET', 'ACCESS_NETWORK_STATE'],
     keystore_alias: task.config.keystore_alias || '',
@@ -2491,7 +2502,7 @@ const useTaskConfig = (task) => {
   setHtmlEditorContent(defaultHtmlTemplate, false)
 
   if (mode.value === 'convert') {
-    uploadedFile.value = { filename: 'project.zip', reused: true, original_name: '使用上一版本的项目文件', size: 0 }
+    uploadedFile.value = { filename: 'project.zip', reused: true, original_name: '浣跨敤涓婁竴鐗堟湰鐨勯」鐩枃浠?, size: 0 }
     uploadProgress.value = 100
   } else if (mode.value === 'html') {
     uploadedHtmlFile.value = { filename: 'index.html', reused: true, original_name: t('html.reuseHtml'), size: 0 }
@@ -2584,12 +2595,13 @@ const createTask = async () => {
         status_bar_style: config.value.status_bar_style,
         status_bar_color: config.value.status_bar_color,
         webview_user_agent: config.value.webview_user_agent,
+        html_localize_resources: config.value.html_localize_resources,
         download_mode: config.value.download_mode,
         permissions: enablePermissions.value ? config.value.permissions : []
       }
       await api.updateTask(updatingTaskId.value, updateData)
       currentStep.value = 3
-      showToast(`"${config.value.app_name}" 已更新至 v${config.value.version_name}`, 'success')
+      showToast(`"${config.value.app_name}" 宸叉洿鏂拌嚦 v${config.value.version_name}`, 'success')
     } else {
       let htmlFilename = null
       if (mode.value === 'html') {
@@ -2617,6 +2629,7 @@ const createTask = async () => {
           status_bar_style: config.value.status_bar_style,
           status_bar_color: config.value.status_bar_color,
           webview_user_agent: config.value.webview_user_agent,
+          html_localize_resources: config.value.html_localize_resources,
           download_mode: config.value.download_mode,
           permissions: enablePermissions.value ? config.value.permissions : [],
           keystore_alias: config.value.keystore_alias || null,
@@ -2632,13 +2645,13 @@ const createTask = async () => {
         await refreshTasks()
         startPolling()
       } catch (error) {
-        showToast('启动失败: ' + (error.response?.data?.detail || error.message), 'error')
+        showToast('鍚姩澶辫触: ' + (error.response?.data?.detail || error.message), 'error')
       }
     }
     resetForm({ preserveQuickGenerate: isQuickGenerate })
     await refreshTasks()
   } catch (error) {
-    showToast('操作失败: ' + (error.response?.data?.detail || error.message), 'error')
+    showToast('鎿嶄綔澶辫触: ' + (error.response?.data?.detail || error.message), 'error')
   } finally {
     isCreating.value = false
   }
@@ -2690,6 +2703,7 @@ const resetForm = (options = {}) => {
     status_bar_style: 'light',
     status_bar_color: 'transparent',
     webview_user_agent: 'android',
+    html_localize_resources: true,
     download_mode: 'picker',
     permissions: ['INTERNET', 'ACCESS_NETWORK_STATE'],
     keystore_alias: '',
@@ -3403,3 +3417,4 @@ onUnmounted(() => {
   margin-bottom: 10px;
 }
 </style>
+

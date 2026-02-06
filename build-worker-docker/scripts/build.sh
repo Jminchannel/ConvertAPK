@@ -151,6 +151,7 @@ log_info "========== 环境变量调试 =========="
 log_info "OUTPUT_FORMAT 原始值: '${OUTPUT_FORMAT:-未设置}'"
 log_info "APP_NAME: '${APP_NAME:-未设置}'"
 log_info "PACKAGE_NAME: '${PACKAGE_NAME:-未设置}'"
+log_info "HTML_LOCALIZE_RESOURCES: '${HTML_LOCALIZE_RESOURCES:-未设置}'"
 log_info "DOWNLOAD_MODE: '${DOWNLOAD_MODE:-未设置}'"
 log_info "=================================="
 
@@ -303,16 +304,21 @@ elif [ "$TASK_MODE" = "html" ]; then
         rm -rf "$TMP_LIBS_DIR"
     fi
 
-    OFFLINEIZE_SCRIPT="/workspace/scripts/offlineize_html_assets.mjs"
-    if [ -f "$OFFLINEIZE_SCRIPT" ]; then
-        log_info "Step 1.5: offlineize remote assets..."
-        if node "$OFFLINEIZE_SCRIPT" "$HTML_ROOT/index.html"; then
-            log_info "Offlineize complete"
+    HTML_LOCALIZE_RESOURCES="$(printf '%s' "${HTML_LOCALIZE_RESOURCES:-true}" | tr '[:upper:]' '[:lower:]')"
+    if [ "$HTML_LOCALIZE_RESOURCES" != "false" ] && [ "$HTML_LOCALIZE_RESOURCES" != "0" ] && [ "$HTML_LOCALIZE_RESOURCES" != "no" ] && [ "$HTML_LOCALIZE_RESOURCES" != "off" ]; then
+        OFFLINEIZE_SCRIPT="/workspace/scripts/offlineize_html_assets.mjs"
+        if [ -f "$OFFLINEIZE_SCRIPT" ]; then
+            log_info "Step 1.5: offlineize remote assets..."
+            if node "$OFFLINEIZE_SCRIPT" "$HTML_ROOT/index.html"; then
+                log_info "Offlineize complete"
+            else
+                log_warning "Offlineize failed; keep original remote URLs"
+            fi
         else
-            log_warning "Offlineize failed; keep original remote URLs"
+            log_warning "Offlineize script not found: $OFFLINEIZE_SCRIPT"
         fi
     else
-        log_warning "Offlineize script not found: $OFFLINEIZE_SCRIPT"
+        log_info "Step 1.5: skip offlineize remote assets (HTML_LOCALIZE_RESOURCES=false)"
     fi
 
     PROJECT_ROOT="$PROJECT_ROOT" node << 'NODE'
