@@ -209,37 +209,110 @@
                 </div>
               </div>
 
-              <div
-                class="upload-zone"
-                :class="{ dragover: isHtmlDragging, 'has-file': uploadedHtmlFile }"
-                @dragover.prevent="isHtmlDragging = true"
-                @dragleave.prevent="isHtmlDragging = false"
-                @drop.prevent="handleHtmlDrop"
-              >
-                <input
-                  type="file"
-                  class="file-input-overlay"
-                  ref="htmlInput"
-                  @change="handleHtmlSelect"
-                  accept=".html,.htm"
-                />
+              <div class="html-mode-switch">
+                <button
+                  class="html-mode-btn"
+                  :class="{ active: htmlInputMode === 'file' }"
+                  @click="setHtmlInputMode('file')"
+                >
+                  {{ t('html.modeFile') }}
+                </button>
+                <button
+                  class="html-mode-btn"
+                  :class="{ active: htmlInputMode === 'edit' }"
+                  @click="setHtmlInputMode('edit')"
+                >
+                  {{ t('html.modeEdit') }}
+                </button>
+              </div>
 
-                <template v-if="!uploadedHtmlFile">
-                  <div class="upload-icon">📄</div>
-                  <div class="upload-text">{{ t('html.dragDrop') }}</div>
-                  <div class="upload-hint">{{ t('html.hint') }}</div>
-                </template>
-                <template v-else>
-                  <div class="upload-icon">✅</div>
-                  <div class="upload-text">{{ t('html.ready') }}</div>
-                  <div class="upload-file-info">
-                    <span class="upload-file-name">{{ uploadedHtmlFile.original_name }}</span>
-                    <span class="upload-file-size">{{ formatFileSize(uploadedHtmlFile.size) }}</span>
+              <div v-if="htmlInputMode === 'file'">
+                <div
+                  class="upload-zone"
+                  :class="{ dragover: isHtmlDragging, 'has-file': uploadedHtmlFile }"
+                  @dragover.prevent="isHtmlDragging = true"
+                  @dragleave.prevent="isHtmlDragging = false"
+                  @drop.prevent="handleHtmlDrop"
+                >
+                  <input
+                    type="file"
+                    class="file-input-overlay"
+                    ref="htmlInput"
+                    @change="handleHtmlSelect"
+                    accept=".html,.htm"
+                  />
+
+                  <template v-if="!uploadedHtmlFile">
+                    <div class="upload-icon">📄</div>
+                    <div class="upload-text">{{ t('html.dragDrop') }}</div>
+                    <div class="upload-hint">{{ t('html.hint') }}</div>
+                  </template>
+                  <template v-else>
+                    <div class="upload-icon">✅</div>
+                    <div class="upload-text">{{ t('html.ready') }}</div>
+                    <div class="upload-file-info">
+                      <span class="upload-file-name">{{ uploadedHtmlFile.original_name }}</span>
+                      <span class="upload-file-size">{{ formatFileSize(uploadedHtmlFile.size) }}</span>
+                    </div>
+                  </template>
+
+                  <div v-if="htmlUploadProgress > 0 && htmlUploadProgress < 100" class="progress-bar" style="margin-top: 16px;">
+                    <div class="progress-fill" :style="{ width: htmlUploadProgress + '%' }"></div>
                   </div>
-                </template>
+                </div>
+              </div>
 
-                <div v-if="htmlUploadProgress > 0 && htmlUploadProgress < 100" class="progress-bar" style="margin-top: 16px;">
+              <div v-else class="html-editor-panel">
+                <div class="html-editor-toolbar">
+                  <div class="html-editor-meta">
+                    <div class="html-editor-title">{{ t('html.editorTitle') }}</div>
+                  </div>
+                  <div class="html-editor-actions">
+                    <button class="btn btn-ghost btn-sm" @click="openHtmlEditorModal">
+                      {{ t('html.fullscreen') }}
+                    </button>
+                    <button class="btn btn-primary btn-sm" @click="saveEditorHtml" :disabled="!canSaveEditorHtml">
+                      {{ t('html.editorSave') }}
+                    </button>
+                  </div>
+                </div>
+
+                <div v-if="isHtmlUploading" class="progress-bar">
                   <div class="progress-fill" :style="{ width: htmlUploadProgress + '%' }"></div>
+                </div>
+
+                <div v-if="!showHtmlEditorModal" class="html-editor-shell">
+                  <div v-if="htmlEditorLoading" class="html-editor-loading">{{ t('html.editorLoading') }}</div>
+                  <div class="html-editor-container" ref="htmlEditorContainer"></div>
+                </div>
+                <div v-else class="html-editor-inline-placeholder">
+                  <div class="html-editor-inline-text">{{ t('html.editorModalOpen') }}</div>
+                  <button class="btn btn-secondary btn-sm" @click="closeHtmlEditorModal">
+                    {{ t('html.exitFullscreen') }}
+                  </button>
+                </div>
+
+                <div class="html-editor-status-row">
+                  <div class="html-editor-status" :class="{ dirty: htmlEditorDirty }">
+                    {{ htmlEditorDirty || !hasSavedHtmlContent ? t('html.editorUnsaved') : t('html.editorSaved') }}
+                  </div>
+                  <div class="html-editor-issues" :class="{ 'has-issues': htmlEditorMarkers.length }">
+                    {{ htmlEditorMarkers.length ? t('html.issues', { count: htmlEditorMarkers.length }) : t('html.noIssues') }}
+                  </div>
+                </div>
+
+                <div v-if="htmlEditorMarkers.length" class="html-error-list">
+                  <div
+                    v-for="(marker, index) in htmlEditorMarkers"
+                    :key="index"
+                    class="html-error-item"
+                    :class="isHtmlErrorMarker(marker) ? 'error' : 'warning'"
+                    @click="revealHtmlMarker(marker)"
+                  >
+                    <span class="html-error-badge">{{ htmlMarkerLabel(marker) }}</span>
+                    <span class="html-error-loc">L{{ marker.startLineNumber }}:{{ marker.startColumn }}</span>
+                    <span class="html-error-msg">{{ marker.message }}</span>
+                  </div>
                 </div>
               </div>
 
@@ -848,6 +921,54 @@
       </div>
     </Teleport>
 
+    <!-- HTML Editor dialog -->
+    <Teleport to="body">
+      <div v-if="showHtmlEditorModal" class="html-editor-overlay" @click.self="closeHtmlEditorModal">
+        <div class="html-editor-dialog">
+          <div class="html-editor-dialog-header">
+            <div class="html-editor-dialog-title">{{ t('html.editorTitle') }}</div>
+            <div class="html-editor-dialog-actions">
+              <button class="btn btn-primary btn-sm" @click="saveEditorHtml" :disabled="!canSaveEditorHtml">
+                {{ t('html.editorSave') }}
+              </button>
+              <button class="btn btn-secondary btn-sm" @click="closeHtmlEditorModal">
+                {{ t('html.exitFullscreen') }}
+              </button>
+            </div>
+          </div>
+          <div class="html-editor-dialog-body">
+            <div class="html-editor-shell">
+              <div v-if="htmlEditorLoading" class="html-editor-loading">{{ t('html.editorLoading') }}</div>
+              <div class="html-editor-container html-editor-modal" ref="htmlEditorModalContainer"></div>
+            </div>
+
+            <div class="html-editor-status-row">
+              <div class="html-editor-status" :class="{ dirty: htmlEditorDirty }">
+                {{ htmlEditorDirty || !hasSavedHtmlContent ? t('html.editorUnsaved') : t('html.editorSaved') }}
+              </div>
+              <div class="html-editor-issues" :class="{ 'has-issues': htmlEditorMarkers.length }">
+                {{ htmlEditorMarkers.length ? t('html.issues', { count: htmlEditorMarkers.length }) : t('html.noIssues') }}
+              </div>
+            </div>
+
+            <div v-if="htmlEditorMarkers.length" class="html-error-list">
+              <div
+                v-for="(marker, index) in htmlEditorMarkers"
+                :key="index"
+                class="html-error-item"
+                :class="isHtmlErrorMarker(marker) ? 'error' : 'warning'"
+                @click="revealHtmlMarker(marker)"
+              >
+                <span class="html-error-badge">{{ htmlMarkerLabel(marker) }}</span>
+                <span class="html-error-loc">L{{ marker.startLineNumber }}:{{ marker.startColumn }}</span>
+                <span class="html-error-msg">{{ marker.message }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
     <!-- Donation dialog -->
     <Teleport to="body">
       <div v-if="showDonation" class="donation-overlay" @click.self="closeDonation">
@@ -957,6 +1078,33 @@
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { Cropper } from 'vue-advanced-cropper'
 import 'vue-advanced-cropper/dist/style.css'
+import { EditorState, Compartment } from '@codemirror/state'
+import {
+  EditorView,
+  keymap,
+  lineNumbers,
+  highlightActiveLine,
+  highlightActiveLineGutter,
+  highlightSpecialChars,
+  drawSelection,
+  dropCursor,
+  rectangularSelection
+} from '@codemirror/view'
+import {
+  defaultHighlightStyle,
+  syntaxHighlighting,
+  indentOnInput,
+  bracketMatching,
+  foldGutter,
+  foldKeymap,
+  syntaxTree,
+  ensureSyntaxTree
+} from '@codemirror/language'
+import { html } from '@codemirror/lang-html'
+import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
+import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete'
+import { lintGutter, setDiagnostics } from '@codemirror/lint'
+import { searchKeymap, highlightSelectionMatches } from '@codemirror/search'
 import * as api from './api'
 const alipayQr = new URL('./pics/支付宝.png', import.meta.url).href
 const wechatQr = new URL('./pics/微信.png', import.meta.url).href
@@ -1159,11 +1307,41 @@ const normalizePermissionsForUi = (permissions) => {
 }
 
 // Task flow
+const defaultHtmlTemplate = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>My HTML App</title>
+    <style>
+      body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+      main { padding: 32px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Hello HTML</h1>
+      <p>Edit this HTML and save to build your APK.</p>
+    </main>
+  </body>
+</html>
+`
+
 const currentStep = ref(1)
 const isDragging = ref(false)
 const isHtmlDragging = ref(false)
 const fileInput = ref(null)
 const htmlInput = ref(null)
+const htmlInputMode = ref('file')
+const htmlEditorContainer = ref(null)
+const htmlEditorModalContainer = ref(null)
+const htmlEditorInstance = ref(null)
+const htmlEditorReady = ref(false)
+const htmlEditorContent = ref(defaultHtmlTemplate)
+const htmlEditorDirty = ref(false)
+const htmlEditorMarkers = ref([])
+const htmlSavedContent = ref('')
+const showHtmlEditorModal = ref(false)
 const iconInput = ref(null)
 const keystoreInput = ref(null)
 const uploadedKeystore = ref(null)
@@ -1173,6 +1351,17 @@ const uploadedHtmlFile = ref(null)
 const uploadProgress = ref(0)
 const htmlUploadProgress = ref(0)
 const isCreating = ref(false)
+const isHtmlUploading = computed(() => htmlUploadProgress.value > 0 && htmlUploadProgress.value < 100)
+const htmlEditorContentEmpty = computed(() => !htmlEditorContent.value.trim())
+const htmlErrorCount = computed(() => htmlEditorMarkers.value.filter((marker) => marker.severity === 'error').length)
+const hasSavedHtmlContent = computed(() => Boolean(htmlSavedContent.value))
+const canSaveEditorHtml = computed(() => !isHtmlUploading.value && !htmlEditorContentEmpty.value)
+const canUseSavedHtmlForBuild = computed(() => hasSavedHtmlContent.value && !htmlEditorDirty.value)
+
+const htmlEditorLoading = ref(false)
+const htmlEditorThemeCompartment = new Compartment()
+let isHtmlProgrammaticUpdate = false
+let htmlDiagnosticsHandle = null
 
 // Tasks & queue
 const tasks = ref([])
@@ -1436,7 +1625,11 @@ const canCreateTask = computed(() => {
     return common && uploadedFile.value
   }
   if (mode.value === 'html') {
-    return common && uploadedHtmlFile.value
+    const htmlReady =
+      htmlInputMode.value === 'edit'
+        ? canUseSavedHtmlForBuild.value
+        : Boolean(uploadedHtmlFile.value)
+    return common && htmlReady
   }
   const basicWeb = common && webUrl.value && !webUrlError.value
   if (enableAds.value) {
@@ -1448,6 +1641,47 @@ const canCreateTask = computed(() => {
 watch(() => mode.value, (value) => {
   if (value !== 'convert' && value !== 'web' && value !== 'html' && quickGenerate.value) {
     exitQuickGenerate()
+  }
+})
+
+watch([() => mode.value, () => htmlInputMode.value], async ([nextMode, nextInputMode]) => {
+  if (nextMode === 'html' && nextInputMode === 'edit') {
+    if (!htmlEditorInstance.value) {
+      htmlEditorLoading.value = true
+      try {
+        await nextTick()
+        await waitForFrame()
+        const targetContainer = showHtmlEditorModal.value ? htmlEditorModalContainer.value : htmlEditorContainer.value
+        mountHtmlEditor(targetContainer)
+      } finally {
+        htmlEditorLoading.value = false
+      }
+    }
+    htmlEditorInstance.value?.requestMeasure()
+  }
+})
+
+const applyHtmlEditorTheme = () => {
+  if (!htmlEditorInstance.value) return
+  htmlEditorInstance.value.dispatch({
+    effects: htmlEditorThemeCompartment.reconfigure(getHtmlEditorTheme())
+  })
+}
+
+watch(currentTheme, () => {
+  applyHtmlEditorTheme()
+})
+
+watch(showHtmlEditorModal, async (isOpen) => {
+  if (htmlInputMode.value !== 'edit') return
+  htmlEditorLoading.value = true
+  try {
+    await nextTick()
+    await waitForFrame()
+    const targetContainer = isOpen ? htmlEditorModalContainer.value : htmlEditorContainer.value
+    mountHtmlEditor(targetContainer)
+  } finally {
+    htmlEditorLoading.value = false
   }
 })
 
@@ -1577,13 +1811,21 @@ const uploadFile = async (file) => {
 
 const handleHtmlSelect = async (event) => {
   const file = event.target.files[0]
-  if (file) await uploadHtml(file)
+  if (!file) return
+  await syncHtmlEditorContent(file)
+  await uploadHtml(file)
+  htmlEditorDirty.value = false
 }
 const handleHtmlDrop = async (event) => {
   isHtmlDragging.value = false
   const file = event.dataTransfer.files[0]
-  if (file && /\.(html|htm)$/i.test(file.name)) await uploadHtml(file)
-  else showToast(t('html.htmlRequired'), 'error')
+  if (file && /\.(html|htm)$/i.test(file.name)) {
+    await syncHtmlEditorContent(file)
+    await uploadHtml(file)
+    htmlEditorDirty.value = false
+  } else {
+    showToast(t('html.htmlRequired'), 'error')
+  }
 }
 const uploadHtml = async (file) => {
   try {
@@ -1592,10 +1834,434 @@ const uploadHtml = async (file) => {
     uploadedHtmlFile.value = result
     currentStep.value = 2
     showToast(t('toast.uploadSuccess'), 'success')
+    return result
   } catch (error) {
     showToast(t('toast.uploadFailed') + ': ' + (error.response?.data?.detail || error.message), 'error')
+    return null
   }
 }
+
+const waitForFrame = () =>
+  new Promise((resolve) => {
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => resolve())
+    } else {
+      setTimeout(resolve, 0)
+    }
+  })
+
+const htmlEditorLightTheme = EditorView.theme(
+  {
+    '&': { backgroundColor: 'transparent', color: 'var(--text-main)' },
+    '.cm-content': {
+      fontFamily: 'JetBrains Mono, Fira Code, Menlo, Monaco, Consolas, "Courier New", monospace',
+      fontSize: '13px',
+      lineHeight: '1.6'
+    },
+    '.cm-gutters': { backgroundColor: 'transparent', border: 'none', color: 'var(--text-sub)' },
+    '.cm-activeLine': { backgroundColor: 'rgba(59, 130, 246, 0.08)' },
+    '.cm-activeLineGutter': { backgroundColor: 'rgba(59, 130, 246, 0.12)' }
+  },
+  { dark: false }
+)
+
+const htmlEditorDarkTheme = EditorView.theme(
+  {
+    '&': { backgroundColor: 'transparent', color: '#e2e8f0' },
+    '.cm-gutters': { backgroundColor: 'transparent', border: 'none', color: '#94a3b8' }
+  },
+  { dark: true }
+)
+
+const getHtmlEditorTheme = () => (currentTheme.value === 'dark' ? htmlEditorDarkTheme : htmlEditorLightTheme)
+
+const createHtmlEditorState = (content) => {
+  const updateListener = EditorView.updateListener.of((update) => {
+    if (update.docChanged && !isHtmlProgrammaticUpdate) {
+      htmlEditorContent.value = update.state.doc.toString()
+      htmlEditorDirty.value = true
+      scheduleHtmlDiagnostics(update.view)
+    }
+  })
+
+  return EditorState.create({
+    doc: content,
+    extensions: [
+      htmlEditorThemeCompartment.of(getHtmlEditorTheme()),
+      lineNumbers(),
+      highlightActiveLineGutter(),
+      highlightSpecialChars(),
+      history(),
+      foldGutter(),
+      drawSelection(),
+      dropCursor(),
+      rectangularSelection(),
+      EditorState.allowMultipleSelections.of(true),
+      indentOnInput(),
+      bracketMatching(),
+      closeBrackets(),
+      autocompletion(),
+      highlightActiveLine(),
+      highlightSelectionMatches(),
+      syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+      html({ autoCloseTags: true, matchClosingTags: true }),
+      lintGutter(),
+      keymap.of([
+        ...defaultKeymap,
+        ...historyKeymap,
+        ...foldKeymap,
+        ...completionKeymap,
+        ...closeBracketsKeymap,
+        ...searchKeymap,
+        indentWithTab
+      ]),
+      updateListener,
+      EditorView.lineWrapping
+    ]
+  })
+}
+
+const computeHtmlDiagnostics = (state) => {
+  const diagnostics = []
+  const seen = new Set()
+  const syntaxDiagnostics = []
+  const pushDiagnostic = (diagnostic) => {
+    const key = `${diagnostic.from}-${diagnostic.to}-${diagnostic.message}`
+    if (seen.has(key)) return
+    seen.add(key)
+    diagnostics.push(diagnostic)
+  }
+  const tree = ensureSyntaxTree(state, state.doc.length, 200)
+  if (tree) {
+    tree.iterate({
+      enter: (node) => {
+        if (!node.type.isError) return
+        const from = node.from
+        const to = Math.max(node.to, from + 1)
+        if (syntaxDiagnostics.length === 0) {
+          syntaxDiagnostics.push({
+            from,
+            to,
+            severity: 'error',
+            message: t('html.syntaxError')
+          })
+        }
+      }
+    })
+  }
+
+  const text = state.doc.toString()
+  const commentRanges = []
+  let commentStart = text.indexOf('<!--')
+  while (commentStart !== -1) {
+    const commentEnd = text.indexOf('-->', commentStart + 4)
+    if (commentEnd === -1) {
+      commentRanges.push([commentStart, text.length])
+      break
+    }
+    commentRanges.push([commentStart, commentEnd + 3])
+    commentStart = text.indexOf('<!--', commentEnd + 3)
+  }
+
+  const voidTags = new Set([
+    'area',
+    'base',
+    'br',
+    'col',
+    'embed',
+    'hr',
+    'img',
+    'input',
+    'link',
+    'meta',
+    'param',
+    'source',
+    'track',
+    'wbr'
+  ])
+
+  const tagRegex = /<\/?([a-zA-Z][\w:-]*)(\s[^<>]*?)?>/g
+  const stack = []
+  let commentIndex = 0
+  let match
+  while ((match = tagRegex.exec(text)) !== null) {
+    const fullTag = match[0]
+    const tagName = match[1]?.toLowerCase() || ''
+    const start = match.index
+    const end = start + fullTag.length
+    while (commentIndex < commentRanges.length && start >= commentRanges[commentIndex][1]) {
+      commentIndex += 1
+    }
+    if (commentIndex < commentRanges.length) {
+      const [cStart, cEnd] = commentRanges[commentIndex]
+      if (start >= cStart && start < cEnd) continue
+    }
+
+    const isClosing = fullTag.startsWith('</')
+    const isSelfClosing = /\/\s*>$/.test(fullTag) || voidTags.has(tagName)
+    if (!tagName) continue
+
+    if (!isClosing) {
+      if (!isSelfClosing) {
+        stack.push({ name: tagName, from: start, to: end })
+      }
+      continue
+    }
+
+    if (stack.length === 0) {
+      pushDiagnostic({
+        from: start,
+        to: end,
+        severity: 'error',
+        message: t('html.tagUnexpectedClose', { name: tagName })
+      })
+      continue
+    }
+
+    const last = stack[stack.length - 1]
+    if (last.name === tagName) {
+      stack.pop()
+      continue
+    }
+
+    const matchIndex = stack.map((item) => item.name).lastIndexOf(tagName)
+    if (matchIndex !== -1) {
+      for (let i = stack.length - 1; i > matchIndex; i -= 1) {
+        const item = stack[i]
+        pushDiagnostic({
+          from: item.from,
+          to: item.to,
+          severity: 'error',
+          message: t('html.tagMissingClose', { name: item.name })
+        })
+      }
+      stack.splice(matchIndex + 1)
+      stack.pop()
+      continue
+    }
+
+    pushDiagnostic({
+      from: start,
+      to: end,
+      severity: 'error',
+      message: t('html.tagUnexpectedClose', { name: tagName })
+    })
+  }
+
+  if (stack.length) {
+    stack.reverse().forEach((item) => {
+      pushDiagnostic({
+        from: item.from,
+        to: item.to,
+        severity: 'error',
+        message: t('html.tagMissingClose', { name: item.name })
+      })
+    })
+  }
+
+  if (!diagnostics.length && syntaxDiagnostics.length) {
+    pushDiagnostic(syntaxDiagnostics[0])
+  }
+
+  return diagnostics
+}
+
+const computeHtmlDiagnosticsForContent = (content) => {
+  const tempState = EditorState.create({
+    doc: content,
+    extensions: [html()]
+  })
+  return computeHtmlDiagnostics(tempState)
+}
+
+const refreshHtmlMarkers = (state, diagnostics) => {
+  htmlEditorMarkers.value = diagnostics
+    .map((diagnostic) => {
+      const line = state.doc.lineAt(diagnostic.from)
+      return {
+        from: diagnostic.from,
+        to: diagnostic.to,
+        severity: diagnostic.severity,
+        message: diagnostic.message,
+        startLineNumber: line.number,
+        startColumn: diagnostic.from - line.from + 1
+      }
+    })
+    .sort((a, b) => {
+      if (a.startLineNumber !== b.startLineNumber) return a.startLineNumber - b.startLineNumber
+      return a.startColumn - b.startColumn
+    })
+}
+
+const applyHtmlDiagnostics = (view) => {
+  if (!view || !htmlEditorInstance.value || htmlEditorInstance.value !== view) return
+  const diagnostics = computeHtmlDiagnostics(view.state)
+  view.dispatch(setDiagnostics(view.state, diagnostics))
+  refreshHtmlMarkers(view.state, diagnostics)
+}
+
+const scheduleHtmlDiagnostics = (view) => {
+  if (!view) return
+  if (htmlDiagnosticsHandle) {
+    if (typeof cancelAnimationFrame === 'function') {
+      cancelAnimationFrame(htmlDiagnosticsHandle)
+    } else {
+      clearTimeout(htmlDiagnosticsHandle)
+    }
+  }
+  if (typeof requestAnimationFrame === 'function') {
+    htmlDiagnosticsHandle = requestAnimationFrame(() => {
+      htmlDiagnosticsHandle = null
+      applyHtmlDiagnostics(view)
+    })
+  } else {
+    htmlDiagnosticsHandle = setTimeout(() => {
+      htmlDiagnosticsHandle = null
+      applyHtmlDiagnostics(view)
+    }, 0)
+  }
+}
+
+const setHtmlEditorContent = (content, markDirty = false) => {
+  isHtmlProgrammaticUpdate = true
+  htmlEditorContent.value = content
+  if (htmlEditorInstance.value) {
+    const view = htmlEditorInstance.value
+    view.dispatch({
+      changes: { from: 0, to: view.state.doc.length, insert: content }
+    })
+    scheduleHtmlDiagnostics(view)
+  }
+  htmlEditorDirty.value = markDirty
+  isHtmlProgrammaticUpdate = false
+}
+
+const destroyHtmlEditor = () => {
+  if (htmlEditorInstance.value) {
+    htmlEditorInstance.value.destroy()
+    htmlEditorInstance.value = null
+  }
+  htmlEditorReady.value = false
+}
+
+const mountHtmlEditor = (container) => {
+  if (!container) return
+  if (htmlEditorInstance.value) {
+    const currentParent = htmlEditorInstance.value.dom?.parentElement
+    if (currentParent === container) {
+      htmlEditorInstance.value.requestMeasure()
+      return
+    }
+    destroyHtmlEditor()
+  }
+  const content = htmlEditorContent.value || defaultHtmlTemplate
+  if (!htmlEditorContent.value) {
+    htmlEditorContent.value = content
+  }
+  const state = createHtmlEditorState(content)
+  htmlEditorInstance.value = new EditorView({
+    state,
+    parent: container
+  })
+  htmlEditorReady.value = true
+  scheduleHtmlDiagnostics(htmlEditorInstance.value)
+}
+
+const setHtmlInputMode = async (value) => {
+  htmlInputMode.value = value
+  if (value === 'edit') {
+    htmlEditorLoading.value = true
+    try {
+    await nextTick()
+    await waitForFrame()
+    const targetContainer = showHtmlEditorModal.value ? htmlEditorModalContainer.value : htmlEditorContainer.value
+    mountHtmlEditor(targetContainer)
+    } finally {
+      htmlEditorLoading.value = false
+    }
+  } else {
+    htmlEditorLoading.value = false
+  }
+}
+
+const syncHtmlEditorContent = async (file) => {
+  try {
+    const content = await file.text()
+    setHtmlEditorContent(content, false)
+  } catch {
+    // ignore
+  }
+}
+
+const openHtmlEditorModal = async () => {
+  showHtmlEditorModal.value = true
+  htmlEditorLoading.value = true
+  try {
+    await nextTick()
+    await waitForFrame()
+    mountHtmlEditor(htmlEditorModalContainer.value)
+  } finally {
+    htmlEditorLoading.value = false
+  }
+}
+
+const closeHtmlEditorModal = async () => {
+  showHtmlEditorModal.value = false
+  htmlEditorLoading.value = true
+  try {
+    await nextTick()
+    await waitForFrame()
+    if (htmlInputMode.value === 'edit') {
+      mountHtmlEditor(htmlEditorContainer.value)
+    } else {
+      destroyHtmlEditor()
+    }
+  } finally {
+    htmlEditorLoading.value = false
+  }
+}
+
+const saveEditorHtml = async () => {
+  if (htmlEditorContentEmpty.value) {
+    showToast(t('html.editorEmpty'), 'error')
+    return
+  }
+  let diagnostics = []
+  if (htmlEditorInstance.value) {
+    const view = htmlEditorInstance.value
+    diagnostics = computeHtmlDiagnostics(view.state)
+    refreshHtmlMarkers(view.state, diagnostics)
+    view.dispatch(setDiagnostics(view.state, diagnostics))
+  } else {
+    const tempState = EditorState.create({
+      doc: htmlEditorContent.value,
+      extensions: [html()]
+    })
+    diagnostics = computeHtmlDiagnostics(tempState)
+    refreshHtmlMarkers(tempState, diagnostics)
+  }
+  if (diagnostics.length) {
+    showToast(t('html.fixErrors', { count: diagnostics.length }), 'error')
+    return
+  }
+  htmlSavedContent.value = htmlEditorContent.value
+  htmlEditorDirty.value = false
+  if (currentStep.value < 2) currentStep.value = 2
+  showToast(t('html.editorSaved'), 'success')
+}
+
+const revealHtmlMarker = (marker) => {
+  if (!htmlEditorInstance.value) return
+  const view = htmlEditorInstance.value
+  view.dispatch({
+    selection: { anchor: marker.from },
+    scrollIntoView: true
+  })
+  view.focus()
+}
+
+const isHtmlErrorMarker = (marker) => marker.severity === 'error'
+const htmlMarkerLabel = (marker) => (isHtmlErrorMarker(marker) ? t('html.issueError') : t('html.issueWarning'))
 
 const triggerKeystoreInput = () => {
   if (isKeystoreUploaded.value || updatingTaskId.value) return
@@ -1803,6 +2469,13 @@ const useTaskConfig = (task) => {
   uploadProgress.value = 0
   uploadedHtmlFile.value = null
   htmlUploadProgress.value = 0
+  htmlInputMode.value = 'file'
+  htmlEditorLoading.value = false
+  htmlEditorDirty.value = false
+  htmlEditorMarkers.value = []
+  showHtmlEditorModal.value = false
+  htmlSavedContent.value = ''
+  setHtmlEditorContent(defaultHtmlTemplate, false)
 
   if (mode.value === 'convert') {
     uploadedFile.value = { filename: 'project.zip', reused: true, original_name: '使用上一版本的项目文件', size: 0 }
@@ -1812,6 +2485,37 @@ const useTaskConfig = (task) => {
     htmlUploadProgress.value = 100
   }
   currentStep.value = 1
+}
+
+const ensureHtmlFileForTask = async () => {
+  if (mode.value !== 'html') return null
+  if (htmlInputMode.value === 'file') {
+    if (!uploadedHtmlFile.value) {
+      showToast(t('html.htmlRequired'), 'error')
+      return null
+    }
+    return uploadedHtmlFile.value.filename
+  }
+
+  if (!hasSavedHtmlContent.value || htmlEditorDirty.value) {
+    showToast(t('html.saveBeforeBuild'), 'error')
+    return null
+  }
+
+  const diagnostics = computeHtmlDiagnosticsForContent(htmlSavedContent.value)
+  if (diagnostics.length) {
+    if (htmlEditorInstance.value) {
+      refreshHtmlMarkers(htmlEditorInstance.value.state, diagnostics)
+    }
+    showToast(t('html.fixErrors', { count: diagnostics.length }), 'error')
+    return null
+  }
+
+  const file = new File([htmlSavedContent.value], 'index.html', { type: 'text/html' })
+  const result = await uploadHtml(file)
+  if (!result) return null
+  uploadedHtmlFile.value = result
+  return result.filename
 }
 
 // Create/Update task
@@ -1850,6 +2554,10 @@ const createTask = async () => {
         showToast(t('toast.versionError'), 'error')
         return
       }
+      if (mode.value === 'html') {
+        const htmlFilename = await ensureHtmlFileForTask()
+        if (!htmlFilename) return
+      }
       const updateData = {
         filename: uploadedFile.value?.reused ? null : uploadedFile.value?.filename || null,
         html_filename: uploadedHtmlFile.value?.reused ? null : uploadedHtmlFile.value?.filename || null,
@@ -1869,13 +2577,18 @@ const createTask = async () => {
       currentStep.value = 3
       showToast(`"${config.value.app_name}" 已更新至 v${config.value.version_name}`, 'success')
     } else {
+      let htmlFilename = null
+      if (mode.value === 'html') {
+        htmlFilename = await ensureHtmlFileForTask()
+        if (!htmlFilename) return
+      }
       const taskData = {
         quick_generate: isQuickGenerate,
         mode: mode.value,
         web_url: mode.value === 'web' ? normalizedWebUrl : null,
         ad_config: mode.value === 'web' && enableAds.value ? adConfig.value : null,
         filename: mode.value === 'convert' ? uploadedFile.value.filename : null,
-        html_filename: mode.value === 'html' ? uploadedHtmlFile.value.filename : null,
+        html_filename: mode.value === 'html' ? htmlFilename : null,
         icon_filename: isQuickGenerate ? null : (uploadedIcon.value?.filename || null),
         keystore_filename: isQuickGenerate ? null : (uploadedKeystore.value?.filename || null),
         config: {
@@ -1926,6 +2639,13 @@ const resetForm = (options = {}) => {
   uploadProgress.value = 0
   uploadedHtmlFile.value = null
   htmlUploadProgress.value = 0
+  htmlInputMode.value = 'file'
+  htmlEditorLoading.value = false
+  htmlEditorDirty.value = false
+  htmlEditorMarkers.value = []
+  showHtmlEditorModal.value = false
+  htmlSavedContent.value = ''
+  setHtmlEditorContent(defaultHtmlTemplate, false)
   if (htmlInput.value) htmlInput.value.value = ''
   if (appIcon.value && !appIcon.value.startsWith('/api/')) URL.revokeObjectURL(appIcon.value)
   appIcon.value = null
@@ -2138,6 +2858,18 @@ onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside)
   if (appIcon.value && !appIcon.value.startsWith('/api/')) URL.revokeObjectURL(appIcon.value)
   if (cropperImageSrc.value) URL.revokeObjectURL(cropperImageSrc.value)
+  if (htmlDiagnosticsHandle) {
+    if (typeof cancelAnimationFrame === 'function') {
+      cancelAnimationFrame(htmlDiagnosticsHandle)
+    } else {
+      clearTimeout(htmlDiagnosticsHandle)
+    }
+    htmlDiagnosticsHandle = null
+  }
+  if (htmlEditorInstance.value) {
+    htmlEditorInstance.value.destroy()
+    htmlEditorInstance.value = null
+  }
 })
 </script>
 
