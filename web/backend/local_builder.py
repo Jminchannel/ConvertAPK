@@ -554,6 +554,11 @@ class MainActivity : BridgeActivity() {{
         )
     }}
 
+    private fun readStatusBarHeightPx(): Int {{
+        val resId = resources.getIdentifier("status_bar_height", "dimen", "android")
+        return if (resId > 0) resources.getDimensionPixelSize(resId) else 0
+    }}
+
     private fun applyWebViewInsets() {{
         val webView = bridge?.webView ?: return
         webView.clipToPadding = true
@@ -564,7 +569,8 @@ class MainActivity : BridgeActivity() {{
             val status = insets.getInsets(WindowInsetsCompat.Type.statusBars())
             val statusStable = insets.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.statusBars())
             val cutout = insets.getInsets(WindowInsetsCompat.Type.displayCutout())
-            val topSystemInset = maxOf(status.top, statusStable.top, cutout.top)
+            val fallbackStatusBarHeight = if (BuildConfig.HIDE_STATUS_BAR) readStatusBarHeightPx() else 0
+            val topSystemInset = maxOf(status.top, statusStable.top, cutout.top, fallbackStatusBarHeight)
             val shouldApplyTopInset = drawBehindStatusBar || BuildConfig.HIDE_STATUS_BAR
             val topInset = if (shouldApplyTopInset) topSystemInset else 0
             webView.setPadding(nav.left, topInset, nav.right, nav.bottom)
@@ -601,7 +607,9 @@ class MainActivity : BridgeActivity() {{
             window.clearFlags(WindowManager.LayoutParams.FLAG_FORCE_NOT_FULLSCREEN)
             @Suppress("DEPRECATION")
             window.decorView.systemUiVisibility =
-                View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                View.SYSTEM_UI_FLAG_FULLSCREEN or
+                View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+                View.SYSTEM_UI_FLAG_LAYOUT_STABLE
             controller.systemBarsBehavior =
                 WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             controller.hide(WindowInsetsCompat.Type.statusBars())
@@ -671,6 +679,11 @@ public class MainActivity extends BridgeActivity {{
         );
     }}
 
+    private int readStatusBarHeightPx() {{
+        int resId = getResources().getIdentifier("status_bar_height", "dimen", "android");
+        return resId > 0 ? getResources().getDimensionPixelSize(resId) : 0;
+    }}
+
     private void applyWebViewInsets() {{
         WebView webView = getBridge() != null ? getBridge().getWebView() : null;
         if (webView == null) {{
@@ -684,7 +697,8 @@ public class MainActivity extends BridgeActivity {{
             Insets status = insets.getInsets(WindowInsetsCompat.Type.statusBars());
             Insets statusStable = insets.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.statusBars());
             Insets cutout = insets.getInsets(WindowInsetsCompat.Type.displayCutout());
-            int topSystemInset = Math.max(Math.max(status.top, statusStable.top), cutout.top);
+            int fallbackStatusBarHeight = BuildConfig.HIDE_STATUS_BAR ? readStatusBarHeightPx() : 0;
+            int topSystemInset = Math.max(Math.max(status.top, statusStable.top), Math.max(cutout.top, fallbackStatusBarHeight));
             boolean shouldApplyTopInset = drawBehindStatusBar || BuildConfig.HIDE_STATUS_BAR;
             int topInset = shouldApplyTopInset ? topSystemInset : 0;
             webView.setPadding(nav.left, topInset, nav.right, nav.bottom);
@@ -720,7 +734,9 @@ public class MainActivity extends BridgeActivity {{
             getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
             getWindow().clearFlags(WindowManager.LayoutParams.FLAG_FORCE_NOT_FULLSCREEN);
             getWindow().getDecorView().setSystemUiVisibility(
-                View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                View.SYSTEM_UI_FLAG_FULLSCREEN |
+                View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN |
+                View.SYSTEM_UI_FLAG_LAYOUT_STABLE
             );
             controller.setSystemBarsBehavior(WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
             controller.hide(WindowInsetsCompat.Type.statusBars());

@@ -1348,7 +1348,11 @@ class MainActivity : BridgeActivity() {
             val status = insets.getInsets(WindowInsetsCompat.Type.statusBars())
             val statusStable = insets.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.statusBars())
             val cutout = insets.getInsets(WindowInsetsCompat.Type.displayCutout())
-            val topSystemInset = maxOf(status.top, statusStable.top, cutout.top)
+            val fallbackStatusBarHeight = if (BuildConfig.HIDE_STATUS_BAR) {
+                val resId = resources.getIdentifier("status_bar_height", "dimen", "android")
+                if (resId > 0) resources.getDimensionPixelSize(resId) else 0
+            } else 0
+            val topSystemInset = maxOf(status.top, statusStable.top, cutout.top, fallbackStatusBarHeight)
             val shouldApplyTopInset = drawBehindStatusBar || BuildConfig.HIDE_STATUS_BAR
             val topInset = if (shouldApplyTopInset) topSystemInset else 0
             webView.setPadding(nav.left, topInset, nav.right, nav.bottom)
@@ -1468,7 +1472,9 @@ class MainActivity : BridgeActivity() {
             window.clearFlags(WindowManager.LayoutParams.FLAG_FORCE_NOT_FULLSCREEN)
             @Suppress("DEPRECATION")
             window.decorView.systemUiVisibility =
-                View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                View.SYSTEM_UI_FLAG_FULLSCREEN or
+                View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+                View.SYSTEM_UI_FLAG_LAYOUT_STABLE
             controller.systemBarsBehavior =
                 WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             controller.hide(WindowInsetsCompat.Type.statusBars())
@@ -1618,7 +1624,12 @@ if (!isKotlin) {
     "                Insets status = insets.getInsets(WindowInsetsCompat.Type.statusBars());\n" +
     "                Insets statusStable = insets.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.statusBars());\n" +
     "                Insets cutout = insets.getInsets(WindowInsetsCompat.Type.displayCutout());\n" +
-    "                int topSystemInset = Math.max(Math.max(status.top, statusStable.top), cutout.top);\n" +
+    "                int fallbackStatusBarHeight = 0;\n" +
+    "                if (hideStatusBar) {\n" +
+    "                    int resId = getResources().getIdentifier(\"status_bar_height\", \"dimen\", \"android\");\n" +
+    "                    fallbackStatusBarHeight = resId > 0 ? getResources().getDimensionPixelSize(resId) : 0;\n" +
+    "                }\n" +
+    "                int topSystemInset = Math.max(Math.max(status.top, statusStable.top), Math.max(cutout.top, fallbackStatusBarHeight));\n" +
     "                boolean shouldApplyTopInset = drawBehindStatusBar || hideStatusBar;\n" +
     "                int topInset = shouldApplyTopInset ? topSystemInset : 0;\n" +
     "                webView.setPadding(nav.left, topInset, nav.right, nav.bottom);\n" +
