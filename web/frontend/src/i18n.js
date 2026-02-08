@@ -92,6 +92,10 @@ export const messages = {
       ready: 'HTML Ready',
       htmlRequired: 'Please upload an HTML file',
       reuseHtml: 'Use previous HTML file',
+      preview: 'Preview',
+      previewTitle: 'App Preview',
+      closePreview: 'Close',
+      previewUnavailable: 'No HTML content available for preview',
     },
     // Config
     config: {
@@ -466,6 +470,10 @@ export const messages = {
       ready: 'HTML 已就绪',
       htmlRequired: '请上传 HTML 文件',
       reuseHtml: '使用上一版本的 HTML 文件',
+      preview: '预览',
+      previewTitle: 'APP 预览',
+      closePreview: '关闭',
+      previewUnavailable: '暂无可预览的 HTML 内容',
     },
     // Config
     config: {
@@ -836,6 +844,10 @@ export const messages = {
       ready: 'HTML 已就緒',
       htmlRequired: '請上傳 HTML 檔案',
       reuseHtml: '使用上一版本的 HTML 檔案',
+      preview: '預覽',
+      previewTitle: 'APP 預覽',
+      closePreview: '關閉',
+      previewUnavailable: '暫無可預覽的 HTML 內容',
     },
     // Config
     config: {

@@ -279,6 +279,11 @@
                     <div class="progress-fill" :style="{ width: htmlUploadProgress + '%' }"></div>
                   </div>
                 </div>
+                <div v-if="uploadedHtmlFile" class="html-preview-inline-action">
+                  <button class="btn btn-secondary btn-sm" @click="previewCurrentHtml">
+                    {{ t('html.preview') }}
+                  </button>
+                </div>
               </div>
 
               <div v-else class="html-editor-panel">
@@ -287,6 +292,9 @@
                     <div class="html-editor-title">{{ t('html.editorTitle') }}</div>
                   </div>
                   <div class="html-editor-actions">
+                    <button class="btn btn-secondary btn-sm" @click="previewCurrentHtml">
+                      {{ t('html.preview') }}
+                    </button>
                     <button class="btn btn-ghost btn-sm" @click="openHtmlEditorModal">
                       {{ t('html.fullscreen') }}
                     </button>
@@ -1019,6 +1027,9 @@
           <div class="html-editor-dialog-header">
             <div class="html-editor-dialog-title">{{ t('html.editorTitle') }}</div>
             <div class="html-editor-dialog-actions">
+              <button class="btn btn-secondary btn-sm" @click="previewCurrentHtml">
+                {{ t('html.preview') }}
+              </button>
               <button class="btn btn-primary btn-sm" @click="saveEditorHtml" :disabled="!canSaveEditorHtml">
                 {{ t('html.editorSave') }}
               </button>
@@ -1055,6 +1066,33 @@
                 <span class="html-error-msg">{{ marker.message }}</span>
               </div>
             </div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- HTML 预览弹窗 -->
+    <Teleport to="body">
+      <div v-if="showHtmlPreviewModal" class="html-preview-overlay" @click.self="closeHtmlPreviewModal">
+        <div class="html-preview-dialog">
+          <div class="html-preview-dialog-header">
+            <div class="html-preview-dialog-title">{{ t('html.previewTitle') }}</div>
+            <button class="html-preview-close-btn" @click="closeHtmlPreviewModal">x</button>
+          </div>
+          <div class="html-preview-dialog-body">
+            <div class="html-preview-phone">
+              <div class="html-preview-phone-notch"></div>
+              <iframe
+                class="html-preview-frame"
+                :srcdoc="htmlPreviewContent"
+                sandbox="allow-scripts allow-forms allow-modals allow-popups allow-downloads"
+              ></iframe>
+            </div>
+          </div>
+          <div class="html-preview-dialog-footer">
+            <button class="btn btn-secondary btn-sm" @click="closeHtmlPreviewModal">
+              {{ t('html.closePreview') }}
+            </button>
           </div>
         </div>
       </div>
@@ -1925,7 +1963,8 @@ export default defineComponent({
   .mobile-shell-active .logs-overlay,
   .mobile-shell-active .settings-overlay,
   .mobile-shell-active .donation-overlay,
-  .mobile-shell-active .html-editor-overlay {
+  .mobile-shell-active .html-editor-overlay,
+  .mobile-shell-active .html-preview-overlay {
     align-items: flex-end;
     padding: 0;
     backdrop-filter: blur(4px);
@@ -1935,7 +1974,8 @@ export default defineComponent({
   .mobile-shell-active .logs-dialog,
   .mobile-shell-active .settings-dialog,
   .mobile-shell-active .donation-dialog,
-  .mobile-shell-active .html-editor-dialog {
+  .mobile-shell-active .html-editor-dialog,
+  .mobile-shell-active .html-preview-dialog {
     width: 100vw;
     max-width: 100vw;
     max-height: 96dvh;
@@ -1951,7 +1991,8 @@ export default defineComponent({
   .mobile-shell-active .logs-dialog-body,
   .mobile-shell-active .settings-dialog-body,
   .mobile-shell-active .donation-dialog-body,
-  .mobile-shell-active .html-editor-dialog-body {
+  .mobile-shell-active .html-editor-dialog-body,
+  .mobile-shell-active .html-preview-dialog-body {
     flex: 1;
     max-height: none;
   }

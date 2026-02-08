@@ -57,6 +57,47 @@ check_error() {
     fi
 }
 
+normalizeProjectRootForBuild() {
+    local projectRoot="$1"
+    if [ -z "$projectRoot" ] || [ ! -d "$projectRoot" ]; then
+        echo "$projectRoot"
+        return 0
+    fi
+    case "$projectRoot" in
+        *"#"*)
+            local safeRoot="$PROJECT_DIR/__convertapk_safe_root"
+            log_warning "检测到项目路径包含 #，将复制到安全目录后再构建"
+            rm -rf "$safeRoot"
+            mkdir -p "$safeRoot"
+            cp -R "$projectRoot"/. "$safeRoot"/
+            log_info "安全构建路径: $safeRoot"
+            echo "$safeRoot"
+            return 0
+            ;;
+    esac
+    echo "$projectRoot"
+}
+
+findAlternativeViteRoot() {
+    local currentRoot="$1"
+    local packageJson=""
+    while IFS= read -r packageJson; do
+        local candidateRoot
+        candidateRoot="$(dirname "$packageJson")"
+        if [ "$candidateRoot" = "$currentRoot" ]; then
+            continue
+        fi
+        if [ -f "$candidateRoot/index.html" ]; then
+            echo "$candidateRoot"
+            return 0
+        fi
+    done < <(find "$PROJECT_DIR" -name "package.json" -type f \
+        -not -path "*/node_modules/*" \
+        -not -path "*/android/*" \
+        -not -path "*/.git/*")
+    return 1
+}
+
 ensure_gradle_wrapper_dist() {
     # 目标：如果 Gradle wrapper 分发包已缓存则直接复用；否则从镜像尝试下载到缓存目录，避免每次构建重新下载
     local wrapper_props=""
@@ -482,6 +523,8 @@ EOF
         PROJECT_ROOT=$(dirname "$PACKAGE_JSON")
     fi
 
+    PROJECT_ROOT="$(normalizeProjectRootForBuild "$PROJECT_ROOT")"
+
     log_info "Project root: $PROJECT_ROOT"
 
     cd "$PROJECT_ROOT"
@@ -598,9 +641,32 @@ if [ "$BUILD_SUCCESS" = "true" ]; then
 else
     log_warning "首次构建失败，分析错误..."
     echo "$BUILD_OUTPUT"
+
+    if echo "$BUILD_OUTPUT" | grep -qE '\[vite:build-html\].*EISDIR' && \
+       echo "$BUILD_OUTPUT" | grep -qE 'index\.html'; then
+        log_warning "检测到 vite 读取 index.html 异常，尝试自动切换项目根目录"
+        ALT_ROOT="$(findAlternativeViteRoot "$PROJECT_ROOT" || true)"
+        if [ -n "$ALT_ROOT" ]; then
+            PROJECT_ROOT="$(normalizeProjectRootForBuild "$ALT_ROOT")"
+            log_info "切换到候选项目根目录: $PROJECT_ROOT"
+            cd "$PROJECT_ROOT"
+            installDependencies
+            check_error "切换目录后依赖安装失败"
+            BUILD_OUTPUT=$(npm run build 2>&1) && BUILD_SUCCESS=true || BUILD_SUCCESS=false
+            if [ "$BUILD_SUCCESS" = "true" ]; then
+                log_success "切换项目根目录后构建成功"
+            else
+                log_warning "切换项目根目录后仍构建失败，继续执行依赖修复流程"
+                echo "$BUILD_OUTPUT"
+            fi
+        else
+            log_warning "未找到可用的候选项目根目录，继续使用原目录"
+        fi
+    fi
     
     # 提取缺失的模块名
-    MISSING_MODULES=""
+    if [ "$BUILD_SUCCESS" != "true" ]; then
+        MISSING_MODULES=""
     
     # 检查 Rollup/Vite 的 "resolve import" 错误
     ROLLUP_MISSING=$(echo "$BUILD_OUTPUT" | grep -oE 'resolve import "[^"]+"' | \
@@ -666,6 +732,7 @@ else
         log_info "重新构建项目..."
         npm run build
         check_error "npm run build 失败"
+    fi
     fi
 fi
 

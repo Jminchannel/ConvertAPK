@@ -220,6 +220,8 @@ export const useAppState = () => {
   const htmlEditorMarkers = ref([])
   const htmlSavedContent = ref('')
   const showHtmlEditorModal = ref(false)
+  const showHtmlPreviewModal = ref(false)
+  const htmlPreviewContent = ref('')
   const iconInput = ref(null)
   const keystoreInput = ref(null)
   const uploadedKeystore = ref(null)
@@ -606,28 +608,73 @@ export const useAppState = () => {
   const handleHtmlSelect = async (event) => {
     const file = event.target.files[0]
     if (!file) return
-    await syncHtmlEditorContent(file)
-    await uploadHtml(file)
+    const previewContent = await syncHtmlEditorContent(file)
+    await uploadHtml(file, { previewContent })
     htmlEditorDirty.value = false
   }
   const handleHtmlDrop = async (event) => {
     isHtmlDragging.value = false
     const file = event.dataTransfer.files[0]
     if (file && /\.(html|htm)$/i.test(file.name)) {
-      await syncHtmlEditorContent(file)
-      await uploadHtml(file)
+      const previewContent = await syncHtmlEditorContent(file)
+      await uploadHtml(file, { previewContent })
       htmlEditorDirty.value = false
     } else {
       showToast(t('html.htmlRequired'), 'error')
     }
   }
-  const uploadHtml = async (file) => {
+
+  const openHtmlPreview = (content) => {
+    const normalizedContent = String(content || '')
+    if (!normalizedContent.trim()) {
+      showToast(t('html.previewUnavailable'), 'error')
+      return
+    }
+    htmlPreviewContent.value = normalizedContent
+    showHtmlPreviewModal.value = true
+  }
+
+  const closeHtmlPreviewModal = () => {
+    showHtmlPreviewModal.value = false
+  }
+
+  const resolvePreviewContent = () => {
+    if (htmlInputMode.value === 'file') {
+      if (!uploadedHtmlFile.value) return ''
+      return htmlEditorContent.value || htmlSavedContent.value || ''
+    }
+    if (hasSavedHtmlContent.value && !htmlEditorDirty.value) {
+      return htmlSavedContent.value
+    }
+    return htmlEditorContent.value || htmlSavedContent.value || ''
+  }
+
+  const previewCurrentHtml = () => {
+    const content = resolvePreviewContent()
+    if (!content.trim()) {
+      if (htmlInputMode.value === 'file') {
+        showToast(t('html.htmlRequired'), 'error')
+      } else {
+        showToast(t('html.previewUnavailable'), 'error')
+      }
+      return
+    }
+    openHtmlPreview(content)
+  }
+
+  const uploadHtml = async (file, options = {}) => {
+    const shouldOpenPreview = options.openPreview !== false
+    const previewContent = typeof options.previewContent === 'string' ? options.previewContent : ''
     try {
       htmlUploadProgress.value = 0
       const result = await api.uploadHtml(file, (progress) => (htmlUploadProgress.value = progress))
       uploadedHtmlFile.value = result
       currentStep.value = 2
       showToast(t('toast.uploadSuccess'), 'success')
+      if (shouldOpenPreview) {
+        const content = previewContent || htmlEditorContent.value || htmlSavedContent.value || ''
+        openHtmlPreview(content)
+      }
       return result
     } catch (error) {
       showToast(t('toast.uploadFailed') + ': ' + (error.response?.data?.detail || error.message), 'error')
@@ -982,8 +1029,9 @@ export const useAppState = () => {
     try {
       const content = await file.text()
       setHtmlEditorContent(content, false)
+      return content
     } catch {
-      // ignore
+      return ''
     }
   }
 
@@ -1042,6 +1090,7 @@ export const useAppState = () => {
     htmlEditorDirty.value = false
     if (currentStep.value < 2) currentStep.value = 2
     showToast(t('html.editorSaved'), 'success')
+    openHtmlPreview(htmlSavedContent.value)
   }
 
   const revealHtmlMarker = (marker) => {
@@ -1269,6 +1318,8 @@ export const useAppState = () => {
     htmlEditorDirty.value = false
     htmlEditorMarkers.value = []
     showHtmlEditorModal.value = false
+    showHtmlPreviewModal.value = false
+    htmlPreviewContent.value = ''
     htmlSavedContent.value = ''
     setHtmlEditorContent(defaultHtmlTemplate, false)
 
@@ -1307,7 +1358,7 @@ export const useAppState = () => {
     }
 
     const file = new File([htmlSavedContent.value], 'index.html', { type: 'text/html' })
-    const result = await uploadHtml(file)
+    const result = await uploadHtml(file, { openPreview: false, previewContent: htmlSavedContent.value })
     if (!result) return null
     uploadedHtmlFile.value = result
     return result.filename
@@ -1441,6 +1492,8 @@ export const useAppState = () => {
     htmlEditorDirty.value = false
     htmlEditorMarkers.value = []
     showHtmlEditorModal.value = false
+    showHtmlPreviewModal.value = false
+    htmlPreviewContent.value = ''
     htmlSavedContent.value = ''
     setHtmlEditorContent(defaultHtmlTemplate, false)
     if (htmlInput.value) htmlInput.value.value = ''
@@ -1671,6 +1724,8 @@ export const useAppState = () => {
       htmlEditorInstance.value.destroy()
       htmlEditorInstance.value = null
     }
+    showHtmlPreviewModal.value = false
+    htmlPreviewContent.value = ''
   })
 
   return {
@@ -1735,6 +1790,8 @@ export const useAppState = () => {
     htmlEditorMarkers,
     htmlSavedContent,
     showHtmlEditorModal,
+    showHtmlPreviewModal,
+    htmlPreviewContent,
     iconInput,
     keystoreInput,
     uploadedKeystore,
@@ -1854,6 +1911,9 @@ export const useAppState = () => {
     syncHtmlEditorContent,
     openHtmlEditorModal,
     closeHtmlEditorModal,
+    openHtmlPreview,
+    closeHtmlPreviewModal,
+    previewCurrentHtml,
     saveEditorHtml,
     revealHtmlMarker,
     isHtmlErrorMarker,
