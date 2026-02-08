@@ -62,7 +62,7 @@ class MainActivity : AppCompatActivity() {
         // 创建WebView
         webView = WebView(this)
         setContentView(webView)
-        webView.clipToPadding = false
+        webView.clipToPadding = true
         applyNavigationInsets()
 
         // 配置WebView设置
@@ -316,13 +316,17 @@ override fun onWindowFocusChanged(hasFocus: Boolean) {
         ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
             val nav = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
             val status = insets.getInsets(WindowInsetsCompat.Type.statusBars())
-            val topInset = if (drawBehindStatusBar && !hideStatusBar) status.top else 0
+            val statusStable = insets.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.statusBars())
+            val cutout = insets.getInsets(WindowInsetsCompat.Type.displayCutout())
+            val topSystemInset = maxOf(status.top, statusStable.top, cutout.top)
+            val shouldApplyTopInset = drawBehindStatusBar || hideStatusBar
+            val topInset = if (shouldApplyTopInset) topSystemInset else 0
             webView.setPadding(nav.left, topInset, nav.right, nav.bottom)
             webView.post {
                 val script = "(function(){var t=" + topInset + ";var b=" + nav.bottom +
                     ";var root=document.documentElement;" +
-                    "root.style.boxSizing='border-box';root.style.paddingTop=t+'px';root.style.paddingBottom=b+'px';" +
-                    "if(document.body){document.body.style.boxSizing='border-box';document.body.style.paddingTop=t+'px';document.body.style.paddingBottom=b+'px';}" +
+                    "if(root){root.style.setProperty('--convertapk-safe-top', t+'px');root.style.setProperty('--convertapk-safe-bottom', b+'px');}" +
+                    "if(document.body){document.body.style.setProperty('--convertapk-safe-top', t+'px');document.body.style.setProperty('--convertapk-safe-bottom', b+'px');}" +
                     "})();"
                 webView.evaluateJavascript(script, null)
             }

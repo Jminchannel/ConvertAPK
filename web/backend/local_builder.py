@@ -556,19 +556,23 @@ class MainActivity : BridgeActivity() {{
 
     private fun applyWebViewInsets() {{
         val webView = bridge?.webView ?: return
-        webView.clipToPadding = false
+        webView.clipToPadding = true
         val drawBehindStatusBar = BuildConfig.STATUS_BAR_BACKGROUND.trim().lowercase() == "transparent"
         val root = window.decorView
         ViewCompat.setOnApplyWindowInsetsListener(root) {{ _, insets ->
             val nav = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
             val status = insets.getInsets(WindowInsetsCompat.Type.statusBars())
-            val topInset = if (drawBehindStatusBar && !BuildConfig.HIDE_STATUS_BAR) status.top else 0
+            val statusStable = insets.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.statusBars())
+            val cutout = insets.getInsets(WindowInsetsCompat.Type.displayCutout())
+            val topSystemInset = maxOf(status.top, statusStable.top, cutout.top)
+            val shouldApplyTopInset = drawBehindStatusBar || BuildConfig.HIDE_STATUS_BAR
+            val topInset = if (shouldApplyTopInset) topSystemInset else 0
             webView.setPadding(nav.left, topInset, nav.right, nav.bottom)
             webView.post {{
                 val script = "(function(){{var t=" + topInset + ";var b=" + nav.bottom +
                     ";var root=document.documentElement;" +
-                    "root.style.boxSizing='border-box';root.style.paddingTop=t+'px';root.style.paddingBottom=b+'px';" +
-                    "if(document.body){{document.body.style.boxSizing='border-box';document.body.style.paddingTop=t+'px';document.body.style.paddingBottom=b+'px';}}" +
+                    "if(root){{root.style.setProperty('--convertapk-safe-top', t+'px');root.style.setProperty('--convertapk-safe-bottom', b+'px');}}" +
+                    "if(document.body){{document.body.style.setProperty('--convertapk-safe-top', t+'px');document.body.style.setProperty('--convertapk-safe-bottom', b+'px');}}" +
                     "}})();"
                 webView.evaluateJavascript(script, null)
             }}
@@ -672,19 +676,23 @@ public class MainActivity extends BridgeActivity {{
         if (webView == null) {{
             return;
         }}
-        webView.setClipToPadding(false);
+        webView.setClipToPadding(true);
         final boolean drawBehindStatusBar = "transparent".equalsIgnoreCase(BuildConfig.STATUS_BAR_BACKGROUND.trim());
         View decor = getWindow().getDecorView();
         ViewCompat.setOnApplyWindowInsetsListener(decor, (v, insets) -> {{
             Insets nav = insets.getInsets(WindowInsetsCompat.Type.navigationBars());
             Insets status = insets.getInsets(WindowInsetsCompat.Type.statusBars());
-            int topInset = (drawBehindStatusBar && !BuildConfig.HIDE_STATUS_BAR) ? status.top : 0;
+            Insets statusStable = insets.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.statusBars());
+            Insets cutout = insets.getInsets(WindowInsetsCompat.Type.displayCutout());
+            int topSystemInset = Math.max(Math.max(status.top, statusStable.top), cutout.top);
+            boolean shouldApplyTopInset = drawBehindStatusBar || BuildConfig.HIDE_STATUS_BAR;
+            int topInset = shouldApplyTopInset ? topSystemInset : 0;
             webView.setPadding(nav.left, topInset, nav.right, nav.bottom);
             webView.post(() -> webView.evaluateJavascript(
                 "(function(){{var t=" + topInset + ";var b=" + nav.bottom + ";" +
                 "var root=document.documentElement;" +
-                "root.style.boxSizing='border-box';root.style.paddingTop=t+'px';root.style.paddingBottom=b+'px';" +
-                "if(document.body){{document.body.style.boxSizing='border-box';document.body.style.paddingTop=t+'px';document.body.style.paddingBottom=b+'px';}}" +
+                "if(root){{root.style.setProperty('--convertapk-safe-top', t+'px');root.style.setProperty('--convertapk-safe-bottom', b+'px');}}" +
+                "if(document.body){{document.body.style.setProperty('--convertapk-safe-top', t+'px');document.body.style.setProperty('--convertapk-safe-bottom', b+'px');}}" +
                 "}})();",
                 null
             ));

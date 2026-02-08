@@ -1270,19 +1270,23 @@ class MainActivity : BridgeActivity() {
 
     private fun setupWebView() {
         val webView = bridge?.webView ?: return
-        webView.clipToPadding = false
+        webView.clipToPadding = true
         val drawBehindStatusBar = BuildConfig.STATUS_BAR_BACKGROUND.trim().lowercase() == "transparent"
         val root = window.decorView
         ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
             val nav = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
             val status = insets.getInsets(WindowInsetsCompat.Type.statusBars())
-            val topInset = if (drawBehindStatusBar && !BuildConfig.HIDE_STATUS_BAR) status.top else 0
+            val statusStable = insets.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.statusBars())
+            val cutout = insets.getInsets(WindowInsetsCompat.Type.displayCutout())
+            val topSystemInset = maxOf(status.top, statusStable.top, cutout.top)
+            val shouldApplyTopInset = drawBehindStatusBar || BuildConfig.HIDE_STATUS_BAR
+            val topInset = if (shouldApplyTopInset) topSystemInset else 0
             webView.setPadding(nav.left, topInset, nav.right, nav.bottom)
             webView.post {
                 val script = "(function(){var t=" + topInset + ";var b=" + nav.bottom +
                     ";var root=document.documentElement;" +
-                    "root.style.boxSizing='border-box';root.style.paddingTop=t+'px';root.style.paddingBottom=b+'px';" +
-                    "if(document.body){document.body.style.boxSizing='border-box';document.body.style.paddingTop=t+'px';document.body.style.paddingBottom=b+'px';}" +
+                    "if(root){root.style.setProperty('--convertapk-safe-top', t+'px');root.style.setProperty('--convertapk-safe-bottom', b+'px');}" +
+                    "if(document.body){document.body.style.setProperty('--convertapk-safe-top', t+'px');document.body.style.setProperty('--convertapk-safe-bottom', b+'px');}" +
                     "})();"
                 webView.evaluateJavascript(script, null)
             }
@@ -1518,11 +1522,10 @@ if (isKotlin && !replacedKotlin && allowKotlinPatch) {
 
 if (!isKotlin) {
   const hasDownloadListener = text.includes("setDownloadListener");
-  const snippet = hasDownloadListener
+  const hasInsetsListener = text.includes("ViewCompat.setOnApplyWindowInsetsListener(decor");
+  const downloadSnippet = hasDownloadListener
     ? ""
     :
-    "        WebView webView = getBridge().getWebView();\n" +
-    "        if (webView != null) {\n" +
     "            webView.setDownloadListener((url, userAgent, contentDisposition, mimeType, contentLength) -> {\n" +
     "                try {\n" +
     "                    Intent intent = new Intent(Intent.ACTION_VIEW);\n" +
@@ -1531,25 +1534,40 @@ if (!isKotlin) {
     "                    startActivity(intent);\n" +
     "                } catch (Exception ignored) {\n" +
     "                }\n" +
-    "            });\n" +
-    "            webView.setClipToPadding(false);\n" +
+    "            });\n";
+  const insetsSnippet = hasInsetsListener
+    ? ""
+    :
+    "            // ConvertAPK: WebView 安全区补偿\n" +
+    "            webView.setClipToPadding(true);\n" +
     "            final boolean drawBehindStatusBar = " + (drawBehindStatusBar ? "true" : "false") + ";\n" +
     "            final boolean hideStatusBar = " + (statusBarHidden ? "true" : "false") + ";\n" +
     "            View decor = getWindow().getDecorView();\n" +
     "            ViewCompat.setOnApplyWindowInsetsListener(decor, (v, insets) -> {\n" +
     "                Insets nav = insets.getInsets(WindowInsetsCompat.Type.navigationBars());\n" +
     "                Insets status = insets.getInsets(WindowInsetsCompat.Type.statusBars());\n" +
-    "                int topInset = (drawBehindStatusBar && !hideStatusBar) ? status.top : 0;\n" +
+    "                Insets statusStable = insets.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.statusBars());\n" +
+    "                Insets cutout = insets.getInsets(WindowInsetsCompat.Type.displayCutout());\n" +
+    "                int topSystemInset = Math.max(Math.max(status.top, statusStable.top), cutout.top);\n" +
+    "                boolean shouldApplyTopInset = drawBehindStatusBar || hideStatusBar;\n" +
+    "                int topInset = shouldApplyTopInset ? topSystemInset : 0;\n" +
     "                webView.setPadding(nav.left, topInset, nav.right, nav.bottom);\n" +
     "                webView.post(() -> webView.evaluateJavascript(\n" +
     "                    \"(function(){var t=\" + topInset + \";var b=\" + nav.bottom + \";\" +\n" +
     "                    \"var root=document.documentElement;\" +\n" +
-    "                    \"root.style.boxSizing='border-box';root.style.paddingTop=t+'px';root.style.paddingBottom=b+'px';\" +\n" +
-    "                    \"if(document.body){document.body.style.boxSizing='border-box';document.body.style.paddingTop=t+'px';document.body.style.paddingBottom=b+'px';}\" +\n" +
+    "                    \"if(root){root.style.setProperty('--convertapk-safe-top', t+'px');root.style.setProperty('--convertapk-safe-bottom', b+'px');}\" +\n" +
+    "                    \"if(document.body){document.body.style.setProperty('--convertapk-safe-top', t+'px');document.body.style.setProperty('--convertapk-safe-bottom', b+'px');}\" +\n" +
     "                    \"})();\", null));\n" +
     "                return insets;\n" +
     "            });\n" +
-    "            ViewCompat.requestApplyInsets(decor);\n" +
+    "            ViewCompat.requestApplyInsets(decor);\n";
+  const snippet = !downloadSnippet && !insetsSnippet
+    ? ""
+    :
+    "        WebView webView = getBridge() != null ? getBridge().getWebView() : null;\n" +
+    "        if (webView != null) {\n" +
+    downloadSnippet +
+    insetsSnippet +
     "        }\n";
 
   const hasStatusSnippet = text.includes("ConvertAPK: status bar");
