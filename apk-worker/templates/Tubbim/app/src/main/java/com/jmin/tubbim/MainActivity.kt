@@ -315,14 +315,18 @@ override fun onWindowFocusChanged(hasFocus: Boolean) {
 
     private fun applyNavigationInsets() {
         val root = window.decorView
+        val drawBehindStatusBar = AppConfig.systemBars.drawBehindStatusBar
+        val hideStatusBar = AppConfig.systemBars.hideStatusBar
         ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
             val nav = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
-            webView.setPadding(nav.left, webView.paddingTop, nav.right, nav.bottom)
+            val status = insets.getInsets(WindowInsetsCompat.Type.statusBars())
+            val topInset = if (drawBehindStatusBar && !hideStatusBar) status.top else 0
+            webView.setPadding(nav.left, topInset, nav.right, nav.bottom)
             webView.post {
-                val script = "(function(){var b=" + nav.bottom +
+                val script = "(function(){var t=" + topInset + ";var b=" + nav.bottom +
                     ";var root=document.documentElement;" +
-                    "root.style.boxSizing='border-box';root.style.paddingBottom=b+'px';" +
-                    "if(document.body){document.body.style.boxSizing='border-box';document.body.style.paddingBottom=b+'px';}" +
+                    "root.style.boxSizing='border-box';root.style.paddingTop=t+'px';root.style.paddingBottom=b+'px';" +
+                    "if(document.body){document.body.style.boxSizing='border-box';document.body.style.paddingTop=t+'px';document.body.style.paddingBottom=b+'px';}" +
                     "})();"
                 webView.evaluateJavascript(script, null)
             }

@@ -25,6 +25,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.core.view.ViewCompat
 import com.jmin.tubbim.utils.AppConfig
 import com.jmin.tubbim.utils.SystemBarsConfig
 
@@ -61,6 +62,8 @@ class MainActivity : AppCompatActivity() {
         // 创建WebView
         webView = WebView(this)
         setContentView(webView)
+        webView.clipToPadding = false
+        applyNavigationInsets()
 
         // 配置WebView设置
         val webSettings: WebSettings = webView.settings
@@ -306,10 +309,31 @@ override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onDestroy()
     }
 
+    private fun applyNavigationInsets() {
+        val root = window.decorView
+        val drawBehindStatusBar = AppConfig.systemBars.drawBehindStatusBar
+        val hideStatusBar = AppConfig.systemBars.hideStatusBar
+        ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
+            val nav = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
+            val status = insets.getInsets(WindowInsetsCompat.Type.statusBars())
+            val topInset = if (drawBehindStatusBar && !hideStatusBar) status.top else 0
+            webView.setPadding(nav.left, topInset, nav.right, nav.bottom)
+            webView.post {
+                val script = "(function(){var t=" + topInset + ";var b=" + nav.bottom +
+                    ";var root=document.documentElement;" +
+                    "root.style.boxSizing='border-box';root.style.paddingTop=t+'px';root.style.paddingBottom=b+'px';" +
+                    "if(document.body){document.body.style.boxSizing='border-box';document.body.style.paddingTop=t+'px';document.body.style.paddingBottom=b+'px';}" +
+                    "})();"
+                webView.evaluateJavascript(script, null)
+            }
+            insets
+        }
+        ViewCompat.requestApplyInsets(root)
+    }
+
     private fun applySystemBarsConfig(config: SystemBarsConfig) {
         // 透明状态栏一般需要“内容绘制到状态栏下方”
         WindowCompat.setDecorFitsSystemWindows(window, !config.drawBehindStatusBar)
-
         @Suppress("DEPRECATION")
         window.statusBarColor = config.statusBarColor
 
@@ -339,3 +363,4 @@ override fun onWindowFocusChanged(hasFocus: Boolean) {
         }
     }
 }
+

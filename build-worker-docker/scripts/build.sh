@@ -1271,15 +1271,18 @@ class MainActivity : BridgeActivity() {
     private fun setupWebView() {
         val webView = bridge?.webView ?: return
         webView.clipToPadding = false
+        val drawBehindStatusBar = BuildConfig.STATUS_BAR_BACKGROUND.trim().lowercase() == "transparent"
         val root = window.decorView
         ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
             val nav = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
-            webView.setPadding(nav.left, webView.paddingTop, nav.right, nav.bottom)
+            val status = insets.getInsets(WindowInsetsCompat.Type.statusBars())
+            val topInset = if (drawBehindStatusBar && !BuildConfig.HIDE_STATUS_BAR) status.top else 0
+            webView.setPadding(nav.left, topInset, nav.right, nav.bottom)
             webView.post {
-                val script = "(function(){var b=" + nav.bottom +
+                val script = "(function(){var t=" + topInset + ";var b=" + nav.bottom +
                     ";var root=document.documentElement;" +
-                    "root.style.boxSizing='border-box';root.style.paddingBottom=b+'px';" +
-                    "if(document.body){document.body.style.boxSizing='border-box';document.body.style.paddingBottom=b+'px';}" +
+                    "root.style.boxSizing='border-box';root.style.paddingTop=t+'px';root.style.paddingBottom=b+'px';" +
+                    "if(document.body){document.body.style.boxSizing='border-box';document.body.style.paddingTop=t+'px';document.body.style.paddingBottom=b+'px';}" +
                     "})();"
                 webView.evaluateJavascript(script, null)
             }
@@ -1529,15 +1532,18 @@ if (!isKotlin) {
     "                }\n" +
     "            });\n" +
     "            webView.setClipToPadding(false);\n" +
+    "            final boolean drawBehindStatusBar = \"transparent\".equalsIgnoreCase(String.valueOf(BuildConfig.STATUS_BAR_BACKGROUND).trim());\n" +
     "            View decor = getWindow().getDecorView();\n" +
     "            ViewCompat.setOnApplyWindowInsetsListener(decor, (v, insets) -> {\n" +
     "                Insets nav = insets.getInsets(WindowInsetsCompat.Type.navigationBars());\n" +
-    "                webView.setPadding(nav.left, webView.getPaddingTop(), nav.right, nav.bottom);\n" +
+    "                Insets status = insets.getInsets(WindowInsetsCompat.Type.statusBars());\n" +
+    "                int topInset = (drawBehindStatusBar && !BuildConfig.HIDE_STATUS_BAR) ? status.top : 0;\n" +
+    "                webView.setPadding(nav.left, topInset, nav.right, nav.bottom);\n" +
     "                webView.post(() -> webView.evaluateJavascript(\n" +
-    "                    \"(function(){var b=\" + nav.bottom + \";\" +\n" +
+    "                    \"(function(){var t=\" + topInset + \";var b=\" + nav.bottom + \";\" +\n" +
     "                    \"var root=document.documentElement;\" +\n" +
-    "                    \"root.style.boxSizing='border-box';root.style.paddingBottom=b+'px';\" +\n" +
-    "                    \"if(document.body){document.body.style.boxSizing='border-box';document.body.style.paddingBottom=b+'px';}\" +\n" +
+    "                    \"root.style.boxSizing='border-box';root.style.paddingTop=t+'px';root.style.paddingBottom=b+'px';\" +\n" +
+    "                    \"if(document.body){document.body.style.boxSizing='border-box';document.body.style.paddingTop=t+'px';document.body.style.paddingBottom=b+'px';}\" +\n" +
     "                    \"})();\", null));\n" +
     "                return insets;\n" +
     "            });\n" +

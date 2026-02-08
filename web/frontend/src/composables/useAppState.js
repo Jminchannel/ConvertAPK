@@ -1090,7 +1090,6 @@ export const useAppState = () => {
     htmlEditorDirty.value = false
     if (currentStep.value < 2) currentStep.value = 2
     showToast(t('html.editorSaved'), 'success')
-    openHtmlPreview(htmlSavedContent.value)
   }
 
   const revealHtmlMarker = (marker) => {

@@ -519,6 +519,7 @@ import androidx.activity.OnBackPressedCallback
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.core.view.ViewCompat
 import com.getcapacitor.BridgeActivity
 
 class MainActivity : BridgeActivity() {{
@@ -527,6 +528,7 @@ class MainActivity : BridgeActivity() {{
     override fun onCreate(savedInstanceState: Bundle?) {{
         super.onCreate(savedInstanceState)
         applySystemBars()
+        applyWebViewInsets()
         onBackPressedDispatcher.addCallback(
             this,
             object : OnBackPressedCallback(true) {{
@@ -550,6 +552,29 @@ class MainActivity : BridgeActivity() {{
                 }}
             }}
         )
+    }}
+
+    private fun applyWebViewInsets() {{
+        val webView = bridge?.webView ?: return
+        webView.clipToPadding = false
+        val drawBehindStatusBar = BuildConfig.STATUS_BAR_BACKGROUND.trim().lowercase() == "transparent"
+        val root = window.decorView
+        ViewCompat.setOnApplyWindowInsetsListener(root) {{ _, insets ->
+            val nav = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
+            val status = insets.getInsets(WindowInsetsCompat.Type.statusBars())
+            val topInset = if (drawBehindStatusBar && !BuildConfig.HIDE_STATUS_BAR) status.top else 0
+            webView.setPadding(nav.left, topInset, nav.right, nav.bottom)
+            webView.post {{
+                val script = "(function(){{var t=" + topInset + ";var b=" + nav.bottom +
+                    ";var root=document.documentElement;" +
+                    "root.style.boxSizing='border-box';root.style.paddingTop=t+'px';root.style.paddingBottom=b+'px';" +
+                    "if(document.body){{document.body.style.boxSizing='border-box';document.body.style.paddingTop=t+'px';document.body.style.paddingBottom=b+'px';}}" +
+                    "}})();"
+                webView.evaluateJavascript(script, null)
+            }}
+            insets
+        }}
+        ViewCompat.requestApplyInsets(root)
     }}
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {{
@@ -603,6 +628,8 @@ import androidx.activity.OnBackPressedCallback;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
+import androidx.core.view.ViewCompat;
+import androidx.core.graphics.Insets;
 import com.getcapacitor.BridgeActivity;
 import android.webkit.WebView;
 
@@ -613,6 +640,7 @@ public class MainActivity extends BridgeActivity {{
     protected void onCreate(Bundle savedInstanceState) {{
         super.onCreate(savedInstanceState);
         applySystemBars();
+        applyWebViewInsets();
         getOnBackPressedDispatcher().addCallback(
             this,
             new OnBackPressedCallback(true) {{
@@ -637,6 +665,32 @@ public class MainActivity extends BridgeActivity {{
                 }}
             }}
         );
+    }}
+
+    private void applyWebViewInsets() {{
+        WebView webView = getBridge() != null ? getBridge().getWebView() : null;
+        if (webView == null) {{
+            return;
+        }}
+        webView.setClipToPadding(false);
+        final boolean drawBehindStatusBar = "transparent".equalsIgnoreCase(BuildConfig.STATUS_BAR_BACKGROUND.trim());
+        View decor = getWindow().getDecorView();
+        ViewCompat.setOnApplyWindowInsetsListener(decor, (v, insets) -> {{
+            Insets nav = insets.getInsets(WindowInsetsCompat.Type.navigationBars());
+            Insets status = insets.getInsets(WindowInsetsCompat.Type.statusBars());
+            int topInset = (drawBehindStatusBar && !BuildConfig.HIDE_STATUS_BAR) ? status.top : 0;
+            webView.setPadding(nav.left, topInset, nav.right, nav.bottom);
+            webView.post(() -> webView.evaluateJavascript(
+                "(function(){{var t=" + topInset + ";var b=" + nav.bottom + ";" +
+                "var root=document.documentElement;" +
+                "root.style.boxSizing='border-box';root.style.paddingTop=t+'px';root.style.paddingBottom=b+'px';" +
+                "if(document.body){{document.body.style.boxSizing='border-box';document.body.style.paddingTop=t+'px';document.body.style.paddingBottom=b+'px';}}" +
+                "}})();",
+                null
+            ));
+            return insets;
+        }});
+        ViewCompat.requestApplyInsets(decor);
     }}
 
     @Override
