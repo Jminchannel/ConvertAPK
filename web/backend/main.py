@@ -621,10 +621,10 @@ async def quick_generate_icon():
 
 @app.post("/api/upload-keystore")
 async def upload_keystore(file: UploadFile = File(...)):
-    """???????.jks / .keystore?"""
+    """上传签名文件（.jks / .keystore）"""
     filename_lower = (file.filename or "").lower()
     if not (filename_lower.endswith(".jks") or filename_lower.endswith(".keystore")):
-        raise HTTPException(status_code=400, detail="??? .jks ? .keystore ??")
+        raise HTTPException(status_code=400, detail="仅支持 .jks 或 .keystore 文件")
 
     file_id = str(uuid.uuid4())
     filename = f"{file_id}_{file.filename}"
@@ -634,7 +634,7 @@ async def upload_keystore(file: UploadFile = File(...)):
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"????????: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"上传密钥文件失败: {str(e)}")
 
     file_size = file_path.stat().st_size
 
@@ -642,7 +642,7 @@ async def upload_keystore(file: UploadFile = File(...)):
         "filename": filename,
         "original_name": file.filename,
         "size": file_size,
-        "message": "????????"
+        "message": "密钥文件上传成功"
     }
 
 
@@ -748,12 +748,12 @@ async def create_task(task_data: BuildTaskCreate):
     
 
 
-    # ???????????????????
+    # 处理用户上传的签名密钥（如果有）
     keystore_in_task = None
     if (not quick_generate) and task_data.keystore_filename:
         src_keystore = BACKEND_UPLOAD_DIR / task_data.keystore_filename
         if not src_keystore.exists():
-            raise HTTPException(status_code=400, detail="?????????????")
+            raise HTTPException(status_code=400, detail="签名文件不存在，请重新上传")
         dst_keystore = task_keystore_dir / "release.keystore"
         shutil.move(str(src_keystore), str(dst_keystore))
         keystore_in_task = "release.keystore"
@@ -789,7 +789,7 @@ async def create_task(task_data: BuildTaskCreate):
         created_at=now,
         updated_at=now,
         progress=0,
-        message="??????????",
+        message="等待构建中",
         reuse_keystore_from=reuse_from,
     )
 

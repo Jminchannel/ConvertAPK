@@ -753,7 +753,7 @@ def run_local_build(
 
         template_dir = _resolve_templates_root() / "Tubbim"
         if not template_dir.exists():
-            raise RuntimeError(f"???????: {template_dir}")
+            raise RuntimeError(f"未找到 Web 模板目录: {template_dir}")
 
         if project_dir.exists():
             shutil.rmtree(project_dir)
@@ -762,7 +762,7 @@ def run_local_build(
 
         web_url = str(env.get("WEB_URL") or "").strip()
         if not web_url:
-            raise RuntimeError("WEB_URL ????")
+            raise RuntimeError("WEB_URL 不能为空")
 
         strings_file = project_root / "app" / "src" / "main" / "res" / "values" / "strings.xml"
         if strings_file.exists():
@@ -839,12 +839,12 @@ def run_local_build(
             )
             gradle_file.write_text(gradle_text, encoding="utf-8")
     elif is_html_task:
-        progress(25, "Step 1: ?? HTML ??...")
-        _log(on_log, "Step 1: ?? HTML ??...")
+        progress(25, "Step 1: 准备 HTML 模板...")
+        _log(on_log, "Step 1: 准备 HTML 模板...")
 
         template_dir = _resolve_templates_root() / "HTML2APK"
         if not template_dir.exists():
-            raise RuntimeError(f"???HTML??: {template_dir}")
+            raise RuntimeError(f"未找到 HTML 模板目录: {template_dir}")
 
         if project_dir.exists():
             shutil.rmtree(project_dir)
@@ -853,7 +853,7 @@ def run_local_build(
 
         html_source = task_input_dir / "index.html"
         if not html_source.exists():
-            raise RuntimeError("HTML ????: index.html")
+            raise RuntimeError("HTML 输入缺少文件: index.html")
         html_root = project_root / "html2apkdemo"
         if html_root.exists():
             shutil.rmtree(html_root)
@@ -931,20 +931,20 @@ def run_local_build(
     else:
         zip_files = list(task_input_dir.glob("*.zip"))
         if not zip_files:
-            raise RuntimeError(f"?? {task_input_dir} ?? ZIP ??")
+            raise RuntimeError(f"在目录中未找到 ZIP 文件: {task_input_dir}")
         zip_file = zip_files[0]
 
         if project_dir.exists():
             shutil.rmtree(project_dir)
         project_dir.mkdir(parents=True, exist_ok=True)
         if zip_file.suffix.lower() != ".zip":
-            raise RuntimeError("??? ZIP ??")
+            raise RuntimeError("上传文件不是 ZIP 格式")
         with zipfile.ZipFile(zip_file, "r") as zf:
             zf.extractall(project_dir)
 
         package_json_candidates = list(project_dir.rglob("package.json"))
         if not package_json_candidates:
-            raise RuntimeError("??? package.json")
+            raise RuntimeError("ZIP 中未找到 package.json")
         package_json = package_json_candidates[0]
         project_root = package_json.parent
 
@@ -962,7 +962,7 @@ def run_local_build(
         if not web_dir.exists():
             web_dir = project_root / "build"
         if not web_dir.exists():
-            raise RuntimeError("????????? dist/build")
+            raise RuntimeError("构建产物目录不存在: dist/build")
 
         progress(35, "Step 2: 准备 Capacitor...")
         _log(on_log, "Step 2: 准备 Capacitor...")

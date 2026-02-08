@@ -185,10 +185,10 @@ log_info "TASK_MODE: '${TASK_MODE}'"
 # ============================================
 # Step 0: prepare
 # ============================================
-log_info "Step 0: ????..."
+log_info "Step 0: 准备构建环境..."
 
 if [ "$TASK_MODE" = "web" ]; then
-    log_info "Step 1: ?? Web ??..."
+    log_info "Step 1: 准备 Web 模板..."
     TEMPLATE_DIR="/workspace/templates/Tubbim"
     if [ ! -d "$TEMPLATE_DIR" ]; then
         log_error "Web template not found: $TEMPLATE_DIR"
@@ -262,7 +262,7 @@ NODE
     cd "$PROJECT_ROOT"
     log_success "Step 0 done"
 elif [ "$TASK_MODE" = "html" ]; then
-    log_info "Step 1: ?? HTML ??..."
+    log_info "Step 1: 准备 HTML 模板..."
     TEMPLATE_DIR="/workspace/templates/HTML2APK"
     if [ ! -d "$TEMPLATE_DIR" ]; then
         log_error "HTML template not found: $TEMPLATE_DIR"
@@ -499,25 +499,98 @@ if [ "$SKIP_WEB_BUILD" = "true" ]; then
     log_warning "检测到预构建静态站点 ZIP：跳过 npm install / npm run build，直接使用 $WEB_DIR"
 else
 
-# 完整重装依赖的函数
-reinstall_dependencies() {
-    log_info "清理并重新安装所有依赖..."
-    
-    # 删除 node_modules 和 lock 文件
-    rm -rf node_modules
-    rm -f package-lock.json
-    rm -f yarn.lock
-    rm -f pnpm-lock.yaml
-    
-    # 重新安装
+# 检测项目使用的包管理器
+detectPackageManager() {
+    if [ -f "pnpm-lock.yaml" ]; then
+        echo "pnpm"
+    elif [ -f "yarn.lock" ]; then
+        echo "yarn"
+    elif [ -f "package-lock.json" ] || [ -f "npm-shrinkwrap.json" ]; then
+        echo "npm-ci"
+    else
+        echo "npm"
+    fi
+}
+
+# 安装依赖（优先使用 lock 文件，避免版本漂移）
+installDependencies() {
+    local installMode="${1:-normal}"
+    local packageManager
+    packageManager="$(detectPackageManager)"
+
+    if [ "$installMode" = "reinstall" ]; then
+        log_info "清理 node_modules 后重新安装依赖..."
+        rm -rf node_modules
+    fi
+
+    if [ "$packageManager" = "pnpm" ]; then
+        if command -v pnpm >/dev/null 2>&1; then
+            log_info "使用 pnpm-lock.yaml 锁定安装依赖..."
+            pnpm install --frozen-lockfile
+            return $?
+        fi
+        log_warning "检测到 pnpm-lock.yaml 但未安装 pnpm，回退 npm install（可能导致版本漂移）"
+        npm install --legacy-peer-deps
+        return $?
+    fi
+
+    if [ "$packageManager" = "yarn" ]; then
+        if command -v yarn >/dev/null 2>&1; then
+            log_info "使用 yarn.lock 锁定安装依赖..."
+            yarn install --frozen-lockfile
+            return $?
+        fi
+        log_warning "检测到 yarn.lock 但未安装 yarn，回退 npm install（可能导致版本漂移）"
+        npm install --legacy-peer-deps
+        return $?
+    fi
+
+    if [ "$packageManager" = "npm-ci" ]; then
+        log_info "使用 package-lock 锁定安装依赖（npm ci）..."
+        npm ci --legacy-peer-deps
+        if [ $? -eq 0 ]; then
+            return 0
+        fi
+        log_warning "npm ci 失败，回退 npm install（可能导致版本漂移）"
+        npm install --legacy-peer-deps
+        return $?
+    fi
+
+    log_info "未检测到 lock 文件，使用 npm install..."
     npm install --legacy-peer-deps
     return $?
 }
 
+# 安装构建缺失依赖（按项目包管理器执行）
+installMissingDependency() {
+    local packageName="$1"
+    local packageManager
+    packageManager="$(detectPackageManager)"
+
+    if [ "$packageManager" = "pnpm" ] && command -v pnpm >/dev/null 2>&1; then
+        pnpm add "$packageName" >/dev/null 2>&1 || true
+        return 0
+    fi
+
+    if [ "$packageManager" = "yarn" ] && command -v yarn >/dev/null 2>&1; then
+        yarn add "$packageName" >/dev/null 2>&1 || true
+        return 0
+    fi
+
+    npm install "$packageName" --legacy-peer-deps --save >/dev/null 2>&1 || true
+}
+
+# 完整重装依赖的函数
+reinstallDependencies() {
+    log_info "执行完整依赖重装..."
+    installDependencies "reinstall"
+    return $?
+}
+
 # 首次安装依赖
-log_info "安装 npm 依赖..."
-npm install --legacy-peer-deps
-check_error "npm install 失败"
+log_info "安装项目依赖..."
+installDependencies
+check_error "依赖安装失败"
 
 # 尝试构建
 log_info "构建项目..."
@@ -563,7 +636,7 @@ else
             # 过滤掉相对路径
             if [[ ! "$PKG_NAME" =~ ^\. ]] && [[ ! "$PKG_NAME" =~ ^/ ]]; then
                 log_info "安装: $PKG_NAME"
-                npm install "$PKG_NAME" --legacy-peer-deps --save 2>/dev/null || true
+                installMissingDependency "$PKG_NAME"
             fi
         done
         
@@ -577,7 +650,7 @@ else
             log_warning "第二次构建仍失败，尝试完整重装依赖..."
             
             # 完整重装
-            reinstall_dependencies
+            reinstallDependencies
             check_error "依赖重装失败"
             
             # 第三次尝试构建
@@ -589,7 +662,7 @@ else
         # 没有检测到缺失模块，直接尝试完整重装
         log_warning "未检测到具体缺失模块，尝试完整重装依赖..."
         
-        reinstall_dependencies
+        reinstallDependencies
         check_error "依赖重装失败"
         
         # 再次构建
@@ -1887,7 +1960,7 @@ if [ -f "$GRADLE_FILE" ]; then
         sed -i "s/versionName \".*\"/versionName \"$VERSION_NAME\"/" "$GRADLE_FILE"
         sed -i "s/versionCode .*/versionCode $VERSION_CODE/" "$GRADLE_FILE"
     fi
-    log_info "???????"
+    log_info "已更新版本号信息"
 fi
 
 log_success "Android 项目配置完成"
@@ -1999,12 +2072,12 @@ else
     fi
 
     if [ -z "$APK_PATH" ] || [ ! -f "$APK_PATH" ]; then
-        log_error "??????APK??"
+        log_error "未找到生成的 APK 文件"
         ls -la "$APK_OUT_DIR" 2>/dev/null || true
         exit 1
     fi
 
-    log_success "APK ????: $APK_PATH"
+    log_success "APK 构建完成: $APK_PATH"
 fi
 
 cd ..

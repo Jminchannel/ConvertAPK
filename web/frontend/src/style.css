@@ -1244,15 +1244,15 @@ html.light-theme .html-editor-toolbar {
   .header-content {
     flex-direction: row;
     align-items: center;
-    justify-content: flex-end;
-    gap: 10px;
+    justify-content: center;
+    gap: 0;
     padding: 0 16px;
     flex-wrap: nowrap;
   }
-  .logo { flex: 0 1 auto; min-width: 0; width: auto; justify-content: flex-end; gap: 10px; }
-  .logo > div:last-child { text-align: right; }
+  .logo { flex: 0 1 auto; min-width: 0; width: 100%; justify-content: center; gap: 10px; }
+  .logo > div:last-child { text-align: center; }
   .logo-text { font-size: 15px; max-width: 160px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .header-actions { flex: 0 0 auto; width: auto; flex-wrap: nowrap; justify-content: flex-end; }
+  .header-actions { display: none; }
   .header-actions .action-label,
   .header-actions .lang-label { display: none; }
   .header-actions .btn { padding: 6px 10px; gap: 6px; }

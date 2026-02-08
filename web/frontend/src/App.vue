@@ -57,7 +57,7 @@
             <button class="window-btn window-maximize" @click="toggleMaximizeWindow" aria-label="Maximize">
               {{ isMaximized ? '馃棖' : '馃棗' }}
             </button>
-            <button class="window-btn window-close" @click="closeWindow" aria-label="Close">鉁?/button>
+            <button class="window-btn window-close" @click="closeWindow" aria-label="Close">✕</button>
           </div>
         </div>
       </div>

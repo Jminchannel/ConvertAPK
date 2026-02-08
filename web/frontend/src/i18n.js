@@ -11,6 +11,9 @@ export const messages = {
       subtitle: 'Web App → Android APK',
       refresh: 'Refresh'
     },
+    mobileNav: {
+      settings: 'Settings'
+    },
     // Mode
     mode: {
       title: 'Conversion Mode',
@@ -384,6 +387,9 @@ export const messages = {
       subtitle: 'Web App → Android APK',
       refresh: '刷新'
     },
+    mobileNav: {
+      settings: '设置'
+    },
     // Mode
     mode: {
       title: '转换模式',
@@ -752,6 +758,9 @@ export const messages = {
       title: 'APK Converter',
       subtitle: 'Web App → Android APK',
       refresh: '重新整理'
+    },
+    mobileNav: {
+      settings: '設定'
     },
     // Mode
     mode: {
