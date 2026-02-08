@@ -208,6 +208,8 @@ TASKS_STATE_LOCK = threading.Lock()
 # One-click (Quick) generate defaults (client-side shortcut).
 QUICK_GENERATE_STATE_PATH = TASKS_DIR / "quick-generate.json"
 QUICK_GENERATE_STATE_LOCK = threading.Lock()
+QUICK_GENERATE_SHARED_KEYSTORE_PATH = TASKS_DIR.parent / "quick-generate" / "release.keystore"
+QUICK_GENERATE_KEYSTORE_LOCK = threading.Lock()
 TEMPLATES_DIR = APK_WORKER_DIR.parent / "templates"
 QUICK_GENERATE_ICON_PATH = TEMPLATES_DIR / "demoLogo.png"
 QUICK_GENERATE_APP_NAME = "demo"
@@ -430,6 +432,49 @@ def _alloc_quick_generate_versions() -> tuple[str, int]:
         return version_name, version_code
 
 
+def _findQuickGenerateKeystoreFromTasks(requireSuccess: bool = True) -> Path | None:
+    latestPath = None
+    latestUpdatedAt = datetime.min
+    for task in list(tasks_db.values()):
+        if not bool(getattr(task, "quick_generate", False)):
+            continue
+        taskId = str(getattr(task, "id", "") or "").strip()
+        if not taskId:
+            continue
+        taskKeystorePath = TASKS_DIR / taskId / "keystore" / "release.keystore"
+        if not taskKeystorePath.exists():
+            continue
+        status = getattr(task, "status", "")
+        statusValue = status.value if hasattr(status, "value") else str(status)
+        if requireSuccess and statusValue != BuildStatus.SUCCESS.value:
+            continue
+        updatedAt = getattr(task, "updated_at", None)
+        if isinstance(updatedAt, datetime):
+            if latestPath is None or updatedAt >= latestUpdatedAt:
+                latestPath = taskKeystorePath
+                latestUpdatedAt = updatedAt
+        elif latestPath is None:
+            latestPath = taskKeystorePath
+    return latestPath
+
+
+def _ensureQuickGenerateSharedKeystore() -> Path | None:
+    with QUICK_GENERATE_KEYSTORE_LOCK:
+        if QUICK_GENERATE_SHARED_KEYSTORE_PATH.exists():
+            return QUICK_GENERATE_SHARED_KEYSTORE_PATH
+        sourcePath = _findQuickGenerateKeystoreFromTasks(requireSuccess=True)
+        if not sourcePath or not sourcePath.exists():
+            return None
+        try:
+            QUICK_GENERATE_SHARED_KEYSTORE_PATH.parent.mkdir(parents=True, exist_ok=True)
+            tmpPath = QUICK_GENERATE_SHARED_KEYSTORE_PATH.with_suffix(".keystore.tmp")
+            shutil.copy2(str(sourcePath), str(tmpPath))
+            tmpPath.replace(QUICK_GENERATE_SHARED_KEYSTORE_PATH)
+            return QUICK_GENERATE_SHARED_KEYSTORE_PATH
+        except Exception:
+            return None
+
+
 def _task_to_dict(task: BuildTask) -> dict:
     data = task.model_dump()
     status = task.status
@@ -468,6 +513,11 @@ def persist_tasks_db(force: bool = False) -> None:
         tmp_path = TASKS_STATE_PATH.with_suffix(".json.tmp")
         tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         tmp_path.replace(TASKS_STATE_PATH)
+
+
+def _onTasksStateChange(force: bool = False) -> None:
+    persist_tasks_db(force=force)
+    _ensureQuickGenerateSharedKeystore()
 
 
 def load_tasks_db() -> None:
@@ -670,8 +720,10 @@ async def create_task(task_data: BuildTaskCreate):
 
     quick_generate = bool(task_data.quick_generate)
     quick_icon_path = None
+    quickSharedKeystorePath = None
     if quick_generate:
         quick_icon_path = _resolve_quick_generate_icon_path()
+        quickSharedKeystorePath = _ensureQuickGenerateSharedKeystore()
     
     # 验证复用的任务是否存在
     reuse_from = None if quick_generate else task_data.reuse_keystore_from
@@ -750,7 +802,11 @@ async def create_task(task_data: BuildTaskCreate):
 
     # 处理用户上传的签名密钥（如果有）
     keystore_in_task = None
-    if (not quick_generate) and task_data.keystore_filename:
+    if quick_generate and quickSharedKeystorePath and quickSharedKeystorePath.exists():
+        dst_keystore = task_keystore_dir / "release.keystore"
+        shutil.copy2(str(quickSharedKeystorePath), str(dst_keystore))
+        keystore_in_task = "release.keystore"
+    elif (not quick_generate) and task_data.keystore_filename:
         src_keystore = BACKEND_UPLOAD_DIR / task_data.keystore_filename
         if not src_keystore.exists():
             raise HTTPException(status_code=400, detail="签名文件不存在，请重新上传")
@@ -1407,7 +1463,7 @@ async def adminhub_feedback(
 @app.on_event("startup")
 async def startup_event():
     """应用启动时初始化"""
-    init_task_runner(tasks_db, on_state_change=persist_tasks_db)
+    init_task_runner(tasks_db, on_state_change=_onTasksStateChange)
     env_setup.start_background_check()
     print("[OK] 构建任务运行器已初始化（最大并发数: 1）")
 

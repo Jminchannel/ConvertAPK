@@ -980,6 +980,16 @@ class BuildTaskRunner:
         """执行构建（在后台线程中运行）"""
         task = self.tasks_db[task_id]
         task.logs = []  # 初始化日志列表
+        if bool(getattr(task, "quick_generate", False)):
+            sharedKeystorePath = TASKS_DIR.parent / "quick-generate" / "release.keystore"
+            taskKeystoreDir = TASKS_DIR / task_id / "keystore"
+            taskKeystorePath = taskKeystoreDir / "release.keystore"
+            if sharedKeystorePath.exists() and not taskKeystorePath.exists():
+                try:
+                    taskKeystoreDir.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(str(sharedKeystorePath), str(taskKeystorePath))
+                except Exception as e:
+                    print(f"[WARN] quickGenerate 签名同步失败: {e}")
         
         # 调试日志：输出任务配置中的 output_format
         output_format_from_config = getattr(task.config, "output_format", "apk")
