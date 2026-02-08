@@ -1424,6 +1424,7 @@ const statusBarIsWhite =
   statusBarColorLower === "white" ||
   statusBarColorLower === "#ffffff" ||
   statusBarColorLower === "#ffffffff";
+const drawBehindStatusBar = !statusBarIsWhite;
 
 if (!replacedKotlin && !(isKotlin && !allowKotlinPatch)) {
   const importSuffix = isKotlin ? "" : ";";
@@ -1532,12 +1533,13 @@ if (!isKotlin) {
     "                }\n" +
     "            });\n" +
     "            webView.setClipToPadding(false);\n" +
-    "            final boolean drawBehindStatusBar = \"transparent\".equalsIgnoreCase(String.valueOf(BuildConfig.STATUS_BAR_BACKGROUND).trim());\n" +
+    "            final boolean drawBehindStatusBar = " + (drawBehindStatusBar ? "true" : "false") + ";\n" +
+    "            final boolean hideStatusBar = " + (statusBarHidden ? "true" : "false") + ";\n" +
     "            View decor = getWindow().getDecorView();\n" +
     "            ViewCompat.setOnApplyWindowInsetsListener(decor, (v, insets) -> {\n" +
     "                Insets nav = insets.getInsets(WindowInsetsCompat.Type.navigationBars());\n" +
     "                Insets status = insets.getInsets(WindowInsetsCompat.Type.statusBars());\n" +
-    "                int topInset = (drawBehindStatusBar && !BuildConfig.HIDE_STATUS_BAR) ? status.top : 0;\n" +
+    "                int topInset = (drawBehindStatusBar && !hideStatusBar) ? status.top : 0;\n" +
     "                webView.setPadding(nav.left, topInset, nav.right, nav.bottom);\n" +
     "                webView.post(() -> webView.evaluateJavascript(\n" +
     "                    \"(function(){var t=\" + topInset + \";var b=\" + nav.bottom + \";\" +\n" +
