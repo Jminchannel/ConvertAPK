@@ -66,11 +66,11 @@ normalizeProjectRootForBuild() {
     case "$projectRoot" in
         *"#"*)
             local safeRoot="$PROJECT_DIR/__convertapk_safe_root"
-            log_warning "检测到项目路径包含 #，将复制到安全目录后再构建"
+            log_warning "检测到项目路径包含 #，将复制到安全目录后再构建" >&2
             rm -rf "$safeRoot"
             mkdir -p "$safeRoot"
             cp -R "$projectRoot"/. "$safeRoot"/
-            log_info "安全构建路径: $safeRoot"
+            log_info "安全构建路径: $safeRoot" >&2
             echo "$safeRoot"
             return 0
             ;;
