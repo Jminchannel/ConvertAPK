@@ -888,12 +888,7 @@ def run_local_build(
                         shutil.copy2(item, target)
             shutil.rmtree(temp_libs, ignore_errors=True)
 
-        localize_html_raw = str(env.get("HTML_LOCALIZE_RESOURCES", "true")).strip().lower()
-        localize_html = localize_html_raw not in {"0", "false", "no", "off"}
-        if localize_html:
-            _offlineize_html_assets(html_root / "index.html", process_env, on_log=on_log)
-        else:
-            _log(on_log, "[HTML] skip offlineize remote assets (HTML_LOCALIZE_RESOURCES=false)")
+        _offlineize_html_assets(html_root / "index.html", process_env, on_log=on_log)
 
         strings_file = project_root / "app" / "src" / "main" / "res" / "values" / "strings.xml"
         if strings_file.exists():

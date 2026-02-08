@@ -1,5 +1,14 @@
-﻿<template>
-  <div class="app" :class="{ 'light-theme': currentTheme === 'light' }">
+<template>
+  <div
+    class="app"
+    :class="{
+      'light-theme': currentTheme === 'light',
+      'mobile-shell-active': isMobileShell,
+      'mobile-tab-build': mobileTab === 'build',
+      'mobile-tab-tasks': mobileTab === 'tasks',
+      'mobile-tab-profile': mobileTab === 'profile'
+    }"
+  >
     <!-- Header -->
     <header class="header">
       <div class="container header-content">
@@ -13,7 +22,7 @@
 
         <div class="header-actions no-drag">
           <!-- Theme -->
-          <div class="theme-switch">
+          <div v-if="!isMobileShell" class="theme-switch">
             <button
               class="btn btn-ghost btn-sm btn-icon no-drag"
               @click="toggleTheme"
@@ -25,7 +34,7 @@
           </div>
 
           <!-- Language -->
-          <div class="lang-switch">
+          <div v-if="!isMobileShell" class="lang-switch">
             <button class="btn btn-ghost btn-sm no-drag" @click="showLangMenu = !showLangMenu">
               <span class="action-icon">&#x1F310;</span>
               <span class="lang-label">{{ currentLangLabel }}</span>
@@ -47,7 +56,7 @@
             <span class="action-icon">&#x1F496;</span>
             <span class="action-label">{{ t('donation.button') }}</span>
           </button>
-          <button class="btn btn-ghost btn-sm no-drag" @click="openSettings">
+          <button v-if="!isMobileShell" class="btn btn-ghost btn-sm no-drag" @click="openSettings">
             <span class="action-icon">&#x1F41B;</span>
             <span class="action-label">{{ t('settings.title') }}</span>
           </button>
@@ -55,7 +64,7 @@
           <div class="window-controls no-drag" v-if="windowControlsAvailable">
             <button class="window-btn" @click="minimizeWindow" aria-label="Minimize">-</button>
             <button class="window-btn window-maximize" @click="toggleMaximizeWindow" aria-label="Maximize">
-              {{ isMaximized ? '馃棖' : '馃棗' }}
+              {{ isMaximized ? '🗖' : '🗗' }}
             </button>
             <button class="window-btn window-close" @click="closeWindow" aria-label="Close">✕</button>
           </div>
@@ -65,10 +74,20 @@
 
     <!-- Main Content -->
     <main class="main" ref="mainRef">
-      <div class="container">
-        <div v-if="activeAnnouncement" class="card no-drag" style="margin-bottom: 16px;">
+      <div class="container mobile-main-container">
+        <div v-if="isMobileShell" class="mobile-page-head">
+          <div class="mobile-page-head-title">{{ mobileTab === 'profile' ? mobileSettingsLabel : mobileTabTitle }}</div>
+          <div class="mobile-page-head-subtitle">{{ mobileTabSubtitle }}</div>
+        </div>
+
+        <div
+          v-if="activeAnnouncement"
+          v-show="!isMobileShell || mobileTab === 'build'"
+          class="card no-drag mobile-build-only"
+          style="margin-bottom: 16px;"
+        >
           <div class="card-header">
-            <div class="card-icon">馃摙</div>
+            <div class="card-icon">📢</div>
             <div>
               <div class="card-title">{{ t('announcement.title') }}</div>
               <div class="card-subtitle">{{ activeAnnouncement.title }} - {{ activeAnnouncement.body }}</div>
@@ -80,46 +99,46 @@
         </div>
 
         <!-- Mode Tabs -->
-        <div class="mode-tabs">
+        <div class="mode-tabs mobile-build-only" v-show="!isMobileShell || mobileTab === 'build'">
           <button class="mode-tab" :class="{ active: mode === 'convert' }" @click="handleModeChange('convert')">
-            <span class="mode-icon">馃摝</span>
+            <span class="mode-icon">📦</span>
             {{ t('mode.apk') }}
           </button>
           <button class="mode-tab" :class="{ active: mode === 'web' }" @click="handleModeChange('web')">
-            <span class="mode-icon">馃寪</span>
+            <span class="mode-icon">🌐</span>
             {{ t('mode.web') }}
           </button>
           <button class="mode-tab" :class="{ active: mode === 'html' }" @click="handleModeChange('html')">
-            <span class="mode-icon">馃搫</span>
+            <span class="mode-icon">📄</span>
             {{ t('mode.html') }}
           </button>
         </div>
 
         <!-- Steps -->
-        <div class="steps">
+        <div class="steps mobile-build-only" v-show="!isMobileShell || mobileTab === 'build'">
           <div class="step" :class="{ active: currentStep === 1, completed: currentStep > 1 }">
-            <div class="step-number">{{ currentStep > 1 ? '鉁? : '1' }}</div>
+            <div class="step-number">{{ currentStep > 1 ? '✓' : '1' }}</div>
             <div class="step-text">
               {{ mode === 'web' ? t('web.url') : (mode === 'html' ? t('html.upload') : t('steps.upload')) }}
             </div>
           </div>
           <div class="step" :class="{ active: currentStep === 2, completed: currentStep > 2 }">
-            <div class="step-number">{{ currentStep > 2 ? '鉁? : '2' }}</div>
+            <div class="step-number">{{ currentStep > 2 ? '✓' : '2' }}</div>
             <div class="step-text">{{ t('steps.configure') }}</div>
           </div>
           <div class="step" :class="{ active: currentStep === 3, completed: currentStep > 3 }">
-            <div class="step-number">{{ currentStep > 3 ? '鉁? : '3' }}</div>
+            <div class="step-number">{{ currentStep > 3 ? '✓' : '3' }}</div>
             <div class="step-text">{{ t('steps.build') }}</div>
           </div>
         </div>
 
-        <div class="grid grid-auto">
+        <div class="grid grid-auto mobile-content-grid">
           <!-- Left -->
-          <div class="stack">
+          <div class="stack mobile-page mobile-page-build" v-show="!isMobileShell || mobileTab === 'build'">
             <!-- Guide (convert only) -->
             <div class="card" v-if="mode === 'convert'">
               <div class="card-header">
-                <div class="card-icon">馃挕</div>
+                <div class="card-icon">💡</div>
                 <div>
                   <div class="card-title">{{ t('guide.title') }}</div>
                   <div class="card-subtitle">{{ t('guide.subtitle') }}</div>
@@ -130,7 +149,7 @@
                   class="btn btn-primary btn-sm"
                   style="margin-left: auto; text-decoration: none;"
                 >
-                  {{ t('guide.openAiStudio') }} 鈫?
+                  {{ t('guide.openAiStudio') }} ↗
                 </a>
               </div>
               <div class="guide-steps">
@@ -157,7 +176,7 @@
             <!-- Upload (convert only) -->
             <div class="card" v-if="mode === 'convert'" ref="convertUploadSection">
               <div class="card-header">
-                <div class="card-icon">馃摝</div>
+                <div class="card-icon">📦</div>
                 <div>
                   <div class="card-title">{{ t('upload.title') }}</div>
                   <div class="card-subtitle">{{ t('upload.subtitle') }}</div>
@@ -180,12 +199,12 @@
                 />
 
                 <template v-if="!uploadedFile">
-                  <div class="upload-icon">馃搧</div>
+                  <div class="upload-icon">📁</div>
                   <div class="upload-text">{{ t('upload.dragDrop') }}</div>
                   <div class="upload-hint">{{ t('upload.hint') }}</div>
                 </template>
                 <template v-else>
-                  <div class="upload-icon">鉁?/div>
+                  <div class="upload-icon">✅</div>
                   <div class="upload-text">{{ t('upload.ready') }}</div>
                   <div class="upload-file-info">
                     <span class="upload-file-name">{{ uploadedFile.original_name }}</span>
@@ -201,19 +220,11 @@
 
             <!-- HTML Upload (html only) -->
             <div class="card" v-if="mode === 'html'" ref="htmlUploadSection">
-              <div class="card-header html-upload-header">
-                <div class="html-header-main">
-                  <div class="card-icon">馃搫</div>
-                  <div>
-                    <div class="card-title">{{ t('html.title') }}</div>
-                    <div class="card-subtitle">{{ t('html.subtitle') }}</div>
-                  </div>
-                </div>
-                <div class="html-header-actions">
-                  <label class="html-localize-toggle" :title="t('html.localizeHint')">
-                    <input type="checkbox" v-model="config.html_localize_resources" />
-                    {{ t('html.localizeToggle') }}
-                  </label>
+              <div class="card-header">
+                <div class="card-icon">📄</div>
+                <div>
+                  <div class="card-title">{{ t('html.title') }}</div>
+                  <div class="card-subtitle">{{ t('html.subtitle') }}</div>
                 </div>
               </div>
 
@@ -251,12 +262,12 @@
                   />
 
                   <template v-if="!uploadedHtmlFile">
-                    <div class="upload-icon">馃搫</div>
+                    <div class="upload-icon">📄</div>
                     <div class="upload-text">{{ t('html.dragDrop') }}</div>
                     <div class="upload-hint">{{ t('html.hint') }}</div>
                   </template>
                   <template v-else>
-                    <div class="upload-icon">鉁?/div>
+                    <div class="upload-icon">✅</div>
                     <div class="upload-text">{{ t('html.ready') }}</div>
                     <div class="upload-file-info">
                       <span class="upload-file-name">{{ uploadedHtmlFile.original_name }}</span>
@@ -329,7 +340,7 @@
             <!-- Web URL (web only) -->
             <div class="card" v-if="mode === 'web'" ref="webUrlSection">
               <div class="card-header">
-                <div class="card-icon">馃寪</div>
+                <div class="card-icon">🌐</div>
                 <div>
                   <div class="card-title">{{ t('web.url') }}</div>
                   <div class="card-subtitle">{{ t('web.urlHint') }}</div>
@@ -356,7 +367,7 @@
 
               <div v-if="enableAds" class="ad-config-panel">
                 <div class="settings-section-title" style="border: none; padding: 0;">
-                  <span class="section-title-icon">馃摵</span>
+                  <span class="section-title-icon">📺</span>
                   {{ t('web.adConfig') }}
                 </div>
 
@@ -391,7 +402,7 @@
             <!-- App config -->
             <div class="card">
               <div class="card-header">
-                <div class="card-icon">鈿欙笍</div>
+                <div class="card-icon">⚙️</div>
                 <div>
                   <div class="card-title">{{ updatingTaskId ? t('config.updateTitle') : t('config.title') }}</div>
                   <div class="card-subtitle">
@@ -435,7 +446,7 @@
                     @click="resetForm"
                     :title="t('config.cancelUpdate')"
                   >
-                  鉁?{{ t('config.cancelUpdate') }}
+                  ✕ {{ t('config.cancelUpdate') }}
                 </button>
                 </div>
               </div>
@@ -461,7 +472,7 @@
                     />
                     <img v-if="appIcon" :src="appIcon" alt="App Icon" />
                 <div v-else class="icon-placeholder">
-                      <span class="icon-placeholder-icon">馃柤锔?/span>
+                      <span class="icon-placeholder-icon">🖼️</span>
                       <span class="icon-placeholder-text">{{ t('icon.uploadHint') }}</span>
                     </div>
                   </div>
@@ -530,7 +541,7 @@
 
               <!-- APK style -->
               <div class="card-header" style="margin-bottom: 16px; padding: 0;">
-                <div class="card-icon" style="width: 36px; height: 36px; font-size: 16px;">馃帹</div>
+                <div class="card-icon" style="width: 36px; height: 36px; font-size: 16px;">🎨</div>
                 <div>
                   <div class="card-title" style="font-size: 15px;">{{ t('config.styleTitle') }}</div>
                 </div>
@@ -590,7 +601,7 @@
 
               <div v-if="enablePermissions" class="permissions-panel">
                 <div class="card-header" style="margin-bottom: 16px; padding: 0; border: none;">
-                  <div class="card-icon" style="width: 36px; height: 36px; font-size: 16px;">馃洝锔?/div>
+                  <div class="card-icon" style="width: 36px; height: 36px; font-size: 16px;">🛡️</div>
                   <div>
                     <div class="card-title" style="font-size: 15px;">{{ t('config.permissionsTitle') }}</div>
                     <div class="card-subtitle" style="font-size: 12px;">{{ t('config.permissionsHint') }}</div>
@@ -606,7 +617,7 @@
                   >
                     <input type="checkbox" :value="perm" v-model="config.permissions" style="display: none;" />
                     <div class="perm-check">
-                      {{ config.permissions.includes(perm) ? '鉁? : '' }}
+                      {{ config.permissions.includes(perm) ? '✓' : '' }}
                     </div>
                     <div class="perm-info">
                       <div class="perm-name">{{ t('config.perm.' + perm) }}</div>
@@ -620,7 +631,7 @@
 
               <!-- Signing -->
               <div class="card-header" style="margin-bottom: 16px; padding: 0;">
-                <div class="card-icon" style="width: 36px; height: 36px; font-size: 16px;">馃攼</div>
+                <div class="card-icon" style="width: 36px; height: 36px; font-size: 16px;">🔐</div>
                 <div>
                   <div class="card-title" style="font-size: 15px;">{{ t('config.signConfig') }}</div>
                   <div class="card-subtitle" style="font-size: 12px; color: var(--text-muted);">{{ t('config.signConfigHint') }}</div>
@@ -647,7 +658,7 @@
                     :disabled="isKeystoreUploaded || !!updatingTaskId"
                   />
                   <div class="keystore-upload-main">
-                    <div class="keystore-icon">馃攽</div>
+                    <div class="keystore-icon">🔑</div>
                     <div class="keystore-meta">
                       <div class="keystore-subtitle">.jks / .keystore</div>
                     </div>
@@ -729,9 +740,13 @@
           </div>
 
           <!-- Right -->
-          <div class="card">
+          <div
+            ref="tasksSection"
+            class="card mobile-page mobile-page-tasks"
+            v-show="!isMobileShell || mobileTab === 'tasks'"
+          >
             <div class="card-header">
-              <div class="card-icon">馃搵</div>
+              <div class="card-icon">📋</div>
               <div>
                 <div class="card-title">{{ t('tasks.title') }}</div>
                 <div class="card-subtitle">{{ t('tasks.subtitle') }}</div>
@@ -781,7 +796,7 @@
                     @click="startTask(task.id)"
                     :title="t('tasks.start')"
                   >
-                    鈻?
+                    ▶
                   </button>
                   <span v-if="task.status === 'processing'" class="task-progress-badge">
                     {{ isQueuedTask(task) ? t('tasks.waiting') : `${task.progress}%` }}
@@ -809,7 +824,7 @@
                     @click="useTaskConfig(task)"
                     :title="t('tasks.useConfig')"
                   >
-                    馃攧
+                    🔄
                   </button>
                   <button
                     v-if="task.status === 'failed'"
@@ -817,13 +832,13 @@
                     @click="retryTask(task.id)"
                     :title="t('tasks.retry')"
                   >
-                    馃攧
+                    🔄
                   </button>
                   <button
                     v-if="isCancelableTask(task) && task.status !== 'processing' && !isQueuedTask(task)"
                     class="btn btn-warning btn-sm"
                     @click="cancelTask(task.id)"
-                    title="鍙栨秷"
+                    title="取消"
                   >
                     X
                   </button>
@@ -833,7 +848,7 @@
                     @click="viewLogs(task.id)"
                     :title="t('tasks.viewLogs')"
                   >
-                    馃搵
+                    📋
                   </button>
                   <button
                     class="btn btn-ghost btn-sm"
@@ -841,21 +856,21 @@
                     :title="t('tasks.delete')"
                     style="color: var(--error-start);"
                   >
-                    鉁?
+                    ✕
                   </button>
                 </div>
               </div>
             </div>
 
             <div v-else class="empty-state">
-              <div class="empty-icon">馃摥</div>
+              <div class="empty-icon">📭</div>
               <div class="empty-text">{{ t('tasks.noTasks') }}</div>
               <div class="empty-hint">{{ t('tasks.createFirst') }}</div>
             </div>
 
             <div v-if="totalTaskPages > 1" class="pagination">
               <button class="btn btn-ghost btn-sm" :disabled="currentTaskPage <= 1" @click="goToTaskPage(currentTaskPage - 1)">
-                鈥?
+                ‹
               </button>
               <button
                 v-for="page in taskPageNumbers"
@@ -871,21 +886,79 @@
                 :disabled="currentTaskPage >= totalTaskPages"
                 @click="goToTaskPage(currentTaskPage + 1)"
               >
-                鈥?
+                ›
               </button>
+            </div>
+          </div>
+
+          <div
+            v-if="isMobileShell"
+            ref="profileSection"
+            class="card mobile-page mobile-page-profile"
+            v-show="mobileTab === 'profile'"
+          >
+            <div class="mobile-profile-actions">
+              <button class="mobile-action-item" @click="openSettings">
+                <span class="mobile-action-icon">&#x1F4AC;</span>
+                <span class="mobile-action-text">{{ t('settings.feedbackSection') }}</span>
+                <span class="mobile-action-arrow">&#x203A;</span>
+              </button>
+
+              <button class="mobile-action-item" @click="openDonation(false)">
+                <span class="mobile-action-icon">&#x1F496;</span>
+                <span class="mobile-action-text">{{ t('donation.button') }}</span>
+                <span class="mobile-action-arrow">&#x203A;</span>
+              </button>
+
+              <button class="mobile-action-item" @click="toggleTheme">
+                <span v-if="currentTheme === 'dark'" class="mobile-action-icon">&#x2600;</span>
+                <span v-else class="mobile-action-icon">&#x1F319;</span>
+                <span class="mobile-action-text">{{ currentTheme === 'dark' ? t('theme.light') : t('theme.dark') }}</span>
+                <span class="mobile-action-arrow">&#x203A;</span>
+              </button>
+            </div>
+
+            <div class="mobile-lang-card">
+              <div class="mobile-lang-title">{{ mobileSettingsLabel }} - {{ currentLangLabel }}</div>
+              <div class="mobile-lang-grid">
+                <button
+                  v-for="lang in languages"
+                  :key="'mobile-lang-' + lang.code"
+                  class="mobile-lang-item"
+                  :class="{ active: currentLang === lang.code }"
+                  @click="changeLanguage(lang.code)"
+                >
+                  {{ lang.label }}
+                </button>
+              </div>
             </div>
           </div>
         </div>
       </div>
     </main>
 
+    <nav v-if="isMobileShell" class="mobile-bottom-nav no-drag">
+      <button class="mobile-tab-btn" :class="{ active: mobileTab === 'build' }" @click="switchMobileTab('build')">
+        <span class="mobile-tab-icon">&#x1F6E0;</span>
+        <span class="mobile-tab-label">{{ t('config.title') }}</span>
+      </button>
+      <button class="mobile-tab-btn" :class="{ active: mobileTab === 'tasks' }" @click="switchMobileTab('tasks')">
+        <span class="mobile-tab-icon">&#x1F4CB;</span>
+        <span class="mobile-tab-label">{{ t('tasks.title') }}</span>
+      </button>
+      <button class="mobile-tab-btn" :class="{ active: mobileTab === 'profile' }" @click="switchMobileTab('profile')">
+        <span class="mobile-tab-icon">&#x2699;</span>
+        <span class="mobile-tab-label">{{ mobileSettingsLabel }}</span>
+      </button>
+    </nav>
+
     <!-- Cropper dialog -->
     <Teleport to="body">
       <div v-if="showCropper" class="cropper-overlay" @click.self="closeCropper">
         <div class="cropper-dialog">
           <div class="cropper-dialog-header">
-            <h3>鉁傦笍 {{ t('cropper.title') }}</h3>
-            <button class="cropper-close-btn" @click="closeCropper">鉁?/button>
+            <h3>✂️ {{ t('cropper.title') }}</h3>
+            <button class="cropper-close-btn" @click="closeCropper">✕</button>
           </div>
           <div class="cropper-dialog-body">
             <Cropper
@@ -915,8 +988,8 @@
       <div v-if="showLogs" class="logs-overlay" @click.self="closeLogs">
         <div class="logs-dialog">
           <div class="logs-dialog-header">
-            <h3>馃搵 {{ t('logs.title') }}</h3>
-            <button class="logs-close-btn" @click="closeLogs">鉁?/button>
+            <h3>📋 {{ t('logs.title') }}</h3>
+            <button class="logs-close-btn" @click="closeLogs">✕</button>
           </div>
           <div class="logs-dialog-body" ref="logsContainer">
             <div v-if="taskLogs.length === 0" class="logs-empty">{{ t('logs.noLogs') }}</div>
@@ -925,14 +998,14 @@
                 v-for="(log, index) in taskLogs"
                 :key="index"
                 class="log-line"
-                :class="{ 'log-error': log.includes('ERROR') || log.includes('閿欒'), 'log-success': log.includes('鎴愬姛') || log.includes('瀹屾垚') }"
+                :class="{ 'log-error': log.includes('ERROR') || log.includes('错误'), 'log-success': log.includes('成功') || log.includes('完成') }"
               >
                 {{ log }}
               </div>
             </div>
           </div>
           <div class="logs-dialog-footer">
-            <button class="btn btn-secondary btn-sm" @click="refreshLogs">鈫?/button>
+            <button class="btn btn-secondary btn-sm" @click="refreshLogs">↻</button>
             <span class="logs-count">{{ taskLogs.length }}</span>
           </div>
         </div>
@@ -992,8 +1065,8 @@
       <div v-if="showDonation" class="donation-overlay" @click.self="closeDonation">
         <div class="donation-dialog">
           <div class="donation-dialog-header">
-            <h3>馃挍 {{ t('donation.title') }}</h3>
-            <button class="donation-close-btn" @click="closeDonation">鉁?/button>
+            <h3>💛 {{ t('donation.title') }}</h3>
+            <button class="donation-close-btn" @click="closeDonation">✕</button>
           </div>
           <div class="donation-dialog-body">
             <div class="donation-message">{{ t('donation.message') }}</div>
@@ -1033,7 +1106,7 @@
             
             <div class="settings-section">
               <div class="settings-section-title">
-                <span class="section-title-icon">馃挰</span>
+                <span class="section-title-icon">💬</span>
                 {{ t('settings.feedbackSection') }}
               </div>
               <div class="settings-hint">
@@ -1092,1813 +1165,17 @@
   </div>
 </template>
 
-<script setup>
-import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+<script>
+import { defineComponent } from 'vue'
 import { Cropper } from 'vue-advanced-cropper'
 import 'vue-advanced-cropper/dist/style.css'
-import { EditorState, Compartment } from '@codemirror/state'
-import {
-  EditorView,
-  keymap,
-  lineNumbers,
-  highlightActiveLine,
-  highlightActiveLineGutter,
-  highlightSpecialChars,
-  drawSelection,
-  dropCursor,
-  rectangularSelection
-} from '@codemirror/view'
-import {
-  defaultHighlightStyle,
-  syntaxHighlighting,
-  indentOnInput,
-  bracketMatching,
-  foldGutter,
-  foldKeymap,
-  syntaxTree,
-  ensureSyntaxTree
-} from '@codemirror/language'
-import { html } from '@codemirror/lang-html'
-import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
-import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete'
-import { lintGutter, setDiagnostics } from '@codemirror/lint'
-import { searchKeymap, highlightSelectionMatches } from '@codemirror/search'
-import * as api from './api'
-const alipayQr = new URL('./pics/鏀粯瀹?png', import.meta.url).href
-const wechatQr = new URL('./pics/寰俊.png', import.meta.url).href
-import { messages, getSavedLanguage, saveLanguage, getSavedTheme, saveTheme, createI18n } from './i18n'
-
-// Theme / Language
-const currentTheme = ref(getSavedTheme())
-const currentLang = ref(getSavedLanguage())
-const showLangMenu = ref(false)
-const openDownloadMenu = ref(null)
-const languages = [
-  { code: 'en', label: 'English' },
-  { code: 'zh-CN', label: '绠€浣撲腑鏂? },
-  { code: 'zh-TW', label: '绻侀珨涓枃' }
-]
-const currentLangLabel = computed(() => {
-  const lang = languages.find((l) => l.code === currentLang.value)
-  return lang ? lang.label : 'Language'
-})
-
-const i18n = ref(createI18n(currentLang.value))
-const t = (key, params) => i18n.value.t(key, params)
-
-const applyTheme = (theme) => {
-  if (theme === 'light') document.documentElement.classList.add('light-theme')
-  else document.documentElement.classList.remove('light-theme')
-}
-
-const toggleTheme = () => {
-  const newTheme = currentTheme.value === 'dark' ? 'light' : 'dark'
-  currentTheme.value = newTheme
-  saveTheme(newTheme)
-  applyTheme(newTheme)
-}
-
-const changeLanguage = (lang) => {
-  currentLang.value = lang
-  saveLanguage(lang)
-  i18n.value = createI18n(lang)
-  showLangMenu.value = false
-}
-
-const toggleDownloadMenu = (taskId) => {
-  openDownloadMenu.value = openDownloadMenu.value === taskId ? null : taskId
-}
-const closeDownloadMenu = () => {
-  openDownloadMenu.value = null
-}
-
-const handleClickOutside = (e) => {
-  if (!e.target.closest('.lang-switch')) showLangMenu.value = false
-  if (!e.target.closest('.download-dropdown')) closeDownloadMenu()
-}
-
-// Modes & feature state
-const mode = ref('convert') // convert | web | html
-const mainRef = ref(null)
-const convertUploadSection = ref(null)
-const htmlUploadSection = ref(null)
-const webUrlSection = ref(null)
-const webUrl = ref('')
-const enableAds = ref(false)
-const adConfig = ref({ appId: '', appKey: '', placementId: '' })
-const enablePermissions = ref(false)
-const useCustomKeystore = ref(false)
-const quickGenerate = ref(false)
-const quickGenerateStash = ref(null)
-const codeCopied = ref(false)
-
-const isMobileViewport = () => {
-  if (typeof window === 'undefined') return false
-  if (window.matchMedia) return window.matchMedia('(max-width: 640px)').matches
-  return window.innerWidth <= 640
-}
-
-const scrollToProjectSection = async () => {
-  if (!isMobileViewport()) return
-  await nextTick()
-  const target = mode.value === 'convert'
-    ? convertUploadSection.value
-    : (mode.value === 'html' ? htmlUploadSection.value : webUrlSection.value)
-  if (!target) return
-  if (mainRef.value) {
-    const container = mainRef.value
-    const containerRect = container.getBoundingClientRect()
-    const targetRect = target.getBoundingClientRect()
-    const offset = targetRect.top - containerRect.top + container.scrollTop - 12
-    container.scrollTo({ top: Math.max(0, offset), behavior: 'smooth' })
-    return
-  }
-  target.scrollIntoView({ behavior: 'smooth', block: 'start' })
-}
-
-const handleModeChange = (value) => {
-  mode.value = value
-  resetForm()
-  scrollToProjectSection()
-}
-
-const jsTemplate = `// 1. 瀹氫箟骞垮憡API (h5api) - 闇€娣诲姞鍒版偍鐨勭綉椤典腑
-window.h5api = {
-  canPlayAd: function(callback) {
-    if (callback) callback({ canPlayAd: true });
-    return true;
-  },
-  playAd: function(callback) {
-    if (window.adIsExecuting) {
-      callback({ code: 10006, message: "骞垮憡鍔犺浇涓? });
-      return;
-    }
-    window.adIsExecuting = true;
-    if (window.sendToApp) {
-      let tm = setTimeout(() => {
-        window.playAdBack = () => {};
-        window.adIsExecuting = false;
-        callback({ code: 10005, message: "瓒呮椂" });
-      }, 10000);
-      window.playAdBack = function(msg) {
-        clearTimeout(tm);
-        let data = typeof msg === "string" ? JSON.parse(msg) : msg;
-        window.adIsExecuting = false;
-        callback(data);
-      };
-      window.sendToApp("playAd", "");
-    } else {
-      window.adIsExecuting = false;
-      callback({ code: 10004, message: "鏃犵幆澧冿紝涓嶆敮鎸佸箍鍛? });
-    }
-  }
-};
-var app = {
-  showVideo: function(videoAdCallback) {
-    if (window.h5api && h5api.canPlayAd()) {
-      h5api.playAd(function(res) {
-        if (res.code === 10001) {
-          videoAdCallback(1);
-        } else {
-          console.log("骞垮憡鏈畬鎴? " + res.message);
-        }
-      });
-    }
-  }
-};`
-
-const copyJsCode = () => {
-  navigator.clipboard.writeText(jsTemplate).then(() => {
-    codeCopied.value = true
-    setTimeout(() => (codeCopied.value = false), 2000)
-  })
-}
-
-const permissionsList = [
-  'INTERNET',
-  'ACCESS_NETWORK_STATE',
-  'ACCESS_WIFI_STATE',
-  'CAMERA',
-  'READ_EXTERNAL_STORAGE',
-  'WRITE_EXTERNAL_STORAGE',
-  'ACCESS_FINE_LOCATION',
-  'ACCESS_COARSE_LOCATION',
-  'RECORD_AUDIO',
-  'READ_PHONE_STATE',
-  'CALL_PHONE',
-  'READ_CONTACTS',
-  'WRITE_CONTACTS',
-  'VIBRATE',
-  'WAKE_LOCK',
-  'RECEIVE_BOOT_COMPLETED',
-  'FOREGROUND_SERVICE',
-  'REQUEST_INSTALL_PACKAGES',
-  'SYSTEM_ALERT_WINDOW',
-  'BLUETOOTH',
-  'BLUETOOTH_ADMIN',
-  'NFC',
-  'READ_CALENDAR',
-  'WRITE_CALENDAR'
-]
-const normalizePermissionForUi = (permission) => {
-  const raw = String(permission || '').trim()
-  if (!raw) return ''
-  if (raw.startsWith('android.permission.')) {
-    return raw.slice('android.permission.'.length).toUpperCase()
-  }
-  if (permissionsList.includes(raw)) return raw
-  const upper = raw.toUpperCase()
-  if (permissionsList.includes(upper)) return upper
-  return raw
-}
-const normalizePermissionsForUi = (permissions) => {
-  if (!Array.isArray(permissions)) return []
-  const normalized = []
-  const seen = new Set()
-  for (const perm of permissions) {
-    const value = normalizePermissionForUi(perm)
-    if (!value || seen.has(value)) continue
-    seen.add(value)
-    normalized.push(value)
-  }
-  return normalized
-}
-
-// Task flow
-const defaultHtmlTemplate = `<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>My HTML App</title>
-    <style>
-      body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
-      main { padding: 32px; }
-    </style>
-  </head>
-  <body>
-    <main>
-      <h1>Hello HTML</h1>
-      <p>Edit this HTML and save to build your APK.</p>
-    </main>
-  </body>
-</html>
-`
-
-const currentStep = ref(1)
-const isDragging = ref(false)
-const isHtmlDragging = ref(false)
-const fileInput = ref(null)
-const htmlInput = ref(null)
-const htmlInputMode = ref('file')
-const htmlEditorContainer = ref(null)
-const htmlEditorModalContainer = ref(null)
-const htmlEditorInstance = ref(null)
-const htmlEditorReady = ref(false)
-const htmlEditorContent = ref(defaultHtmlTemplate)
-const htmlEditorDirty = ref(false)
-const htmlEditorMarkers = ref([])
-const htmlSavedContent = ref('')
-const showHtmlEditorModal = ref(false)
-const iconInput = ref(null)
-const keystoreInput = ref(null)
-const uploadedKeystore = ref(null)
-const keystoreUploadError = ref('')
-const uploadedFile = ref(null)
-const uploadedHtmlFile = ref(null)
-const uploadProgress = ref(0)
-const htmlUploadProgress = ref(0)
-const isCreating = ref(false)
-const isHtmlUploading = computed(() => htmlUploadProgress.value > 0 && htmlUploadProgress.value < 100)
-const htmlEditorContentEmpty = computed(() => !htmlEditorContent.value.trim())
-const htmlErrorCount = computed(() => htmlEditorMarkers.value.filter((marker) => marker.severity === 'error').length)
-const hasSavedHtmlContent = computed(() => Boolean(htmlSavedContent.value))
-const canSaveEditorHtml = computed(() => !isHtmlUploading.value && !htmlEditorContentEmpty.value)
-const canUseSavedHtmlForBuild = computed(() => hasSavedHtmlContent.value && !htmlEditorDirty.value)
-
-const htmlEditorLoading = ref(false)
-const htmlEditorThemeCompartment = new Compartment()
-let isHtmlProgrammaticUpdate = false
-let htmlDiagnosticsHandle = null
-
-// Tasks & queue
-const tasks = ref([])
-const queueStatus = ref({ queue_size: 0, running_count: 0, max_concurrent: 1 })
-let pollInterval = null
-
-// Settings
-const showSettings = ref(false)
-const announcements = ref([])
-const deviceInfo = ref({ cpu: '', ram: '', os: '', cores: '' })
-const feedbackContent = ref('')
-const feedbackImages = ref([])
-const feedbackFileInput = ref(null)
-const feedbackSubmitting = ref(false)
-const showDonation = ref(false)
-const donationHideChecked = ref(false)
-const donationAutoDisabled = ref(localStorage.getItem('apk_builder_donation_hide') === '1')
-const previousVersionName = ref('')
-
-// Logs
-const showLogs = ref(false)
-const taskLogs = ref([])
-const currentLogTaskId = ref(null)
-const logsContainer = ref(null)
-
-// Update existing task
-const updatingTaskId = ref(null)
-const updatingTask = ref(null)
-
-// Icon / Cropper
-const appIcon = ref(null)
-const appIconFile = ref(null)
-const uploadedIcon = ref(null)
-const iconError = ref('')
-const showCropper = ref(false)
-const cropperRef = ref(null)
-const cropperImageSrc = ref('')
-
-// Window controls (Electron)
-const isMaximized = ref(false)
-const windowControlsAvailable = computed(() => Boolean(window.windowControls))
-
-const minimizeWindow = () => window.windowControls?.minimize?.()
-const toggleMaximizeWindow = async () => {
-  await window.windowControls?.toggleMaximize?.()
-  if (window.windowControls?.isMaximized) {
-    isMaximized.value = await window.windowControls.isMaximized()
-  }
-}
-const closeWindow = () => window.windowControls?.close?.()
-
-// Config
-const config = ref({
-  app_name: '',
-  package_name: '',
-  version_name: '1.0.0',
-  version_code: 1,
-  output_format: 'apk',
-  orientation: 'portrait',
-  double_click_exit: true,
-  status_bar_hidden: false,
-  status_bar_style: 'light',
-  status_bar_color: 'transparent',
-  webview_user_agent: 'android',
-  html_localize_resources: true,
-  download_mode: 'picker',
-  permissions: ['INTERNET', 'ACCESS_NETWORK_STATE'],
-  keystore_alias: '',
-  keystore_password: '',
-  key_password: ''
-})
-
-const applyQuickGenerateDefaults = () => {
-  // Quick generate uses backend defaults for icon & signing file; clear any user uploads.
-  if (appIcon.value && !appIcon.value.startsWith('/api/') && appIconFile.value) URL.revokeObjectURL(appIcon.value)
-  appIcon.value = null
-  appIconFile.value = null
-  uploadedIcon.value = null
-  iconError.value = ''
-
-  uploadedKeystore.value = null
-  useCustomKeystore.value = false
-  keystoreUploadError.value = ''
-  if (keystoreInput.value) keystoreInput.value.value = ''
-
-  enablePermissions.value = true
-  config.value = {
-    ...config.value,
-    app_name: 'demo',
-    package_name: 'com.convertapk.demo',
-    // Backend will auto-increment these on each task creation.
-    version_name: '1.0.0',
-    version_code: 1,
-    output_format: 'apk',
-    orientation: 'portrait',
-    double_click_exit: true,
-    status_bar_hidden: true,
-    status_bar_style: 'light',
-    status_bar_color: 'transparent',
-    html_localize_resources: true,
-    download_mode: 'picker',
-    permissions: [...permissionsList],
-    keystore_alias: 'key0',
-    keystore_password: '123456',
-    key_password: '123456'
-  }
-}
-
-const stashQuickGenerateState = () => {
-  quickGenerateStash.value = {
-    config: JSON.parse(JSON.stringify(config.value)),
-    enablePermissions: enablePermissions.value,
-    useCustomKeystore: useCustomKeystore.value,
-    keystoreUploadError: keystoreUploadError.value,
-    uploadedKeystore: uploadedKeystore.value ? { ...uploadedKeystore.value } : null,
-    iconError: iconError.value,
-    uploadedIcon: uploadedIcon.value ? { ...uploadedIcon.value } : null,
-    appIcon: appIcon.value,
-    appIconFile: appIconFile.value
-  }
-}
-
-const restoreQuickGenerateState = () => {
-  const stash = quickGenerateStash.value
-  if (!stash) return
-
-  enablePermissions.value = Boolean(stash.enablePermissions)
-  useCustomKeystore.value = Boolean(stash.useCustomKeystore)
-  keystoreUploadError.value = String(stash.keystoreUploadError || '')
-  uploadedKeystore.value = stash.uploadedKeystore || null
-
-  iconError.value = String(stash.iconError || '')
-  uploadedIcon.value = stash.uploadedIcon || null
-
-  // Restore icon preview
-  if (appIcon.value && !appIcon.value.startsWith('/api/') && appIconFile.value) {
-    try { URL.revokeObjectURL(appIcon.value) } catch {}
-  }
-  appIconFile.value = stash.appIconFile || null
-  if (appIconFile.value) {
-    appIcon.value = URL.createObjectURL(appIconFile.value)
-  } else {
-    appIcon.value = stash.appIcon || null
-  }
-
-  config.value = stash.config || config.value
-
-  // File inputs cannot be restored; reset the native value for cleanliness.
-  if (keystoreInput.value) keystoreInput.value.value = ''
-}
-
-const enterQuickGenerate = () => {
-  if (quickGenerate.value) return
-  if ((mode.value !== 'convert' && mode.value !== 'web' && mode.value !== 'html') || updatingTaskId.value) return
-  stashQuickGenerateState()
-  quickGenerate.value = true
-  applyQuickGenerateDefaults()
-}
-
-const exitQuickGenerate = () => {
-  if (!quickGenerate.value) return
-  quickGenerate.value = false
-  restoreQuickGenerateState()
-  quickGenerateStash.value = null
-}
-
-// Toast
-const toast = ref({ show: false, type: 'success', message: '' })
-const showToast = (message, type = 'success') => {
-  toast.value = { show: true, type, message }
-  setTimeout(() => (toast.value.show = false), 3000)
-}
-
-const isValidPackageName = (value) => {
-  if (!value) return false
-  const trimmed = String(value).trim()
-  return /^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$/.test(trimmed)
-}
-
-const isValidUrl = (value) => {
-  if (!value) return false
-  try {
-    const url = new URL(value)
-    return url.protocol === 'http:' || url.protocol === 'https:'
-  } catch {
-    return false
-  }
-}
-
-const isValidHostName = (value) => {
-  if (!value) return false
-  const host = String(value).toLowerCase()
-  if (host === 'localhost') return true
-  const ipv4 = /^(25[0-5]|2[0-4]\d|1?\d?\d)(\.(25[0-5]|2[0-4]\d|1?\d?\d)){3}$/
-  if (ipv4.test(host)) return true
-  const labels = host.split('.')
-  if (labels.length < 2) return false
-  return labels.every((label, idx) => {
-    if (!label || label.length > 63) return false
-    if (!/^[a-z0-9-]+$/.test(label)) return false
-    if (label.startsWith('-') || label.endsWith('-')) return false
-    if (idx === labels.length - 1 && label.length < 2) return false
-    return true
-  })
-}
-
-const isValidPort = (value) => {
-  if (!value) return true
-  const port = Number(value)
-  return Number.isInteger(port) && port >= 1 && port <= 65535
-}
-
-const isValidWebUrl = (value) => {
-  if (!value) return false
-  const trimmed = String(value).trim()
-  if (!trimmed) return false
-  const candidate = /^https?:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`
-  try {
-    const url = new URL(candidate)
-    if (url.protocol !== 'http:' && url.protocol !== 'https:') return false
-    if (!isValidHostName(url.hostname)) return false
-    return isValidPort(url.port)
-  } catch {
-    return false
-  }
-}
-
-const webUrlError = computed(() => {
-  if (!webUrl.value) return ''
-  return isValidWebUrl(webUrl.value) ? '' : t('web.validUrlError')
-})
-
-const packageNameError = computed(() => {
-  if (!config.value.package_name) return ''
-  return isValidPackageName(config.value.package_name) ? '' : t('config.packageNameRule')
-})
-
-const keystorePasswordError = computed(() => {
-  const value = String(config.value.keystore_password || '')
-  if (!value) return ''
-  return value.length >= 6 ? '' : t('config.keystorePasswordRule')
-})
-
-const keyPasswordError = computed(() => {
-  const value = String(config.value.key_password || '')
-  if (!value) return ''
-  return value.length >= 6 ? '' : t('config.keyPasswordRule')
-})
-
-const isKeystoreUploaded = computed(() => Boolean(uploadedKeystore.value))
-
-const canCreateTask = computed(() => {
-  const shouldCheckKeystore = !isKeystoreUploaded.value
-  const hasIcon = quickGenerate.value && (mode.value === 'convert' || mode.value === 'web' || mode.value === 'html') && !updatingTaskId.value
-    ? true
-    : (appIcon.value || uploadedIcon.value)
-  const common =
-    config.value.app_name &&
-    config.value.package_name &&
-    !packageNameError.value &&
-    (!shouldCheckKeystore || (!keystorePasswordError.value && !keyPasswordError.value)) &&
-    hasIcon
-
-  if (mode.value === 'convert') {
-    return common && uploadedFile.value
-  }
-  if (mode.value === 'html') {
-    const htmlReady =
-      htmlInputMode.value === 'edit'
-        ? canUseSavedHtmlForBuild.value
-        : Boolean(uploadedHtmlFile.value)
-    return common && htmlReady
-  }
-  const basicWeb = common && webUrl.value && !webUrlError.value
-  if (enableAds.value) {
-    return basicWeb && adConfig.value.appId && adConfig.value.appKey && adConfig.value.placementId
-  }
-  return basicWeb
-})
-
-watch(() => mode.value, (value) => {
-  if (value !== 'convert' && value !== 'web' && value !== 'html' && quickGenerate.value) {
-    exitQuickGenerate()
-  }
-})
-
-watch([() => mode.value, () => htmlInputMode.value], async ([nextMode, nextInputMode]) => {
-  if (nextMode === 'html' && nextInputMode === 'edit') {
-    if (!htmlEditorInstance.value) {
-      htmlEditorLoading.value = true
-      try {
-        await nextTick()
-        await waitForFrame()
-        const targetContainer = showHtmlEditorModal.value ? htmlEditorModalContainer.value : htmlEditorContainer.value
-        mountHtmlEditor(targetContainer)
-      } finally {
-        htmlEditorLoading.value = false
-      }
-    }
-    htmlEditorInstance.value?.requestMeasure()
-  }
-})
-
-const applyHtmlEditorTheme = () => {
-  if (!htmlEditorInstance.value) return
-  htmlEditorInstance.value.dispatch({
-    effects: htmlEditorThemeCompartment.reconfigure(getHtmlEditorTheme())
-  })
-}
-
-watch(currentTheme, () => {
-  applyHtmlEditorTheme()
-})
-
-watch(showHtmlEditorModal, async (isOpen) => {
-  if (htmlInputMode.value !== 'edit') return
-  htmlEditorLoading.value = true
-  try {
-    await nextTick()
-    await waitForFrame()
-    const targetContainer = isOpen ? htmlEditorModalContainer.value : htmlEditorContainer.value
-    mountHtmlEditor(targetContainer)
-  } finally {
-    htmlEditorLoading.value = false
-  }
-})
-
-const resolveWebUrl = async (input) => {
-  const raw = String(input || '').trim()
-  if (!raw) return ''
-  const hasScheme = /^https?:\/\//i.test(raw)
-  const candidates = hasScheme ? [raw] : [`https://${raw}`, `http://${raw}`]
-  for (const candidate of candidates) {
-    try {
-      const result = await api.probeUrl(candidate)
-      if (result?.ok) return candidate
-    } catch (_) {
-      // ignore and try next
-    }
-  }
-  return ''
-}
-
-const getTaskTime = (task) => task.updated_at || task.created_at
-const sortedTasks = computed(() => (
-  [...tasks.value].sort((a, b) => new Date(getTaskTime(b)) - new Date(getTaskTime(a)))
-))
-const taskPageSize = 10
-const currentTaskPage = ref(1)
-const totalTaskPages = computed(() => Math.max(1, Math.ceil(sortedTasks.value.length / taskPageSize)))
-const pagedTasks = computed(() => {
-  const start = (currentTaskPage.value - 1) * taskPageSize
-  return sortedTasks.value.slice(start, start + taskPageSize)
-})
-const taskPageNumbers = computed(() => Array.from({ length: totalTaskPages.value }, (_, i) => i + 1))
-const goToTaskPage = (page) => {
-  const clamped = Math.max(1, Math.min(totalTaskPages.value, Number(page || 1)))
-  currentTaskPage.value = clamped
-}
-const taskStats = computed(() => {
-  const total = tasks.value.length
-  const success = tasks.value.filter((t) => t.status === 'success').length
-  return { total, success }
-})
-
-const dismissedAnnouncementId = ref(localStorage.getItem('apk_builder_announcement_id'))
-const activeAnnouncement = ref(null)
-const resolveActiveAnnouncement = () => {
-  const dismissedId = dismissedAnnouncementId.value
-  activeAnnouncement.value = announcements.value.find((item) => String(item.id) !== dismissedId) || null
-}
-
-// Helpers
-const formatFileSize = (bytes) => {
-  if (!bytes && bytes !== 0) return '-'
-  if (bytes < 1024) return bytes + ' B'
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
-  return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
-}
-const formatDate = (dateStr) => {
-  const date = new Date(dateStr)
-  return date.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
-}
-const parseVersionParts = (value) => {
-  const raw = String(value || '').trim()
-  if (!raw) return [0]
-  return raw.split('.').map((part) => {
-    const n = Number(part)
-    return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0
-  })
-}
-const compareVersion = (a, b) => {
-  const left = parseVersionParts(a)
-  const right = parseVersionParts(b)
-  const maxLen = Math.max(left.length, right.length)
-  for (let i = 0; i < maxLen; i += 1) {
-    const l = left[i] ?? 0
-    const r = right[i] ?? 0
-    if (l > r) return 1
-    if (l < r) return -1
-  }
-  return 0
-}
-const bumpPatchVersion = (value) => {
-  const parts = parseVersionParts(value)
-  if (!parts.length) return '1.0.1'
-  while (parts.length < 3) parts.push(0)
-  parts[parts.length - 1] += 1
-  return parts.join('.')
-}
-const getStatusText = (status) => {
-  const map = { pending: t('status.pending'), processing: t('status.processing'), success: t('status.success'), failed: t('status.failed') }
-  return map[status] || status
-}
-const getTaskIcon = (status) => {
-  const map = { pending: '鈴?, processing: '鈿欙笍', success: '鉁?, failed: '鉂? }
-  return map[status] || '馃摝'
-}
-const getDownloadUrl = (taskId) => api.getDownloadUrl(taskId)
-const getKeystoreUrl = (taskId) => api.getKeystoreUrl(taskId)
-const isQueuedTask = (task) => {
-  if (task?.status === 'pending') return true
-  if (task?.status !== 'processing') return false
-  return String(task?.message || '').includes('鎺掗槦')
-}
-const isCancelableTask = (task) => task?.status === 'pending' || task?.status === 'processing'
-
-// Upload
-const triggerFileInput = () => fileInput.value?.click?.()
-const handleFileSelect = async (event) => {
-  const file = event.target.files[0]
-  if (file) await uploadFile(file)
-}
-const handleDrop = async (event) => {
-  isDragging.value = false
-  const file = event.dataTransfer.files[0]
-  if (file && file.name.endsWith('.zip')) await uploadFile(file)
-  else showToast('璇蜂笂浼?ZIP 鏂囦欢', 'error')
-}
-const uploadFile = async (file) => {
-  try {
-    uploadProgress.value = 0
-    const result = await api.uploadFile(file, (progress) => (uploadProgress.value = progress))
-    uploadedFile.value = result
-    currentStep.value = 2
-    showToast(t('toast.uploadSuccess'), 'success')
-  } catch (error) {
-    showToast(t('toast.uploadFailed') + ': ' + (error.response?.data?.detail || error.message), 'error')
-  }
-}
-
-const handleHtmlSelect = async (event) => {
-  const file = event.target.files[0]
-  if (!file) return
-  await syncHtmlEditorContent(file)
-  await uploadHtml(file)
-  htmlEditorDirty.value = false
-}
-const handleHtmlDrop = async (event) => {
-  isHtmlDragging.value = false
-  const file = event.dataTransfer.files[0]
-  if (file && /\.(html|htm)$/i.test(file.name)) {
-    await syncHtmlEditorContent(file)
-    await uploadHtml(file)
-    htmlEditorDirty.value = false
-  } else {
-    showToast(t('html.htmlRequired'), 'error')
-  }
-}
-const uploadHtml = async (file) => {
-  try {
-    htmlUploadProgress.value = 0
-    const result = await api.uploadHtml(file, (progress) => (htmlUploadProgress.value = progress))
-    uploadedHtmlFile.value = result
-    currentStep.value = 2
-    showToast(t('toast.uploadSuccess'), 'success')
-    return result
-  } catch (error) {
-    showToast(t('toast.uploadFailed') + ': ' + (error.response?.data?.detail || error.message), 'error')
-    return null
-  }
-}
-
-const waitForFrame = () =>
-  new Promise((resolve) => {
-    if (typeof requestAnimationFrame === 'function') {
-      requestAnimationFrame(() => resolve())
-    } else {
-      setTimeout(resolve, 0)
-    }
-  })
-
-const htmlEditorLightTheme = EditorView.theme(
-  {
-    '&': { backgroundColor: 'transparent', color: 'var(--text-main)' },
-    '.cm-content': {
-      fontFamily: 'JetBrains Mono, Fira Code, Menlo, Monaco, Consolas, "Courier New", monospace',
-      fontSize: '13px',
-      lineHeight: '1.6'
-    },
-    '.cm-gutters': { backgroundColor: 'transparent', border: 'none', color: 'var(--text-sub)' },
-    '.cm-activeLine': { backgroundColor: 'rgba(59, 130, 246, 0.08)' },
-    '.cm-activeLineGutter': { backgroundColor: 'rgba(59, 130, 246, 0.12)' }
-  },
-  { dark: false }
-)
-
-const htmlEditorDarkTheme = EditorView.theme(
-  {
-    '&': { backgroundColor: 'transparent', color: '#e2e8f0' },
-    '.cm-gutters': { backgroundColor: 'transparent', border: 'none', color: '#94a3b8' }
-  },
-  { dark: true }
-)
-
-const getHtmlEditorTheme = () => (currentTheme.value === 'dark' ? htmlEditorDarkTheme : htmlEditorLightTheme)
-
-const createHtmlEditorState = (content) => {
-  const updateListener = EditorView.updateListener.of((update) => {
-    if (update.docChanged && !isHtmlProgrammaticUpdate) {
-      htmlEditorContent.value = update.state.doc.toString()
-      htmlEditorDirty.value = true
-      scheduleHtmlDiagnostics(update.view)
-    }
-  })
-
-  return EditorState.create({
-    doc: content,
-    extensions: [
-      htmlEditorThemeCompartment.of(getHtmlEditorTheme()),
-      lineNumbers(),
-      highlightActiveLineGutter(),
-      highlightSpecialChars(),
-      history(),
-      foldGutter(),
-      drawSelection(),
-      dropCursor(),
-      rectangularSelection(),
-      EditorState.allowMultipleSelections.of(true),
-      indentOnInput(),
-      bracketMatching(),
-      closeBrackets(),
-      autocompletion(),
-      highlightActiveLine(),
-      highlightSelectionMatches(),
-      syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
-      html({ autoCloseTags: true, matchClosingTags: true }),
-      lintGutter(),
-      keymap.of([
-        ...defaultKeymap,
-        ...historyKeymap,
-        ...foldKeymap,
-        ...completionKeymap,
-        ...closeBracketsKeymap,
-        ...searchKeymap,
-        indentWithTab
-      ]),
-      updateListener,
-      EditorView.lineWrapping
-    ]
-  })
-}
-
-const computeHtmlDiagnostics = (state) => {
-  const diagnostics = []
-  const seen = new Set()
-  const syntaxDiagnostics = []
-  const pushDiagnostic = (diagnostic) => {
-    const key = `${diagnostic.from}-${diagnostic.to}-${diagnostic.message}`
-    if (seen.has(key)) return
-    seen.add(key)
-    diagnostics.push(diagnostic)
-  }
-  const tree = ensureSyntaxTree(state, state.doc.length, 200)
-  if (tree) {
-    tree.iterate({
-      enter: (node) => {
-        if (!node.type.isError) return
-        const from = node.from
-        const to = Math.max(node.to, from + 1)
-        if (syntaxDiagnostics.length === 0) {
-          syntaxDiagnostics.push({
-            from,
-            to,
-            severity: 'error',
-            message: t('html.syntaxError')
-          })
-        }
-      }
-    })
-  }
-
-  const text = state.doc.toString()
-  const commentRanges = []
-  let commentStart = text.indexOf('<!--')
-  while (commentStart !== -1) {
-    const commentEnd = text.indexOf('-->', commentStart + 4)
-    if (commentEnd === -1) {
-      commentRanges.push([commentStart, text.length])
-      break
-    }
-    commentRanges.push([commentStart, commentEnd + 3])
-    commentStart = text.indexOf('<!--', commentEnd + 3)
-  }
-
-  const voidTags = new Set([
-    'area',
-    'base',
-    'br',
-    'col',
-    'embed',
-    'hr',
-    'img',
-    'input',
-    'link',
-    'meta',
-    'param',
-    'source',
-    'track',
-    'wbr'
-  ])
-
-  const tagRegex = /<\/?([a-zA-Z][\w:-]*)(\s[^<>]*?)?>/g
-  const stack = []
-  let commentIndex = 0
-  let match
-  while ((match = tagRegex.exec(text)) !== null) {
-    const fullTag = match[0]
-    const tagName = match[1]?.toLowerCase() || ''
-    const start = match.index
-    const end = start + fullTag.length
-    while (commentIndex < commentRanges.length && start >= commentRanges[commentIndex][1]) {
-      commentIndex += 1
-    }
-    if (commentIndex < commentRanges.length) {
-      const [cStart, cEnd] = commentRanges[commentIndex]
-      if (start >= cStart && start < cEnd) continue
-    }
-
-    const isClosing = fullTag.startsWith('</')
-    const isSelfClosing = /\/\s*>$/.test(fullTag) || voidTags.has(tagName)
-    if (!tagName) continue
-
-    if (!isClosing) {
-      if (!isSelfClosing) {
-        stack.push({ name: tagName, from: start, to: end })
-      }
-      continue
-    }
-
-    if (stack.length === 0) {
-      pushDiagnostic({
-        from: start,
-        to: end,
-        severity: 'error',
-        message: t('html.tagUnexpectedClose', { name: tagName })
-      })
-      continue
-    }
-
-    const last = stack[stack.length - 1]
-    if (last.name === tagName) {
-      stack.pop()
-      continue
-    }
-
-    const matchIndex = stack.map((item) => item.name).lastIndexOf(tagName)
-    if (matchIndex !== -1) {
-      for (let i = stack.length - 1; i > matchIndex; i -= 1) {
-        const item = stack[i]
-        pushDiagnostic({
-          from: item.from,
-          to: item.to,
-          severity: 'error',
-          message: t('html.tagMissingClose', { name: item.name })
-        })
-      }
-      stack.splice(matchIndex + 1)
-      stack.pop()
-      continue
-    }
-
-    pushDiagnostic({
-      from: start,
-      to: end,
-      severity: 'error',
-      message: t('html.tagUnexpectedClose', { name: tagName })
-    })
-  }
-
-  if (stack.length) {
-    stack.reverse().forEach((item) => {
-      pushDiagnostic({
-        from: item.from,
-        to: item.to,
-        severity: 'error',
-        message: t('html.tagMissingClose', { name: item.name })
-      })
-    })
-  }
-
-  if (!diagnostics.length && syntaxDiagnostics.length) {
-    pushDiagnostic(syntaxDiagnostics[0])
-  }
-
-  return diagnostics
-}
-
-const computeHtmlDiagnosticsForContent = (content) => {
-  const tempState = EditorState.create({
-    doc: content,
-    extensions: [html()]
-  })
-  return computeHtmlDiagnostics(tempState)
-}
-
-const refreshHtmlMarkers = (state, diagnostics) => {
-  htmlEditorMarkers.value = diagnostics
-    .map((diagnostic) => {
-      const line = state.doc.lineAt(diagnostic.from)
-      return {
-        from: diagnostic.from,
-        to: diagnostic.to,
-        severity: diagnostic.severity,
-        message: diagnostic.message,
-        startLineNumber: line.number,
-        startColumn: diagnostic.from - line.from + 1
-      }
-    })
-    .sort((a, b) => {
-      if (a.startLineNumber !== b.startLineNumber) return a.startLineNumber - b.startLineNumber
-      return a.startColumn - b.startColumn
-    })
-}
-
-const applyHtmlDiagnostics = (view) => {
-  if (!view || !htmlEditorInstance.value || htmlEditorInstance.value !== view) return
-  const diagnostics = computeHtmlDiagnostics(view.state)
-  view.dispatch(setDiagnostics(view.state, diagnostics))
-  refreshHtmlMarkers(view.state, diagnostics)
-}
-
-const scheduleHtmlDiagnostics = (view) => {
-  if (!view) return
-  if (htmlDiagnosticsHandle) {
-    if (typeof cancelAnimationFrame === 'function') {
-      cancelAnimationFrame(htmlDiagnosticsHandle)
-    } else {
-      clearTimeout(htmlDiagnosticsHandle)
-    }
-  }
-  if (typeof requestAnimationFrame === 'function') {
-    htmlDiagnosticsHandle = requestAnimationFrame(() => {
-      htmlDiagnosticsHandle = null
-      applyHtmlDiagnostics(view)
-    })
-  } else {
-    htmlDiagnosticsHandle = setTimeout(() => {
-      htmlDiagnosticsHandle = null
-      applyHtmlDiagnostics(view)
-    }, 0)
-  }
-}
-
-const setHtmlEditorContent = (content, markDirty = false) => {
-  isHtmlProgrammaticUpdate = true
-  htmlEditorContent.value = content
-  if (htmlEditorInstance.value) {
-    const view = htmlEditorInstance.value
-    view.dispatch({
-      changes: { from: 0, to: view.state.doc.length, insert: content }
-    })
-    scheduleHtmlDiagnostics(view)
-  }
-  htmlEditorDirty.value = markDirty
-  isHtmlProgrammaticUpdate = false
-}
-
-const destroyHtmlEditor = () => {
-  if (htmlEditorInstance.value) {
-    htmlEditorInstance.value.destroy()
-    htmlEditorInstance.value = null
-  }
-  htmlEditorReady.value = false
-}
-
-const mountHtmlEditor = (container) => {
-  if (!container) return
-  if (htmlEditorInstance.value) {
-    const currentParent = htmlEditorInstance.value.dom?.parentElement
-    if (currentParent === container) {
-      htmlEditorInstance.value.requestMeasure()
-      return
-    }
-    destroyHtmlEditor()
-  }
-  const content = htmlEditorContent.value || defaultHtmlTemplate
-  if (!htmlEditorContent.value) {
-    htmlEditorContent.value = content
-  }
-  const state = createHtmlEditorState(content)
-  htmlEditorInstance.value = new EditorView({
-    state,
-    parent: container
-  })
-  htmlEditorReady.value = true
-  scheduleHtmlDiagnostics(htmlEditorInstance.value)
-}
-
-const setHtmlInputMode = async (value) => {
-  htmlInputMode.value = value
-  if (value === 'edit') {
-    htmlEditorLoading.value = true
-    try {
-    await nextTick()
-    await waitForFrame()
-    const targetContainer = showHtmlEditorModal.value ? htmlEditorModalContainer.value : htmlEditorContainer.value
-    mountHtmlEditor(targetContainer)
-    } finally {
-      htmlEditorLoading.value = false
-    }
-  } else {
-    htmlEditorLoading.value = false
-  }
-}
-
-const syncHtmlEditorContent = async (file) => {
-  try {
-    const content = await file.text()
-    setHtmlEditorContent(content, false)
-  } catch {
-    // ignore
-  }
-}
-
-const openHtmlEditorModal = async () => {
-  showHtmlEditorModal.value = true
-  htmlEditorLoading.value = true
-  try {
-    await nextTick()
-    await waitForFrame()
-    mountHtmlEditor(htmlEditorModalContainer.value)
-  } finally {
-    htmlEditorLoading.value = false
-  }
-}
-
-const closeHtmlEditorModal = async () => {
-  showHtmlEditorModal.value = false
-  htmlEditorLoading.value = true
-  try {
-    await nextTick()
-    await waitForFrame()
-    if (htmlInputMode.value === 'edit') {
-      mountHtmlEditor(htmlEditorContainer.value)
-    } else {
-      destroyHtmlEditor()
-    }
-  } finally {
-    htmlEditorLoading.value = false
-  }
-}
-
-const saveEditorHtml = async () => {
-  if (htmlEditorContentEmpty.value) {
-    showToast(t('html.editorEmpty'), 'error')
-    return
-  }
-  let diagnostics = []
-  if (htmlEditorInstance.value) {
-    const view = htmlEditorInstance.value
-    diagnostics = computeHtmlDiagnostics(view.state)
-    refreshHtmlMarkers(view.state, diagnostics)
-    view.dispatch(setDiagnostics(view.state, diagnostics))
-  } else {
-    const tempState = EditorState.create({
-      doc: htmlEditorContent.value,
-      extensions: [html()]
-    })
-    diagnostics = computeHtmlDiagnostics(tempState)
-    refreshHtmlMarkers(tempState, diagnostics)
-  }
-  if (diagnostics.length) {
-    showToast(t('html.fixErrors', { count: diagnostics.length }), 'error')
-    return
-  }
-  htmlSavedContent.value = htmlEditorContent.value
-  htmlEditorDirty.value = false
-  if (currentStep.value < 2) currentStep.value = 2
-  showToast(t('html.editorSaved'), 'success')
-}
-
-const revealHtmlMarker = (marker) => {
-  if (!htmlEditorInstance.value) return
-  const view = htmlEditorInstance.value
-  view.dispatch({
-    selection: { anchor: marker.from },
-    scrollIntoView: true
-  })
-  view.focus()
-}
-
-const isHtmlErrorMarker = (marker) => marker.severity === 'error'
-const htmlMarkerLabel = (marker) => (isHtmlErrorMarker(marker) ? t('html.issueError') : t('html.issueWarning'))
-
-const triggerKeystoreInput = () => {
-  if (isKeystoreUploaded.value || updatingTaskId.value) return
-  keystoreInput.value?.click?.()
-}
-
-const handleKeystoreSelect = async (event) => {
-  if (updatingTaskId.value) {
-    showToast(t('config.keystoreUploadNotAllowed'), 'error')
-    return
-  }
-  const file = event.target.files[0]
-  if (!file) return
-  keystoreUploadError.value = ''
-  const name = (file.name || '').toLowerCase()
-  if (!(name.endsWith('.jks') || name.endsWith('.keystore'))) {
-    keystoreUploadError.value = t('config.keystoreUploadInvalid')
-    showToast(keystoreUploadError.value, 'error')
-    if (keystoreInput.value) keystoreInput.value.value = ''
-    return
-  }
-  try {
-    const result = await api.uploadKeystore(file)
-    uploadedKeystore.value = result
-    useCustomKeystore.value = true
-    showToast(t('config.keystoreUploadSuccess'), 'success')
-  } catch (error) {
-    keystoreUploadError.value = t('config.keystoreUploadFailed')
-    showToast(keystoreUploadError.value + ': ' + (error.response?.data?.detail || error.message), 'error')
-  }
-}
-
-const clearKeystoreUpload = () => {
-  uploadedKeystore.value = null
-  useCustomKeystore.value = false
-  keystoreUploadError.value = ''
-  if (keystoreInput.value) keystoreInput.value.value = ''
-}
-
-// Icon cropper flow
-const handleIconSelect = async (event) => {
-  const file = event.target.files[0]
-  if (!file) return
-  iconError.value = ''
-  if (file.type !== 'image/png') {
-    iconError.value = '璇蜂笂浼?PNG 鏍煎紡鐨勫浘鐗?
-    return
-  }
-  cropperImageSrc.value = URL.createObjectURL(file)
-  showCropper.value = true
-}
-const closeCropper = () => {
-  showCropper.value = false
-  if (cropperImageSrc.value) {
-    URL.revokeObjectURL(cropperImageSrc.value)
-    cropperImageSrc.value = ''
-  }
-  if (iconInput.value) iconInput.value.value = ''
-}
-const cropImage = async () => {
-  if (!cropperRef.value) return
-  const { canvas } = cropperRef.value.getResult()
-  if (!canvas) return
-  const outputCanvas = document.createElement('canvas')
-  outputCanvas.width = 1024
-  outputCanvas.height = 1024
-  const ctx = outputCanvas.getContext('2d')
-  ctx.drawImage(canvas, 0, 0, 1024, 1024)
-  outputCanvas.toBlob(async (blob) => {
-    if (!blob) return
-    const croppedFile = new File([blob], 'logo.png', { type: 'image/png' })
-    appIconFile.value = croppedFile
-    if (appIcon.value && !appIcon.value.startsWith('/api/')) URL.revokeObjectURL(appIcon.value)
-    appIcon.value = URL.createObjectURL(blob)
-    try {
-      const result = await api.uploadIcon(croppedFile)
-      uploadedIcon.value = result
-      showToast('鍥炬爣璁剧疆鎴愬姛', 'success')
-    } catch (error) {
-      showToast('鍥炬爣涓婁紶澶辫触: ' + (error.response?.data?.detail || error.message), 'error')
-    }
-    closeCropper()
-  }, 'image/png', 1.0)
-}
-
-// Tasks
-const refreshTasks = async () => {
-  try {
-    tasks.value = await api.getTasks()
-    try {
-      queueStatus.value = await api.getQueueStatus()
-    } catch {
-      // ignore
-    }
-  } catch (e) {
-    // ignore
-  }
-}
-const startPolling = () => {
-  if (pollInterval) return
-  pollInterval = setInterval(async () => {
-    await refreshTasks()
-    const hasProcessing = tasks.value.some((t) => t.status === 'processing')
-    if (!hasProcessing) stopPolling()
-  }, 2000)
-}
-const stopPolling = () => {
-  if (pollInterval) {
-    clearInterval(pollInterval)
-    pollInterval = null
-  }
-}
-
-const startTask = async (taskId) => {
-  try {
-    await api.startTask(taskId)
-    showToast(t('toast.taskStarted'), 'success')
-    await refreshTasks()
-    startPolling()
-  } catch (error) {
-    showToast('鍚姩澶辫触: ' + (error.response?.data?.detail || error.message), 'error')
-  }
-}
-const retryTask = async (taskId) => {
-  try {
-    await api.retryTask(taskId)
-    showToast(t('toast.taskRetried'), 'success')
-    await refreshTasks()
-  } catch (error) {
-    showToast('閲嶈瘯澶辫触: ' + (error.response?.data?.detail || error.message), 'error')
-  }
-}
-const cancelTask = async (taskId) => {
-  if (!confirm('纭畾瑕佸彇娑堣繖涓换鍔″悧锛?)) return
-  try {
-    await api.cancelTask(taskId)
-    showToast('浠诲姟宸插彇娑?, 'success')
-    await refreshTasks()
-  } catch (error) {
-    showToast('鍙栨秷澶辫触: ' + (error.response?.data?.detail || error.message), 'error')
-  }
-}
-const deleteTask = async (taskId) => {
-  if (!confirm('纭畾瑕佸垹闄よ繖涓换鍔″悧锛?)) return
-  try {
-    await api.deleteTask(taskId)
-    showToast(t('toast.taskDeleted'), 'success')
-    await refreshTasks()
-  } catch (error) {
-    showToast('鍒犻櫎澶辫触: ' + (error.response?.data?.detail || error.message), 'error')
-  }
-}
-
-const useTaskConfig = (task) => {
-  updatingTaskId.value = task.id
-  updatingTask.value = task
-  quickGenerate.value = false
-  quickGenerateStash.value = null
-
-  mode.value = task.mode || 'convert'
-  webUrl.value = task.web_url || ''
-  enableAds.value = false
-  adConfig.value = { appId: '', appKey: '', placementId: '' }
-
-  const normalizedPermissions = normalizePermissionsForUi(task.config?.permissions || [])
-  previousVersionName.value = task.config.version_name || '1.0.0'
-
-  config.value = {
-    ...config.value,
-    app_name: task.config.app_name,
-    package_name: task.config.package_name,
-    version_name: bumpPatchVersion(task.config.version_name || '1.0.0'),
-    version_code: (task.config.version_code || 1) + 1,
-    output_format: task.config.output_format ?? 'apk',
-    orientation: task.config.orientation ?? 'portrait',
-    double_click_exit: task.config.double_click_exit ?? true,
-    status_bar_hidden: task.config.status_bar_hidden ?? false,
-    status_bar_style: task.config.status_bar_style ?? 'light',
-    status_bar_color: task.config.status_bar_color ?? 'transparent',
-    webview_user_agent: task.config.webview_user_agent ?? 'android',
-    html_localize_resources: task.config.html_localize_resources ?? true,
-    download_mode: task.config.download_mode ?? 'picker',
-    permissions: normalizedPermissions.length ? normalizedPermissions : ['INTERNET', 'ACCESS_NETWORK_STATE'],
-    keystore_alias: task.config.keystore_alias || '',
-    keystore_password: task.config.keystore_password || '',
-    key_password: task.config.key_password || ''
-  }
-
-  enablePermissions.value = normalizedPermissions.length > 0
-
-  if (task.icon_filename) {
-    uploadedIcon.value = { filename: task.icon_filename, reused: true }
-    appIcon.value = api.getIconUrl(task.id)
-  } else {
-    uploadedIcon.value = null
-  uploadedKeystore.value = null
-  useCustomKeystore.value = false
-  keystoreUploadError.value = ''
-  if (keystoreInput.value) keystoreInput.value.value = ''
-    appIcon.value = null
-  }
-  uploadedKeystore.value = null
-  keystoreUploadError.value = ''
-  if (keystoreInput.value) keystoreInput.value.value = ''
-
-  uploadedFile.value = null
-  uploadProgress.value = 0
-  uploadedHtmlFile.value = null
-  htmlUploadProgress.value = 0
-  htmlInputMode.value = 'file'
-  htmlEditorLoading.value = false
-  htmlEditorDirty.value = false
-  htmlEditorMarkers.value = []
-  showHtmlEditorModal.value = false
-  htmlSavedContent.value = ''
-  setHtmlEditorContent(defaultHtmlTemplate, false)
-
-  if (mode.value === 'convert') {
-    uploadedFile.value = { filename: 'project.zip', reused: true, original_name: '浣跨敤涓婁竴鐗堟湰鐨勯」鐩枃浠?, size: 0 }
-    uploadProgress.value = 100
-  } else if (mode.value === 'html') {
-    uploadedHtmlFile.value = { filename: 'index.html', reused: true, original_name: t('html.reuseHtml'), size: 0 }
-    htmlUploadProgress.value = 100
-  }
-  currentStep.value = 1
-}
-
-const ensureHtmlFileForTask = async () => {
-  if (mode.value !== 'html') return null
-  if (htmlInputMode.value === 'file') {
-    if (!uploadedHtmlFile.value) {
-      showToast(t('html.htmlRequired'), 'error')
-      return null
-    }
-    return uploadedHtmlFile.value.filename
-  }
-
-  if (!hasSavedHtmlContent.value || htmlEditorDirty.value) {
-    showToast(t('html.saveBeforeBuild'), 'error')
-    return null
-  }
-
-  const diagnostics = computeHtmlDiagnosticsForContent(htmlSavedContent.value)
-  if (diagnostics.length) {
-    if (htmlEditorInstance.value) {
-      refreshHtmlMarkers(htmlEditorInstance.value.state, diagnostics)
-    }
-    showToast(t('html.fixErrors', { count: diagnostics.length }), 'error')
-    return null
-  }
-
-  const file = new File([htmlSavedContent.value], 'index.html', { type: 'text/html' })
-  const result = await uploadHtml(file)
-  if (!result) return null
-  uploadedHtmlFile.value = result
-  return result.filename
-}
-
-// Create/Update task
-const createTask = async () => {
-  if (!canCreateTask.value) return
-  if (packageNameError.value) {
-    showToast(packageNameError.value, 'error')
-    return
-  }
-  if (!isKeystoreUploaded.value && keystorePasswordError.value) {
-    showToast(keystorePasswordError.value, 'error')
-    return
-  }
-  if (!isKeystoreUploaded.value && keyPasswordError.value) {
-    showToast(keyPasswordError.value, 'error')
-    return
-  }
-  isCreating.value = true
-  try {
-    let normalizedWebUrl = webUrl.value
-    if (mode.value === 'web') {
-      normalizedWebUrl = await resolveWebUrl(webUrl.value)
-      if (!normalizedWebUrl) {
-        showToast(t('web.urlUnreachable'), 'error')
-        return
-      }
-      if (normalizedWebUrl !== webUrl.value) {
-        webUrl.value = normalizedWebUrl
-      }
-    }
-
-    const isQuickGenerate = quickGenerate.value && (mode.value === 'convert' || mode.value === 'web' || mode.value === 'html') && !updatingTaskId.value
-
-  if (updatingTaskId.value) {
-      if (compareVersion(config.value.version_name, previousVersionName.value) < 0) {
-        showToast(t('toast.versionError'), 'error')
-        return
-      }
-      if (mode.value === 'html') {
-        const htmlFilename = await ensureHtmlFileForTask()
-        if (!htmlFilename) return
-      }
-      const updateData = {
-        filename: uploadedFile.value?.reused ? null : uploadedFile.value?.filename || null,
-        html_filename: uploadedHtmlFile.value?.reused ? null : uploadedHtmlFile.value?.filename || null,
-        icon_filename: uploadedIcon.value?.reused ? null : uploadedIcon.value?.filename || null,
-        version_name: config.value.version_name,
-        version_code: config.value.version_code,
-        output_format: config.value.output_format,
-        orientation: config.value.orientation,
-        double_click_exit: config.value.double_click_exit,
-        status_bar_hidden: config.value.status_bar_hidden,
-        status_bar_style: config.value.status_bar_style,
-        status_bar_color: config.value.status_bar_color,
-        webview_user_agent: config.value.webview_user_agent,
-        html_localize_resources: config.value.html_localize_resources,
-        download_mode: config.value.download_mode,
-        permissions: enablePermissions.value ? config.value.permissions : []
-      }
-      await api.updateTask(updatingTaskId.value, updateData)
-      currentStep.value = 3
-      showToast(`"${config.value.app_name}" 宸叉洿鏂拌嚦 v${config.value.version_name}`, 'success')
-    } else {
-      let htmlFilename = null
-      if (mode.value === 'html') {
-        htmlFilename = await ensureHtmlFileForTask()
-        if (!htmlFilename) return
-      }
-      const taskData = {
-        quick_generate: isQuickGenerate,
-        mode: mode.value,
-        web_url: mode.value === 'web' ? normalizedWebUrl : null,
-        ad_config: mode.value === 'web' && enableAds.value ? adConfig.value : null,
-        filename: mode.value === 'convert' ? uploadedFile.value.filename : null,
-        html_filename: mode.value === 'html' ? htmlFilename : null,
-        icon_filename: isQuickGenerate ? null : (uploadedIcon.value?.filename || null),
-        keystore_filename: isQuickGenerate ? null : (uploadedKeystore.value?.filename || null),
-        config: {
-          app_name: config.value.app_name,
-          package_name: config.value.package_name.trim(),
-          version_name: config.value.version_name,
-          version_code: config.value.version_code,
-          output_format: config.value.output_format,
-          orientation: config.value.orientation,
-          double_click_exit: config.value.double_click_exit,
-          status_bar_hidden: config.value.status_bar_hidden,
-          status_bar_style: config.value.status_bar_style,
-          status_bar_color: config.value.status_bar_color,
-          webview_user_agent: config.value.webview_user_agent,
-          html_localize_resources: config.value.html_localize_resources,
-          download_mode: config.value.download_mode,
-          permissions: enablePermissions.value ? config.value.permissions : [],
-          keystore_alias: config.value.keystore_alias || null,
-          keystore_password: config.value.keystore_password || null,
-          key_password: config.value.key_password || null
-        }
-      }
-      const created = await api.createTask(taskData)
-      currentStep.value = 3
-      showToast(t('toast.taskCreated'), 'success')
-      try {
-        await api.startTask(created.id)
-        await refreshTasks()
-        startPolling()
-      } catch (error) {
-        showToast('鍚姩澶辫触: ' + (error.response?.data?.detail || error.message), 'error')
-      }
-    }
-    resetForm({ preserveQuickGenerate: isQuickGenerate })
-    await refreshTasks()
-  } catch (error) {
-    showToast('鎿嶄綔澶辫触: ' + (error.response?.data?.detail || error.message), 'error')
-  } finally {
-    isCreating.value = false
-  }
-}
-
-const resetForm = (options = {}) => {
-  const preserveQuickGenerate = Boolean(options.preserveQuickGenerate)
-  webUrl.value = ''
-  enableAds.value = false
-  enablePermissions.value = false
-  adConfig.value = { appId: '', appKey: '', placementId: '' }
-  uploadedFile.value = null
-  uploadProgress.value = 0
-  uploadedHtmlFile.value = null
-  htmlUploadProgress.value = 0
-  htmlInputMode.value = 'file'
-  htmlEditorLoading.value = false
-  htmlEditorDirty.value = false
-  htmlEditorMarkers.value = []
-  showHtmlEditorModal.value = false
-  htmlSavedContent.value = ''
-  setHtmlEditorContent(defaultHtmlTemplate, false)
-  if (htmlInput.value) htmlInput.value.value = ''
-  if (appIcon.value && !appIcon.value.startsWith('/api/')) URL.revokeObjectURL(appIcon.value)
-  appIcon.value = null
-  appIconFile.value = null
-  uploadedIcon.value = null
-  uploadedKeystore.value = null
-  useCustomKeystore.value = false
-  keystoreUploadError.value = ''
-  if (keystoreInput.value) keystoreInput.value.value = ''
-  iconError.value = ''
-  updatingTaskId.value = null
-  updatingTask.value = null
-  if (!preserveQuickGenerate) {
-    quickGenerate.value = false
-    quickGenerateStash.value = null
-  }
-  previousVersionName.value = ''
-  config.value = {
-    app_name: '',
-    package_name: '',
-    version_name: '1.0.0',
-    version_code: 1,
-    output_format: 'apk',
-    orientation: 'portrait',
-    double_click_exit: true,
-    status_bar_hidden: false,
-    status_bar_style: 'light',
-    status_bar_color: 'transparent',
-    webview_user_agent: 'android',
-    html_localize_resources: true,
-    download_mode: 'picker',
-    permissions: ['INTERNET', 'ACCESS_NETWORK_STATE'],
-    keystore_alias: '',
-    keystore_password: '',
-    key_password: ''
-  }
-  if (preserveQuickGenerate && quickGenerate.value && (mode.value === 'convert' || mode.value === 'web' || mode.value === 'html')) {
-    applyQuickGenerateDefaults()
-  }
-  currentStep.value = 1
-}
-
-// Logs
-const viewLogs = async (taskId) => {
-  currentLogTaskId.value = taskId
-  showLogs.value = true
-  await refreshLogs()
-}
-const closeLogs = () => {
-  showLogs.value = false
-  currentLogTaskId.value = null
-  taskLogs.value = []
-}
-const refreshLogs = async () => {
-  if (!currentLogTaskId.value) return
-  try {
-    const result = await api.getTaskLogs(currentLogTaskId.value, 500)
-    taskLogs.value = result.logs || []
-    setTimeout(() => {
-      if (logsContainer.value) logsContainer.value.scrollTop = logsContainer.value.scrollHeight
-    }, 50)
-  } catch {
-    taskLogs.value = []
-  }
-}
-
-// Settings
-const openSettings = () => {
-  showSettings.value = true
-}
-
-const closeSettings = () => (showSettings.value = false)
-const fetchAnnouncements = async () => {
-  try {
-    const result = await api.getAdminAnnouncements()
-    announcements.value = Array.isArray(result) ? result : (result?.items || [])
-    resolveActiveAnnouncement()
-  } catch {
-    announcements.value = []
-    resolveActiveAnnouncement()
-  }
-}
-
-const dismissAnnouncement = () => {
-  if (activeAnnouncement.value) {
-    const id = String(activeAnnouncement.value.id)
-    localStorage.setItem('apk_builder_announcement_id', id)
-    dismissedAnnouncementId.value = id
-    resolveActiveAnnouncement()
-  }
-}
-
-const loadSystemInfo = async () => {
-  try {
-    const result = await api.getSystemInfo()
-    deviceInfo.value = result || deviceInfo.value
-  } catch {
-    // ignore
-  }
-}
-
-const triggerFeedbackFileSelect = () => {
-  feedbackFileInput.value?.click?.()
-}
-
-const handleFeedbackFiles = (event) => {
-  const files = Array.from(event.target.files || [])
-  const maxSize = 10 * 1024 * 1024
-  const filtered = files.filter((file) => file.size <= maxSize).slice(0, 5)
-  if (filtered.length < files.length) {
-    showToast(t('toast.feedbackFileLimit'), 'error')
-  }
-  feedbackImages.value = filtered
-}
-
-const submitFeedback = async () => {
-  if (!feedbackContent.value) {
-    showToast(t('toast.feedbackEmpty'), 'error')
-    return
-  }
-  feedbackSubmitting.value = true
-  try {
-    await api.submitFeedback({
-      client_id: api.getClientId(),
-      content: feedbackContent.value,
-      device_info: { ...deviceInfo.value },
-      images: feedbackImages.value
-    })
-    feedbackContent.value = ''
-    feedbackImages.value = []
-    showToast(t('toast.feedbackSent'), 'success')
-  } catch (error) {
-    showToast(t('toast.feedbackFailed'), 'error')
-  } finally {
-    feedbackSubmitting.value = false
-  }
-}
-
-const refreshAll = async () => {
-  await refreshTasks()
-  await fetchAnnouncements()
-  await loadSystemInfo()
-}
-
-const openDonation = (fromAuto) => {
-  if (fromAuto && donationAutoDisabled.value) return
-  donationHideChecked.value = false
-  showDonation.value = true
-}
-const closeDonation = () => {
-  if (donationHideChecked.value) {
-    localStorage.setItem('apk_builder_donation_hide', '1')
-    donationAutoDisabled.value = true
-  }
-  showDonation.value = false
-}
-const taskStatusCache = ref(new Map())
-const taskStatusReady = ref(false)
-const shouldAutoShowDonation = () => Math.random() < 0.1
-watch(
-  tasks,
-  (next) => {
-    const prev = taskStatusCache.value
-    const updates = new Map(prev)
-    let newSuccess = null
-    for (const task of next) {
-      const prevStatus = prev.get(task.id)
-      updates.set(task.id, task.status)
-      if (taskStatusReady.value && task.status === 'success' && prevStatus !== 'success') {
-        newSuccess = task
-        break
-      }
-    }
-    taskStatusCache.value = updates
-    if (taskStatusReady.value && newSuccess && !showDonation.value && shouldAutoShowDonation()) {
-      openDonation(true)
-    }
-    taskStatusReady.value = true
-  },
-  { deep: true }
-)
-
-watch(useCustomKeystore, (next) => {
-  if (!next) {
-    clearKeystoreUpload()
-  }
-})
-
-watch(sortedTasks, () => {
-  if (currentTaskPage.value > totalTaskPages.value) {
-    goToTaskPage(totalTaskPages.value)
-  }
-})
-
-onMounted(async () => {
-  applyTheme(currentTheme.value)
-  document.addEventListener('click', handleClickOutside)
-  await refreshTasks()
-  await fetchAnnouncements()
-  await loadSystemInfo()
-  if (window.windowControls?.isMaximized) {
-    try {
-      isMaximized.value = await window.windowControls.isMaximized()
-    } catch {
-      // ignore
-    }
-  }
-})
-
-onUnmounted(() => {
-  stopPolling()
-  document.removeEventListener('click', handleClickOutside)
-  if (appIcon.value && !appIcon.value.startsWith('/api/')) URL.revokeObjectURL(appIcon.value)
-  if (cropperImageSrc.value) URL.revokeObjectURL(cropperImageSrc.value)
-  if (htmlDiagnosticsHandle) {
-    if (typeof cancelAnimationFrame === 'function') {
-      cancelAnimationFrame(htmlDiagnosticsHandle)
-    } else {
-      clearTimeout(htmlDiagnosticsHandle)
-    }
-    htmlDiagnosticsHandle = null
-  }
-  if (htmlEditorInstance.value) {
-    htmlEditorInstance.value.destroy()
-    htmlEditorInstance.value = null
+import { useAppState } from './composables/useAppState'
+
+export default defineComponent({
+  name: 'App',
+  components: { Cropper },
+  setup() {
+    return useAppState()
   }
 })
 </script>
@@ -3416,5 +1693,267 @@ onUnmounted(() => {
   gap: 8px;
   margin-bottom: 10px;
 }
-</style>
 
+.mobile-page-head,
+.mobile-bottom-nav {
+  display: none;
+}
+
+@keyframes mobilePageFade {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 640px) {
+  .mobile-shell-active .header {
+    position: sticky;
+    top: 0;
+    z-index: 120;
+    border-bottom-color: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(16px);
+  }
+
+  .mobile-shell-active .main {
+    padding: 10px 0 calc(98px + env(safe-area-inset-bottom));
+  }
+
+  .mobile-main-container {
+    padding-bottom: 12px;
+  }
+
+  .mobile-page-head {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: flex-start;
+    margin: 2px 0 14px;
+    padding: 16px;
+    text-align: left;
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background:
+      radial-gradient(circle at 90% 0%, rgba(99, 102, 241, 0.28), transparent 45%),
+      radial-gradient(circle at 0% 100%, rgba(14, 165, 233, 0.16), transparent 40%),
+      var(--bg-card);
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.24);
+  }
+
+  .mobile-page-head-title {
+    width: 100%;
+    text-align: left;
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--text-main);
+    letter-spacing: 0.2px;
+  }
+
+  .mobile-page-head-subtitle {
+    width: 100%;
+    text-align: left;
+    margin-top: 4px;
+    color: var(--text-sub);
+    font-size: 12px;
+  }
+
+  .mobile-content-grid {
+    gap: 14px;
+  }
+
+  .mobile-page {
+    animation: mobilePageFade 0.22s ease;
+  }
+
+  .mobile-shell-active .card {
+    border-radius: 18px;
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.24);
+    border-color: rgba(255, 255, 255, 0.08);
+  }
+
+  .mobile-shell-active .card:hover {
+    transform: none;
+  }
+
+  .mobile-profile-actions {
+    display: grid;
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+
+  .mobile-action-item {
+    width: 100%;
+    border: 1px solid var(--border-color);
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text-main);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px;
+    font-size: 14px;
+    cursor: pointer;
+  }
+
+  .mobile-action-item:active {
+    transform: scale(0.99);
+  }
+
+  .mobile-action-icon {
+    width: 28px;
+    height: 28px;
+    border-radius: 10px;
+    display: grid;
+    place-items: center;
+    background: rgba(99, 102, 241, 0.18);
+    color: #c7d2fe;
+    font-size: 14px;
+    flex-shrink: 0;
+  }
+
+  .mobile-action-text {
+    flex: 1;
+    text-align: left;
+    font-weight: 600;
+  }
+
+  .mobile-action-arrow {
+    color: var(--text-muted);
+    font-size: 18px;
+    line-height: 1;
+  }
+
+  .mobile-lang-card {
+    border: 1px solid var(--border-color);
+    border-radius: 14px;
+    padding: 12px;
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  .mobile-lang-title {
+    font-size: 12px;
+    color: var(--text-sub);
+    margin-bottom: 10px;
+  }
+
+  .mobile-lang-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .mobile-lang-item {
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    background: transparent;
+    color: var(--text-sub);
+    padding: 8px 6px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+
+  .mobile-lang-item.active {
+    background: var(--primary-gradient);
+    color: #fff;
+    border-color: transparent;
+    font-weight: 600;
+  }
+
+  .mobile-bottom-nav {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    bottom: calc(10px + env(safe-area-inset-bottom));
+    padding: 8px;
+    border-radius: 18px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(8, 8, 12, 0.88);
+    backdrop-filter: blur(16px);
+    box-shadow: 0 16px 32px rgba(0, 0, 0, 0.35);
+    z-index: 300;
+  }
+
+  .light-theme .mobile-bottom-nav {
+    background: rgba(255, 255, 255, 0.92);
+    border-color: rgba(15, 23, 42, 0.08);
+  }
+
+  .mobile-tab-btn {
+    border: none;
+    border-radius: 12px;
+    background: transparent;
+    color: var(--text-sub);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    padding: 8px 4px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .mobile-tab-btn.active {
+    color: #fff;
+    background: var(--primary-gradient);
+    box-shadow: var(--shadow-glow);
+  }
+
+  .light-theme .mobile-tab-btn.active {
+    color: #fff;
+  }
+
+  .mobile-tab-icon {
+    font-size: 17px;
+    line-height: 1;
+  }
+
+  .mobile-tab-label {
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1;
+  }
+
+  .mobile-shell-active .cropper-overlay,
+  .mobile-shell-active .logs-overlay,
+  .mobile-shell-active .settings-overlay,
+  .mobile-shell-active .donation-overlay,
+  .mobile-shell-active .html-editor-overlay {
+    align-items: flex-end;
+    padding: 0;
+    backdrop-filter: blur(4px);
+  }
+
+  .mobile-shell-active .cropper-dialog,
+  .mobile-shell-active .logs-dialog,
+  .mobile-shell-active .settings-dialog,
+  .mobile-shell-active .donation-dialog,
+  .mobile-shell-active .html-editor-dialog {
+    width: 100vw;
+    max-width: 100vw;
+    max-height: 96dvh;
+    height: 96dvh;
+    border-radius: 18px 18px 0 0;
+    border-left: none;
+    border-right: none;
+    border-bottom: none;
+    animation: mobilePageFade 0.24s ease;
+  }
+
+  .mobile-shell-active .cropper-dialog-body,
+  .mobile-shell-active .logs-dialog-body,
+  .mobile-shell-active .settings-dialog-body,
+  .mobile-shell-active .donation-dialog-body,
+  .mobile-shell-active .html-editor-dialog-body {
+    flex: 1;
+    max-height: none;
+  }
+}
+</style>

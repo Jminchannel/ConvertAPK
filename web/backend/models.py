@@ -38,8 +38,6 @@ class AppConfig(BaseModel):
     status_bar_color: str = "transparent"  # transparent | #FFFFFF
     # WebView UA (web mode)
     webview_user_agent: str = "android"  # android | pc
-    # HTML mode resource localization switch: true = offlineize remote assets, false = keep remote links
-    html_localize_resources: bool = True
     # HTML mode download behavior: silent (save directly) | picker (system file manager)
     download_mode: str = "picker"
     # Frontend sends short names (e.g. INTERNET) or full names (android.permission.INTERNET)
@@ -232,6 +230,5 @@ class UpdateTaskRequest(BaseModel):
     status_bar_style: Optional[str] = None  # light | dark
     status_bar_color: Optional[str] = None  # transparent | #FFFFFF
     webview_user_agent: Optional[str] = None  # android | pc (web mode)
-    html_localize_resources: Optional[bool] = None  # true | false (html mode)
     download_mode: Optional[str] = None  # silent | picker (html mode)
     permissions: Optional[List[str]] = None

@@ -535,41 +535,6 @@ body {
 }
 
 /* HTML Editor */
-.html-upload-header {
-  justify-content: space-between;
-  align-items: center;
-}
-.html-header-main {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  min-width: 0;
-}
-.html-header-actions {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-}
-.html-localize-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border-radius: 999px;
-  border: 1px solid var(--border-color);
-  background: var(--bg-surface);
-  color: var(--text-main);
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  user-select: none;
-  white-space: nowrap;
-}
-.html-localize-toggle input[type='checkbox'] {
-  width: 14px;
-  height: 14px;
-  accent-color: #6366f1;
-}
 .html-mode-switch {
   display: inline-flex;
   gap: 6px;
@@ -1267,18 +1232,6 @@ html.light-theme .html-editor-toolbar {
   .step { justify-content: flex-start; }
   .card { padding: 18px; }
   .card-header { flex-direction: column; align-items: flex-start; gap: 12px; }
-  .html-upload-header {
-    align-items: stretch;
-    gap: 10px;
-  }
-  .html-header-main {
-    width: 100%;
-  }
-  .html-header-actions {
-    margin-left: 0;
-    width: 100%;
-    justify-content: flex-start;
-  }
   .task-item { flex-direction: column; align-items: flex-start; }
   .task-actions { width: 100%; flex-wrap: wrap; }
   .stats { grid-template-columns: 1fr; }
