@@ -1220,6 +1220,109 @@ function writeText(file, text) {
   fs.writeFileSync(file, text, "utf8");
 }
 
+const safeAreaMarkers = [
+  "safe-area-inset-top",
+  "safe-area-inset-bottom",
+  "env(safe-area-inset",
+  "--convertapk-safe-top",
+  "--convertapk-safe-bottom",
+];
+const safeAreaScanExtensions = new Set([
+  ".html",
+  ".htm",
+  ".css",
+  ".js",
+  ".mjs",
+  ".cjs",
+  ".ts",
+  ".tsx",
+  ".vue",
+]);
+const safeAreaScanMaxBytes = 2 * 1024 * 1024;
+
+function fileContainsSafeArea(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  if (!safeAreaScanExtensions.has(ext)) {
+    return false;
+  }
+  let raw;
+  try {
+    raw = fs.readFileSync(filePath);
+  } catch (err) {
+    return false;
+  }
+  const text = raw.subarray(0, safeAreaScanMaxBytes).toString("utf8");
+  if (!text) {
+    return false;
+  }
+  return safeAreaMarkers.some((marker) => text.includes(marker));
+}
+
+function detectSafeAreaUsage(projectRootDir, androidRootDir) {
+  const candidates = [
+    path.join(projectRootDir, "index.html"),
+    path.join(projectRootDir, "src"),
+    path.join(projectRootDir, "dist"),
+    path.join(projectRootDir, "build"),
+    path.join(androidRootDir, "app", "src", "main", "assets", "public"),
+  ];
+  const skipDirs = new Set(["node_modules", ".git", ".gradle"]);
+  const seen = new Set();
+  for (const candidate of candidates) {
+    if (!fs.existsSync(candidate)) {
+      continue;
+    }
+    const stack = [candidate];
+    while (stack.length) {
+      const current = stack.pop();
+      let stat;
+      try {
+        stat = fs.statSync(current);
+      } catch (err) {
+        continue;
+      }
+      if (stat.isDirectory()) {
+        let entries = [];
+        try {
+          entries = fs.readdirSync(current, { withFileTypes: true });
+        } catch (err) {
+          continue;
+        }
+        for (const entry of entries) {
+          if (skipDirs.has(entry.name)) {
+            continue;
+          }
+          stack.push(path.join(current, entry.name));
+        }
+        continue;
+      }
+      if (!stat.isFile()) {
+        continue;
+      }
+      const resolved = path.resolve(current);
+      if (seen.has(resolved)) {
+        continue;
+      }
+      seen.add(resolved);
+      if (!fileContainsSafeArea(resolved)) {
+        continue;
+      }
+      let displayPath = resolved;
+      try {
+        const relativePath = path.relative(projectRootDir, resolved);
+        if (relativePath && !relativePath.startsWith("..") && !path.isAbsolute(relativePath)) {
+          displayPath = relativePath;
+        }
+      } catch (err) {
+      }
+      console.log(`[Insets] detected safe-area usage: ${displayPath}`);
+      return true;
+    }
+  }
+  console.log("[Insets] safe-area usage not detected");
+  return false;
+}
+
 function findMainActivity(javaRoot) {
   const stack = [javaRoot];
   while (stack.length) {
@@ -1260,6 +1363,8 @@ const doubleClickExit =
   String(process.env.DOUBLE_CLICK_EXIT || "").trim().toLowerCase() === "true";
 const taskMode = String(process.env.TASK_MODE || "").trim().toLowerCase();
 const allowKotlinPatch = taskMode === "convert";
+const useWebViewPadding = !detectSafeAreaUsage(projectRoot, androidDir);
+console.log(`[Insets] useWebViewPadding=${useWebViewPadding ? "true" : "false"}`);
 const packageLineMatch = text.match(/^package\s+[^\s]+/m);
 const packageLine = packageNameRaw
   ? `package ${packageNameRaw}`
@@ -1341,6 +1446,7 @@ class MainActivity : BridgeActivity() {
     private fun setupWebView() {
         val webView = bridge?.webView ?: return
         webView.clipToPadding = true
+        val useWebViewPadding = ${useWebViewPadding ? "true" : "false"}
         val drawBehindStatusBar = BuildConfig.STATUS_BAR_BACKGROUND.trim().lowercase() == "transparent"
         val root = window.decorView
         ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
@@ -1353,11 +1459,12 @@ class MainActivity : BridgeActivity() {
                 if (resId > 0) resources.getDimensionPixelSize(resId) else 0
             } else 0
             val topSystemInset = maxOf(status.top, statusStable.top, cutout.top, fallbackStatusBarHeight)
-            val shouldApplyTopInset = drawBehindStatusBar || BuildConfig.HIDE_STATUS_BAR
+            val shouldApplyTopInset = useWebViewPadding && (drawBehindStatusBar || BuildConfig.HIDE_STATUS_BAR)
             val topInset = if (shouldApplyTopInset) topSystemInset else 0
-            webView.setPadding(nav.left, topInset, nav.right, nav.bottom)
+            val bottomInset = if (useWebViewPadding) nav.bottom else 0
+            webView.setPadding(nav.left, topInset, nav.right, bottomInset)
             webView.post {
-                val script = "(function(){var t=" + topInset + ";var b=" + nav.bottom +
+                val script = "(function(){var t=" + topInset + ";var b=" + bottomInset +
                     ";var root=document.documentElement;" +
                     "if(root){root.style.setProperty('--convertapk-safe-top', t+'px');root.style.setProperty('--convertapk-safe-bottom', b+'px');}" +
                     "if(document.body){document.body.style.setProperty('--convertapk-safe-top', t+'px');document.body.style.setProperty('--convertapk-safe-bottom', b+'px');}" +
@@ -1616,6 +1723,7 @@ if (!isKotlin) {
     :
     "            // ConvertAPK: WebView 安全区补偿\n" +
     "            webView.setClipToPadding(true);\n" +
+    "            final boolean useWebViewPadding = " + (useWebViewPadding ? "true" : "false") + ";\n" +
     "            final boolean drawBehindStatusBar = " + (drawBehindStatusBar ? "true" : "false") + ";\n" +
     "            final boolean hideStatusBar = " + (statusBarHidden ? "true" : "false") + ";\n" +
     "            View decor = getWindow().getDecorView();\n" +
@@ -1630,11 +1738,12 @@ if (!isKotlin) {
     "                    fallbackStatusBarHeight = resId > 0 ? getResources().getDimensionPixelSize(resId) : 0;\n" +
     "                }\n" +
     "                int topSystemInset = Math.max(Math.max(status.top, statusStable.top), Math.max(cutout.top, fallbackStatusBarHeight));\n" +
-    "                boolean shouldApplyTopInset = drawBehindStatusBar || hideStatusBar;\n" +
+    "                boolean shouldApplyTopInset = useWebViewPadding && (drawBehindStatusBar || hideStatusBar);\n" +
     "                int topInset = shouldApplyTopInset ? topSystemInset : 0;\n" +
-    "                webView.setPadding(nav.left, topInset, nav.right, nav.bottom);\n" +
+    "                int bottomInset = useWebViewPadding ? nav.bottom : 0;\n" +
+    "                webView.setPadding(nav.left, topInset, nav.right, bottomInset);\n" +
     "                webView.post(() -> webView.evaluateJavascript(\n" +
-    "                    \"(function(){var t=\" + topInset + \";var b=\" + nav.bottom + \";\" +\n" +
+    "                    \"(function(){var t=\" + topInset + \";var b=\" + bottomInset + \";\" +\n" +
     "                    \"var root=document.documentElement;\" +\n" +
     "                    \"if(root){root.style.setProperty('--convertapk-safe-top', t+'px');root.style.setProperty('--convertapk-safe-bottom', b+'px');}\" +\n" +
     "                    \"if(document.body){document.body.style.setProperty('--convertapk-safe-top', t+'px');document.body.style.setProperty('--convertapk-safe-bottom', b+'px');}\" +\n" +
@@ -1841,6 +1950,21 @@ if (!isKotlin) {
       text = text.slice(0, idx) + onBackPressed + text.slice(idx);
     }
   }
+}
+
+if (!useWebViewPadding) {
+  text = text.replace(
+    /webView\.setPadding\(\s*nav\.left\s*,\s*topInset\s*,\s*nav\.right\s*,\s*nav\.bottom\s*\);/g,
+    "webView.setPadding(nav.left, 0, nav.right, 0);"
+  );
+  text = text.replace(
+    /webView\.setPadding\(\s*nav\.left\s*,\s*topInset\s*,\s*nav\.right\s*,\s*nav\.bottom\s*\)/g,
+    "webView.setPadding(nav.left, 0, nav.right, 0)"
+  );
+  text = text.replace(
+    /\+\s*topInset\s*\+\s*";var b="\s*\+\s*nav\.bottom\s*\+/g,
+    '+ 0 + ";var b=" + 0 +'
+  );
 }
 
 writeText(mainActivity, text);
