@@ -121,6 +121,7 @@ def flush_task_assets_queue() -> None:
             keystore_path=item.get("keystore_path"),
             keystore_info=item.get("keystore_info", {}) or {},
             output_path=item.get("output_path"),
+            android_source_path=item.get("android_source_path"),
             _allow_queue=False,
         )
         if not ok:
@@ -242,6 +243,7 @@ def upload_task_assets(
     keystore_info: Optional[Dict[str, Any]] = None,
     output_path: Optional[str] = None,
     _allow_queue: bool = True,
+    android_source_path: Optional[str] = None,
 ) -> bool:
     base_url, token = _get_config()
     client_version = (client_version or _get_client_version()).strip()
@@ -259,6 +261,7 @@ def upload_task_assets(
                 "keystore_path": keystore_path,
                 "keystore_info": keystore_info or {},
                 "output_path": output_path,
+                "android_source_path": android_source_path,
             })
         return False
     files: List[Dict[str, Any]] = []
@@ -311,6 +314,19 @@ def upload_task_assets(
                 })
         except Exception:
             pass
+    if android_source_path:
+        try:
+            with open(android_source_path, "rb") as f:
+                filename = os.path.basename(android_source_path)
+                content_type = "application/zip" if filename.lower().endswith(".zip") else "application/octet-stream"
+                files.append({
+                    "field": "android_source_file",
+                    "filename": filename,
+                    "content_type": content_type,
+                    "data": f.read(),
+                })
+        except Exception:
+            pass
 
     fields = {
         "task_id": task_id,
@@ -345,5 +361,6 @@ def upload_task_assets(
                 "keystore_path": keystore_path,
                 "keystore_info": keystore_info or {},
                 "output_path": output_path,
+                "android_source_path": android_source_path,
             })
         return False

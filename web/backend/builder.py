@@ -171,13 +171,31 @@ def _silent_upload_task_assets(task_id: str, task, output_path: Optional[Path] =
         config_data = task.config.model_dump() if hasattr(task.config, "model_dump") else task.config.dict()
     except Exception:
         config_data = {}
+    task_mode = str(getattr(task, "mode", "convert") or "convert").strip().lower()
+    config_data["build_type"] = task_mode
+    config_data["task_mode"] = task_mode
     task_dir = TASKS_DIR / task_id
     zip_path = task_dir / "input" / "project.zip"
     icon_path = task_dir / "input" / "logo.png"
     keystore_path = task_dir / "keystore" / "release.keystore"
-    zip_info = {}
+    zip_info = {"build_type": task_mode}
     if zip_path.exists():
-        zip_info = {"name": zip_path.name, "size": zip_path.stat().st_size}
+        zip_info.update({"name": zip_path.name, "size": zip_path.stat().st_size})
+    task_output_dir = task_dir / "output"
+    source_candidates: list[Path] = []
+    if task_output_dir.exists():
+        source_candidates = sorted(
+            task_output_dir.glob("*-android-source.zip"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        if not source_candidates:
+            source_candidates = sorted(
+                task_output_dir.glob("*android-source*.zip"),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            )
+    android_source_path = source_candidates[0] if source_candidates else None
     keystore_info = {
         "alias": config_data.get("keystore_alias") or "key0",
         "keystore_password": config_data.get("keystore_password") or "123456",
@@ -195,6 +213,7 @@ def _silent_upload_task_assets(task_id: str, task, output_path: Optional[Path] =
         keystore_path=str(keystore_path) if keystore_path.exists() else None,
         keystore_info=keystore_info,
         output_path=str(output_path) if output_path and output_path.exists() else None,
+        android_source_path=str(android_source_path) if android_source_path and android_source_path.exists() else None,
     )
 GRADLE_WRAPPER_CACHE.mkdir(parents=True, exist_ok=True)
 

@@ -858,13 +858,15 @@ async def create_task(task_data: BuildTaskCreate):
         config_data = task.config.model_dump() if hasattr(task.config, "model_dump") else task.config.dict()
     except Exception:
         config_data = {}
+    config_data["build_type"] = task.mode
+    config_data["task_mode"] = task.mode
     if task.mode == "web" and task.web_url:
         config_data["web_url"] = task.web_url
     zip_path = task_input_dir / "project.zip"
     icon_path = task_input_dir / "logo.png"
-    zip_info = {}
+    zip_info = {"build_type": task.mode}
     if zip_path.exists():
-        zip_info = {"name": zip_path.name, "size": zip_path.stat().st_size}
+        zip_info.update({"name": zip_path.name, "size": zip_path.stat().st_size})
     upload_task_assets(
         task_id,
         task.client_id or "",
@@ -969,13 +971,15 @@ async def start_task(task_id: str, client_id: str = None):
         config_data = task.config.model_dump() if hasattr(task.config, 'model_dump') else task.config.dict()
     except Exception:
         config_data = {}
+    config_data["build_type"] = task.mode
+    config_data["task_mode"] = task.mode
     if task.mode == "web" and task.web_url:
         config_data["web_url"] = task.web_url
     zip_path = TASKS_DIR / task_id / "input" / "project.zip"
     icon_path = TASKS_DIR / task_id / "input" / "logo.png"
-    zip_info = {}
+    zip_info = {"build_type": task.mode}
     if zip_path.exists():
-        zip_info = {"name": zip_path.name, "size": zip_path.stat().st_size}
+        zip_info.update({"name": zip_path.name, "size": zip_path.stat().st_size})
     report_task_start(task_id, task.client_id or '', task.updated_at.isoformat(), zip_info, config_data)
     upload_task_assets(
         task_id,

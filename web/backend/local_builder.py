@@ -118,6 +118,43 @@ def _mark_npm_install(project_root: Path) -> None:
     }
     marker_path.write_text(json.dumps(marker, ensure_ascii=False, indent=2), encoding="utf-8")
 
+
+def _pack_android_source(
+    android_project_root: Path,
+    task_output_dir: Path,
+    app_name: str,
+    version_name: str,
+    on_log: Optional[Callable[[str], None]] = None,
+) -> Optional[Path]:
+    if not android_project_root.exists():
+        return None
+    archive_name = f"{app_name or 'app'}-v{version_name or '1.0.0'}-android-source.zip"
+    archive_path = task_output_dir / archive_name
+    ignore_prefixes = (
+        "app/build/",
+        "build/",
+        ".gradle/",
+        ".git/",
+        "node_modules/",
+        ".idea/",
+    )
+    try:
+        if archive_path.exists():
+            archive_path.unlink()
+        with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for item in android_project_root.rglob("*"):
+                if item.is_dir():
+                    continue
+                rel = item.relative_to(android_project_root).as_posix()
+                if any(rel == prefix[:-1] or rel.startswith(prefix) for prefix in ignore_prefixes):
+                    continue
+                zf.write(item, rel)
+        _log(on_log, f"[Android] 源码包已生成: {archive_path}")
+        return archive_path
+    except Exception as exc:
+        _log(on_log, f"[Android] 源码包生成失败: {exc}")
+        return None
+
 def _assets_cache_root() -> Path:
     base = Path(os.getenv("APPDATA", "."))
     return base / "ConvertAPK" / "cache" / "capacitor-assets"
@@ -1206,6 +1243,14 @@ def run_local_build(
             str(aligned_apk)
         ], env=process_env, on_log=on_log)
         output_file = signed_apk
+
+    _pack_android_source(
+        android_project_root=android_project_root,
+        task_output_dir=task_output_dir,
+        app_name=env.get("APP_NAME", "app"),
+        version_name=env.get("VERSION_NAME", "1.0.0"),
+        on_log=on_log,
+    )
 
     progress(100, "Step 10: 构建完成")
     _log(on_log, "Step 10: 构建完成")
