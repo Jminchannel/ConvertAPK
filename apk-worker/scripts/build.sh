@@ -2081,7 +2081,8 @@ else
     log_info "Step 7: 构建 Release APK..."
 fi
 
-cd "$ANDROID_DIR"
+ANDROID_BUILD_DIR="$PROJECT_ROOT/$ANDROID_DIR"
+cd "$ANDROID_BUILD_DIR"
 
 # Ensure gradlew exists (web mode may miss wrapper if template copy failed)
 if [ ! -f "gradlew" ]; then
@@ -2095,7 +2096,7 @@ if [ ! -f "gradlew" ]; then
     fi
 fi
 if [ ! -f "gradlew" ]; then
-    log_error "gradlew not found in $ANDROID_DIR"
+    log_error "gradlew not found in $ANDROID_BUILD_DIR"
     exit 1
 fi
 
@@ -2145,10 +2146,15 @@ if [ "$OUTPUT_FORMAT" = "aab" ]; then
     check_error "AAB 构建失败"
 
     # 找到生成的 AAB
-    AAB_PATH=$(find . -name "*.aab" -path "*/release/*" | head -n 1)
-
+    AAB_OUT_DIR="$(pwd)/app/build/outputs/bundle/release"
+    AAB_PATH=$(find "$AAB_OUT_DIR" -maxdepth 1 -name "*.aab" -type f 2>/dev/null | head -n 1)
     if [ -z "$AAB_PATH" ]; then
+        AAB_PATH=$(find . -name "*.aab" -path "*/release/*" -type f | head -n 1)
+    fi
+
+    if [ -z "$AAB_PATH" ] || [ ! -f "$AAB_PATH" ]; then
         log_error "未找到生成的AAB文件"
+        ls -la "$AAB_OUT_DIR" 2>/dev/null || true
         exit 1
     fi
 
@@ -2181,7 +2187,7 @@ else
     log_success "APK 构建完成: $APK_PATH"
 fi
 
-cd ..
+cd "$PROJECT_ROOT"
 
 # ============================================
 # 步骤 8: 生成/使用密钥库
@@ -2245,7 +2251,7 @@ else
     log_info "Step 9: 对齐 APK (zipalign)..."
 fi
 
-cd "$ANDROID_DIR"
+cd "$ANDROID_BUILD_DIR"
 
 FINAL_OUTPUT=""
 
