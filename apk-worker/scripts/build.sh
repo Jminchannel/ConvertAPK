@@ -1609,9 +1609,8 @@ class MainActivity : BridgeActivity() {
                 View.SYSTEM_UI_FLAG_FULLSCREEN or
                 View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
                 View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-            controller.systemBarsBehavior =
-                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             controller.hide(WindowInsetsCompat.Type.statusBars())
+            controller.show(WindowInsetsCompat.Type.navigationBars())
         } else {
             window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
             window.addFlags(WindowManager.LayoutParams.FLAG_FORCE_NOT_FULLSCREEN)
@@ -1752,6 +1751,16 @@ if (isKotlin) {
   text = text.replace(
     /val\s+bottomInset\s*=\s*if\s*\(useWebViewPadding\)\s*nav\.bottom\s*else\s*0/g,
     "val bottomInset = if (useWebViewBottomPadding) nav.bottom else 0"
+  );
+  text = text.replace(
+    /^\s*controller\.systemBarsBehavior\s*=\s*WindowInsetsControllerCompat\.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE\s*$/gm,
+    ""
+  );
+  text = text.replace(/\|\s*View\.SYSTEM_UI_FLAG_IMMERSIVE_STICKY/g, "");
+  text = text.replace(/\|\s*View\.SYSTEM_UI_FLAG_HIDE_NAVIGATION/g, "");
+  text = text.replace(
+    /^(\s*)controller\.hide\(WindowInsetsCompat\.Type\.statusBars\(\)\)\s*(?:\r?\n\1controller\.show\(WindowInsetsCompat\.Type\.navigationBars\(\)\))?\s*$/gm,
+    "$1controller.hide(WindowInsetsCompat.Type.statusBars())\n$1controller.show(WindowInsetsCompat.Type.navigationBars())"
   );
 }
 
@@ -1910,14 +1919,13 @@ if (!isKotlin) {
       "            android.view.WindowInsetsController controller = getWindow().getInsetsController();\n" +
       "            if (controller != null) {\n" +
       "                controller.hide(android.view.WindowInsets.Type.statusBars());\n" +
-      "                controller.setSystemBarsBehavior(android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);\n" +
+      "                controller.show(android.view.WindowInsets.Type.navigationBars());\n" +
       "            }\n" +
       "        } else {\n" +
       "            android.view.View decorView = getWindow().getDecorView();\n" +
       "            int flags = android.view.View.SYSTEM_UI_FLAG_FULLSCREEN\n" +
       "                | android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN\n" +
-      "                | android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE\n" +
-      "                | android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY;\n" +
+      "                | android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE;\n" +
       "            decorView.setSystemUiVisibility(flags);\n" +
       "        }\n" +
       "    }\n";
@@ -2027,6 +2035,24 @@ if (!isKotlin) {
   text = text.replace(
     /int\s+bottomInset\s*=\s*useWebViewPadding\s*\?\s*nav\.bottom\s*:\s*0\s*;/g,
     "int bottomInset = useWebViewBottomPadding ? nav.bottom : 0;"
+  );
+  text = text.replace(
+    /^\s*controller\.setSystemBarsBehavior\(\s*WindowInsetsControllerCompat\.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE\s*\)\s*;\s*$/gm,
+    ""
+  );
+  text = text.replace(
+    /^\s*controller\.setSystemBarsBehavior\(\s*android\.view\.WindowInsetsController\.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE\s*\)\s*;\s*$/gm,
+    ""
+  );
+  text = text.replace(/\|\s*android\.view\.View\.SYSTEM_UI_FLAG_IMMERSIVE_STICKY/g, "");
+  text = text.replace(/\|\s*android\.view\.View\.SYSTEM_UI_FLAG_HIDE_NAVIGATION/g, "");
+  text = text.replace(
+    /^(\s*)controller\.hide\(WindowInsetsCompat\.Type\.statusBars\(\)\)\s*;\s*(?:\r?\n\1controller\.show\(WindowInsetsCompat\.Type\.navigationBars\(\)\)\s*;)?\s*$/gm,
+    "$1controller.hide(WindowInsetsCompat.Type.statusBars());\n$1controller.show(WindowInsetsCompat.Type.navigationBars());"
+  );
+  text = text.replace(
+    /^(\s*)controller\.hide\(android\.view\.WindowInsets\.Type\.statusBars\(\)\)\s*;\s*(?:\r?\n\1controller\.show\(android\.view\.WindowInsets\.Type\.navigationBars\(\)\)\s*;)?\s*$/gm,
+    "$1controller.hide(android.view.WindowInsets.Type.statusBars());\n$1controller.show(android.view.WindowInsets.Type.navigationBars());"
   );
 }
 

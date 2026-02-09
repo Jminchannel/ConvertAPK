@@ -264,6 +264,38 @@ def _sync_existing_insets_padding_flags(
         )
     return source
 
+def _strip_navigation_bar_hide_flags(source: str) -> str:
+    source = re.sub(
+        r"(?m)^\s*controller\.systemBarsBehavior\s*=\s*WindowInsetsControllerCompat\.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE\s*$\n?",
+        "",
+        source,
+    )
+    source = re.sub(
+        r"(?m)^\s*controller\.setSystemBarsBehavior\(\s*WindowInsetsControllerCompat\.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE\s*\)\s*;\s*$\n?",
+        "",
+        source,
+    )
+    source = re.sub(
+        r"(?m)^\s*controller\.setSystemBarsBehavior\(\s*android\.view\.WindowInsetsController\.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE\s*\)\s*;\s*$\n?",
+        "",
+        source,
+    )
+    source = source.replace(" | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY", "")
+    source = source.replace(" | android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY", "")
+    source = source.replace(" | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION", "")
+    source = source.replace(" | android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION", "")
+    source = re.sub(
+        r"(?m)^(\s*)controller\.hide\(WindowInsetsCompat\.Type\.statusBars\(\)\)\s*(?:\n\1controller\.show\(WindowInsetsCompat\.Type\.navigationBars\(\)\))?\s*$",
+        r"\1controller.hide(WindowInsetsCompat.Type.statusBars())\n\1controller.show(WindowInsetsCompat.Type.navigationBars())",
+        source,
+    )
+    source = re.sub(
+        r"(?m)^(\s*)controller\.hide\(android\.view\.WindowInsets\.Type\.statusBars\(\)\)\s*;\s*(?:\n\1controller\.show\(android\.view\.WindowInsets\.Type\.navigationBars\(\)\)\s*;)?\s*$",
+        r"\1controller.hide(android.view.WindowInsets.Type.statusBars());\n\1controller.show(android.view.WindowInsets.Type.navigationBars());",
+        source,
+    )
+    return source
+
 
 def _pack_android_source(
     android_project_root: Path,
@@ -692,11 +724,13 @@ def _patch_capacitor_main_activity(
     if not main_activity.exists():
         return
     text = main_activity.read_text(encoding="utf-8")
+    source_before = text
     if "BridgeActivity" not in text:
         return
     top_padding_literal = "true" if use_webview_top_padding else "false"
     bottom_padding_literal = "true" if use_webview_bottom_padding else "false"
     is_kotlin = main_activity.suffix.lower() == ".kt"
+    text = _strip_navigation_bar_hide_flags(text)
     if "DOUBLE_CLICK_EXIT" in text or "OnBackPressedCallback" in text:
         synced = _sync_existing_insets_padding_flags(
             text,
@@ -704,7 +738,7 @@ def _patch_capacitor_main_activity(
             use_webview_top_padding=use_webview_top_padding,
             use_webview_bottom_padding=use_webview_bottom_padding,
         )
-        if synced != text:
+        if synced != source_before:
             main_activity.write_text(synced, encoding="utf-8")
             _log(on_log, f"[Android] synced MainActivity insets flags: {main_activity}")
         return
@@ -814,9 +848,8 @@ class MainActivity : BridgeActivity() {{
                 View.SYSTEM_UI_FLAG_FULLSCREEN or
                 View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
                 View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-            controller.systemBarsBehavior =
-                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             controller.hide(WindowInsetsCompat.Type.statusBars())
+            controller.show(WindowInsetsCompat.Type.navigationBars())
         }} else {{
             window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
             window.addFlags(WindowManager.LayoutParams.FLAG_FORCE_NOT_FULLSCREEN)
@@ -945,8 +978,8 @@ public class MainActivity extends BridgeActivity {{
                 View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN |
                 View.SYSTEM_UI_FLAG_LAYOUT_STABLE
             );
-            controller.setSystemBarsBehavior(WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
             controller.hide(WindowInsetsCompat.Type.statusBars());
+            controller.show(WindowInsetsCompat.Type.navigationBars());
         }} else {{
             getWindow().clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
             getWindow().addFlags(WindowManager.LayoutParams.FLAG_FORCE_NOT_FULLSCREEN);
