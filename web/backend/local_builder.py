@@ -119,7 +119,7 @@ def _mark_npm_install(project_root: Path) -> None:
     marker_path.write_text(json.dumps(marker, ensure_ascii=False, indent=2), encoding="utf-8")
 
 _SAFE_AREA_TOP_MARKERS = (
-    "safe-area-inset-top",
+    "var(--convertapk-safe-top",
     "--convertapk-safe-top",
 )
 _SAFE_AREA_BOTTOM_MARKERS = (
@@ -205,6 +205,64 @@ def _detect_safe_area_usage(
     if not bottom_detected:
         _log(on_log, "[Insets] safe-area bottom usage not detected")
     return top_detected, bottom_detected
+
+def _sync_existing_insets_padding_flags(
+    source: str,
+    is_kotlin: bool,
+    use_webview_top_padding: bool,
+    use_webview_bottom_padding: bool,
+) -> str:
+    top_literal = "true" if use_webview_top_padding else "false"
+    bottom_literal = "true" if use_webview_bottom_padding else "false"
+    if is_kotlin:
+        source = re.sub(
+            r"(?m)^(\s*)val\s+useWebViewPadding\s*=\s*(?:true|false)\s*$",
+            rf"\1val useWebViewTopPadding = {top_literal}\n\1val useWebViewBottomPadding = {bottom_literal}",
+            source,
+        )
+        source = re.sub(
+            r"(?m)^(\s*)val\s+useWebViewTopPadding\s*=\s*(?:true|false)\s*$",
+            rf"\1val useWebViewTopPadding = {top_literal}",
+            source,
+        )
+        source = re.sub(
+            r"(?m)^(\s*)val\s+useWebViewBottomPadding\s*=\s*(?:true|false)\s*$",
+            rf"\1val useWebViewBottomPadding = {bottom_literal}",
+            source,
+        )
+        source = source.replace(
+            "val shouldApplyTopInset = useWebViewPadding &&",
+            "val shouldApplyTopInset = useWebViewTopPadding &&",
+        )
+        source = source.replace(
+            "val bottomInset = if (useWebViewPadding) nav.bottom else 0",
+            "val bottomInset = if (useWebViewBottomPadding) nav.bottom else 0",
+        )
+    else:
+        source = re.sub(
+            r"(?m)^(\s*)final\s+boolean\s+useWebViewPadding\s*=\s*(?:true|false)\s*;\s*$",
+            rf"\1final boolean useWebViewTopPadding = {top_literal};\n\1final boolean useWebViewBottomPadding = {bottom_literal};",
+            source,
+        )
+        source = re.sub(
+            r"(?m)^(\s*)final\s+boolean\s+useWebViewTopPadding\s*=\s*(?:true|false)\s*;\s*$",
+            rf"\1final boolean useWebViewTopPadding = {top_literal};",
+            source,
+        )
+        source = re.sub(
+            r"(?m)^(\s*)final\s+boolean\s+useWebViewBottomPadding\s*=\s*(?:true|false)\s*;\s*$",
+            rf"\1final boolean useWebViewBottomPadding = {bottom_literal};",
+            source,
+        )
+        source = source.replace(
+            "boolean shouldApplyTopInset = useWebViewPadding &&",
+            "boolean shouldApplyTopInset = useWebViewTopPadding &&",
+        )
+        source = source.replace(
+            "int bottomInset = useWebViewPadding ? nav.bottom : 0;",
+            "int bottomInset = useWebViewBottomPadding ? nav.bottom : 0;",
+        )
+    return source
 
 
 def _pack_android_source(
@@ -636,11 +694,21 @@ def _patch_capacitor_main_activity(
     text = main_activity.read_text(encoding="utf-8")
     if "BridgeActivity" not in text:
         return
-    if "DOUBLE_CLICK_EXIT" in text or "OnBackPressedCallback" in text:
-        return
     top_padding_literal = "true" if use_webview_top_padding else "false"
     bottom_padding_literal = "true" if use_webview_bottom_padding else "false"
-    if main_activity.suffix.lower() == ".kt":
+    is_kotlin = main_activity.suffix.lower() == ".kt"
+    if "DOUBLE_CLICK_EXIT" in text or "OnBackPressedCallback" in text:
+        synced = _sync_existing_insets_padding_flags(
+            text,
+            is_kotlin=is_kotlin,
+            use_webview_top_padding=use_webview_top_padding,
+            use_webview_bottom_padding=use_webview_bottom_padding,
+        )
+        if synced != text:
+            main_activity.write_text(synced, encoding="utf-8")
+            _log(on_log, f"[Android] synced MainActivity insets flags: {main_activity}")
+        return
+    if is_kotlin:
         updated = f"""package {package_name}
 
 import android.graphics.Color

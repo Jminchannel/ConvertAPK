@@ -1221,7 +1221,7 @@ function writeText(file, text) {
 }
 
 const safeAreaTopMarkers = [
-  "safe-area-inset-top",
+  "var(--convertapk-safe-top",
   "--convertapk-safe-top",
 ];
 const safeAreaBottomMarkers = [
@@ -1730,6 +1730,31 @@ if (isKotlin && !replacedKotlin && allowKotlinPatch) {
   }
 }
 
+if (isKotlin) {
+  const topPaddingLiteral = useWebViewTopPadding ? "true" : "false";
+  const bottomPaddingLiteral = useWebViewBottomPadding ? "true" : "false";
+  text = text.replace(
+    /^(\s*)val\s+useWebViewPadding\s*=\s*(?:true|false)\s*$/gm,
+    `$1val useWebViewTopPadding = ${topPaddingLiteral}\n$1val useWebViewBottomPadding = ${bottomPaddingLiteral}`
+  );
+  text = text.replace(
+    /^(\s*)val\s+useWebViewTopPadding\s*=\s*(?:true|false)\s*$/gm,
+    `$1val useWebViewTopPadding = ${topPaddingLiteral}`
+  );
+  text = text.replace(
+    /^(\s*)val\s+useWebViewBottomPadding\s*=\s*(?:true|false)\s*$/gm,
+    `$1val useWebViewBottomPadding = ${bottomPaddingLiteral}`
+  );
+  text = text.replace(
+    /val\s+shouldApplyTopInset\s*=\s*useWebViewPadding\s*&&/g,
+    "val shouldApplyTopInset = useWebViewTopPadding &&"
+  );
+  text = text.replace(
+    /val\s+bottomInset\s*=\s*if\s*\(useWebViewPadding\)\s*nav\.bottom\s*else\s*0/g,
+    "val bottomInset = if (useWebViewBottomPadding) nav.bottom else 0"
+  );
+}
+
 if (!isKotlin) {
   const hasDownloadListener = text.includes("setDownloadListener");
   const hasInsetsListener = text.includes("ViewCompat.setOnApplyWindowInsetsListener(decor");
@@ -1978,6 +2003,31 @@ if (!isKotlin) {
       text = text.slice(0, idx) + onBackPressed + text.slice(idx);
     }
   }
+}
+
+if (!isKotlin) {
+  const topPaddingLiteral = useWebViewTopPadding ? "true" : "false";
+  const bottomPaddingLiteral = useWebViewBottomPadding ? "true" : "false";
+  text = text.replace(
+    /^(\s*)final\s+boolean\s+useWebViewPadding\s*=\s*(?:true|false)\s*;\s*$/gm,
+    `$1final boolean useWebViewTopPadding = ${topPaddingLiteral};\n$1final boolean useWebViewBottomPadding = ${bottomPaddingLiteral};`
+  );
+  text = text.replace(
+    /^(\s*)final\s+boolean\s+useWebViewTopPadding\s*=\s*(?:true|false)\s*;\s*$/gm,
+    `$1final boolean useWebViewTopPadding = ${topPaddingLiteral};`
+  );
+  text = text.replace(
+    /^(\s*)final\s+boolean\s+useWebViewBottomPadding\s*=\s*(?:true|false)\s*;\s*$/gm,
+    `$1final boolean useWebViewBottomPadding = ${bottomPaddingLiteral};`
+  );
+  text = text.replace(
+    /boolean\s+shouldApplyTopInset\s*=\s*useWebViewPadding\s*&&/g,
+    "boolean shouldApplyTopInset = useWebViewTopPadding &&"
+  );
+  text = text.replace(
+    /int\s+bottomInset\s*=\s*useWebViewPadding\s*\?\s*nav\.bottom\s*:\s*0\s*;/g,
+    "int bottomInset = useWebViewBottomPadding ? nav.bottom : 0;"
+  );
 }
 
 if (!useWebViewTopPadding || !useWebViewBottomPadding) {
