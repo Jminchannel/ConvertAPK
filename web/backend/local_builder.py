@@ -118,11 +118,12 @@ def _mark_npm_install(project_root: Path) -> None:
     }
     marker_path.write_text(json.dumps(marker, ensure_ascii=False, indent=2), encoding="utf-8")
 
-_SAFE_AREA_MARKERS = (
+_SAFE_AREA_TOP_MARKERS = (
     "safe-area-inset-top",
-    "safe-area-inset-bottom",
-    "env(safe-area-inset",
     "--convertapk-safe-top",
+)
+_SAFE_AREA_BOTTOM_MARKERS = (
+    "safe-area-inset-bottom",
     "--convertapk-safe-bottom",
 )
 _SAFE_AREA_SCAN_EXTENSIONS = {
@@ -138,24 +139,26 @@ _SAFE_AREA_SCAN_EXTENSIONS = {
 }
 _SAFE_AREA_SCAN_MAX_BYTES = 2 * 1024 * 1024
 
-def _file_contains_safe_area(file_path: Path) -> bool:
+def _detect_file_safe_area(file_path: Path) -> Tuple[bool, bool]:
     if file_path.suffix.lower() not in _SAFE_AREA_SCAN_EXTENSIONS:
-        return False
+        return False, False
     try:
         with file_path.open("rb") as handle:
             raw = handle.read(_SAFE_AREA_SCAN_MAX_BYTES)
     except Exception:
-        return False
+        return False, False
     text = raw.decode("utf-8", errors="ignore")
     if not text:
-        return False
-    return any(marker in text for marker in _SAFE_AREA_MARKERS)
+        return False, False
+    has_top = any(marker in text for marker in _SAFE_AREA_TOP_MARKERS)
+    has_bottom = any(marker in text for marker in _SAFE_AREA_BOTTOM_MARKERS)
+    return has_top, has_bottom
 
 def _detect_safe_area_usage(
     project_root: Path,
     android_app_dir: Path,
     on_log: Optional[Callable[[str], None]] = None,
-) -> bool:
+) -> Tuple[bool, bool]:
     candidates = [
         project_root / "index.html",
         project_root / "src",
@@ -164,6 +167,8 @@ def _detect_safe_area_usage(
         android_app_dir / "src" / "main" / "assets" / "public",
     ]
     seen = set()
+    top_detected = False
+    bottom_detected = False
     for candidate in candidates:
         if not candidate.exists():
             continue
@@ -180,16 +185,26 @@ def _detect_safe_area_usage(
             if key in seen:
                 continue
             seen.add(key)
-            if not _file_contains_safe_area(file_path):
+            has_top, has_bottom = _detect_file_safe_area(file_path)
+            if not has_top and not has_bottom:
                 continue
             try:
                 display_path = file_path.relative_to(project_root)
             except Exception:
                 display_path = file_path
-            _log(on_log, f"[Insets] detected safe-area usage: {display_path}")
-            return True
-    _log(on_log, "[Insets] safe-area usage not detected")
-    return False
+            if has_top and not top_detected:
+                top_detected = True
+                _log(on_log, f"[Insets] detected safe-area top usage: {display_path}")
+            if has_bottom and not bottom_detected:
+                bottom_detected = True
+                _log(on_log, f"[Insets] detected safe-area bottom usage: {display_path}")
+            if top_detected and bottom_detected:
+                return True, True
+    if not top_detected:
+        _log(on_log, "[Insets] safe-area top usage not detected")
+    if not bottom_detected:
+        _log(on_log, "[Insets] safe-area bottom usage not detected")
+    return top_detected, bottom_detected
 
 
 def _pack_android_source(
@@ -612,7 +627,8 @@ def _patch_android_build_config(build_gradle: Path, env: Dict[str, str], on_log=
 def _patch_capacitor_main_activity(
     main_activity: Path,
     package_name: str,
-    use_webview_padding: bool = True,
+    use_webview_top_padding: bool = True,
+    use_webview_bottom_padding: bool = True,
     on_log=None,
 ) -> None:
     if not main_activity.exists():
@@ -622,7 +638,8 @@ def _patch_capacitor_main_activity(
         return
     if "DOUBLE_CLICK_EXIT" in text or "OnBackPressedCallback" in text:
         return
-    padding_literal = "true" if use_webview_padding else "false"
+    top_padding_literal = "true" if use_webview_top_padding else "false"
+    bottom_padding_literal = "true" if use_webview_bottom_padding else "false"
     if main_activity.suffix.lower() == ".kt":
         updated = f"""package {package_name}
 
@@ -678,7 +695,8 @@ class MainActivity : BridgeActivity() {{
     private fun applyWebViewInsets() {{
         val webView = bridge?.webView ?: return
         webView.clipToPadding = true
-        val useWebViewPadding = {padding_literal}
+        val useWebViewTopPadding = {top_padding_literal}
+        val useWebViewBottomPadding = {bottom_padding_literal}
         val drawBehindStatusBar = BuildConfig.STATUS_BAR_BACKGROUND.trim().lowercase() == "transparent"
         val root = window.decorView
         ViewCompat.setOnApplyWindowInsetsListener(root) {{ _, insets ->
@@ -688,9 +706,9 @@ class MainActivity : BridgeActivity() {{
             val cutout = insets.getInsets(WindowInsetsCompat.Type.displayCutout())
             val fallbackStatusBarHeight = if (BuildConfig.HIDE_STATUS_BAR) readStatusBarHeightPx() else 0
             val topSystemInset = maxOf(status.top, statusStable.top, cutout.top, fallbackStatusBarHeight)
-            val shouldApplyTopInset = useWebViewPadding && (drawBehindStatusBar || BuildConfig.HIDE_STATUS_BAR)
+            val shouldApplyTopInset = useWebViewTopPadding && (drawBehindStatusBar || BuildConfig.HIDE_STATUS_BAR)
             val topInset = if (shouldApplyTopInset) topSystemInset else 0
-            val bottomInset = if (useWebViewPadding) nav.bottom else 0
+            val bottomInset = if (useWebViewBottomPadding) nav.bottom else 0
             webView.setPadding(nav.left, topInset, nav.right, bottomInset)
             webView.post {{
                 val script = "(function(){{var t=" + topInset + ";var b=" + bottomInset +
@@ -808,7 +826,8 @@ public class MainActivity extends BridgeActivity {{
             return;
         }}
         webView.setClipToPadding(true);
-        final boolean useWebViewPadding = {padding_literal};
+        final boolean useWebViewTopPadding = {top_padding_literal};
+        final boolean useWebViewBottomPadding = {bottom_padding_literal};
         final boolean drawBehindStatusBar = "transparent".equalsIgnoreCase(BuildConfig.STATUS_BAR_BACKGROUND.trim());
         View decor = getWindow().getDecorView();
         ViewCompat.setOnApplyWindowInsetsListener(decor, (v, insets) -> {{
@@ -818,9 +837,9 @@ public class MainActivity extends BridgeActivity {{
             Insets cutout = insets.getInsets(WindowInsetsCompat.Type.displayCutout());
             int fallbackStatusBarHeight = BuildConfig.HIDE_STATUS_BAR ? readStatusBarHeightPx() : 0;
             int topSystemInset = Math.max(Math.max(status.top, statusStable.top), Math.max(cutout.top, fallbackStatusBarHeight));
-            boolean shouldApplyTopInset = useWebViewPadding && (drawBehindStatusBar || BuildConfig.HIDE_STATUS_BAR);
+            boolean shouldApplyTopInset = useWebViewTopPadding && (drawBehindStatusBar || BuildConfig.HIDE_STATUS_BAR);
             int topInset = shouldApplyTopInset ? topSystemInset : 0;
-            int bottomInset = useWebViewPadding ? nav.bottom : 0;
+            int bottomInset = useWebViewBottomPadding ? nav.bottom : 0;
             webView.setPadding(nav.left, topInset, nav.right, bottomInset);
             webView.post(() -> webView.evaluateJavascript(
                 "(function(){{var t=" + topInset + ";var b=" + bottomInset + ";" +
@@ -1216,13 +1235,24 @@ def run_local_build(
         main_candidates = list(android_app_dir.rglob("MainActivity.kt")) + list(
             android_app_dir.rglob("MainActivity.java")
         )
-        use_webview_padding = not _detect_safe_area_usage(project_root, android_app_dir, on_log=on_log)
-        _log(on_log, f"[Insets] useWebViewPadding={str(use_webview_padding).lower()}")
+        safe_area_top_used, safe_area_bottom_used = _detect_safe_area_usage(
+            project_root, android_app_dir, on_log=on_log
+        )
+        use_webview_top_padding = not safe_area_top_used
+        use_webview_bottom_padding = not safe_area_bottom_used
+        _log(
+            on_log,
+            "[Insets] useWebViewTopPadding="
+            f"{str(use_webview_top_padding).lower()}, "
+            "useWebViewBottomPadding="
+            f"{str(use_webview_bottom_padding).lower()}",
+        )
         if main_candidates:
             _patch_capacitor_main_activity(
                 main_candidates[0],
                 package_name,
-                use_webview_padding=use_webview_padding,
+                use_webview_top_padding=use_webview_top_padding,
+                use_webview_bottom_padding=use_webview_bottom_padding,
                 on_log=on_log,
             )
 

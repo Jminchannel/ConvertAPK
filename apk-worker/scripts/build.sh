@@ -1220,11 +1220,12 @@ function writeText(file, text) {
   fs.writeFileSync(file, text, "utf8");
 }
 
-const safeAreaMarkers = [
+const safeAreaTopMarkers = [
   "safe-area-inset-top",
-  "safe-area-inset-bottom",
-  "env(safe-area-inset",
   "--convertapk-safe-top",
+];
+const safeAreaBottomMarkers = [
+  "safe-area-inset-bottom",
   "--convertapk-safe-bottom",
 ];
 const safeAreaScanExtensions = new Set([
@@ -1240,22 +1241,25 @@ const safeAreaScanExtensions = new Set([
 ]);
 const safeAreaScanMaxBytes = 2 * 1024 * 1024;
 
-function fileContainsSafeArea(filePath) {
+function detectFileSafeArea(filePath) {
   const ext = path.extname(filePath).toLowerCase();
   if (!safeAreaScanExtensions.has(ext)) {
-    return false;
+    return { top: false, bottom: false };
   }
   let raw;
   try {
     raw = fs.readFileSync(filePath);
   } catch (err) {
-    return false;
+    return { top: false, bottom: false };
   }
   const text = raw.subarray(0, safeAreaScanMaxBytes).toString("utf8");
   if (!text) {
-    return false;
+    return { top: false, bottom: false };
   }
-  return safeAreaMarkers.some((marker) => text.includes(marker));
+  return {
+    top: safeAreaTopMarkers.some((marker) => text.includes(marker)),
+    bottom: safeAreaBottomMarkers.some((marker) => text.includes(marker)),
+  };
 }
 
 function detectSafeAreaUsage(projectRootDir, androidRootDir) {
@@ -1268,6 +1272,8 @@ function detectSafeAreaUsage(projectRootDir, androidRootDir) {
   ];
   const skipDirs = new Set(["node_modules", ".git", ".gradle"]);
   const seen = new Set();
+  let topDetected = false;
+  let bottomDetected = false;
   for (const candidate of candidates) {
     if (!fs.existsSync(candidate)) {
       continue;
@@ -1304,7 +1310,8 @@ function detectSafeAreaUsage(projectRootDir, androidRootDir) {
         continue;
       }
       seen.add(resolved);
-      if (!fileContainsSafeArea(resolved)) {
+      const safeAreaUsage = detectFileSafeArea(resolved);
+      if (!safeAreaUsage.top && !safeAreaUsage.bottom) {
         continue;
       }
       let displayPath = resolved;
@@ -1315,12 +1322,26 @@ function detectSafeAreaUsage(projectRootDir, androidRootDir) {
         }
       } catch (err) {
       }
-      console.log(`[Insets] detected safe-area usage: ${displayPath}`);
-      return true;
+      if (safeAreaUsage.top && !topDetected) {
+        topDetected = true;
+        console.log(`[Insets] detected safe-area top usage: ${displayPath}`);
+      }
+      if (safeAreaUsage.bottom && !bottomDetected) {
+        bottomDetected = true;
+        console.log(`[Insets] detected safe-area bottom usage: ${displayPath}`);
+      }
+      if (topDetected && bottomDetected) {
+        return { top: true, bottom: true };
+      }
     }
   }
-  console.log("[Insets] safe-area usage not detected");
-  return false;
+  if (!topDetected) {
+    console.log("[Insets] safe-area top usage not detected");
+  }
+  if (!bottomDetected) {
+    console.log("[Insets] safe-area bottom usage not detected");
+  }
+  return { top: topDetected, bottom: bottomDetected };
 }
 
 function findMainActivity(javaRoot) {
@@ -1363,8 +1384,13 @@ const doubleClickExit =
   String(process.env.DOUBLE_CLICK_EXIT || "").trim().toLowerCase() === "true";
 const taskMode = String(process.env.TASK_MODE || "").trim().toLowerCase();
 const allowKotlinPatch = taskMode === "convert";
-const useWebViewPadding = !detectSafeAreaUsage(projectRoot, androidDir);
-console.log(`[Insets] useWebViewPadding=${useWebViewPadding ? "true" : "false"}`);
+const safeAreaUsage = detectSafeAreaUsage(projectRoot, androidDir);
+const useWebViewTopPadding = !safeAreaUsage.top;
+const useWebViewBottomPadding = !safeAreaUsage.bottom;
+console.log(
+  `[Insets] useWebViewTopPadding=${useWebViewTopPadding ? "true" : "false"}, ` +
+  `useWebViewBottomPadding=${useWebViewBottomPadding ? "true" : "false"}`
+);
 const packageLineMatch = text.match(/^package\s+[^\s]+/m);
 const packageLine = packageNameRaw
   ? `package ${packageNameRaw}`
@@ -1446,7 +1472,8 @@ class MainActivity : BridgeActivity() {
     private fun setupWebView() {
         val webView = bridge?.webView ?: return
         webView.clipToPadding = true
-        val useWebViewPadding = ${useWebViewPadding ? "true" : "false"}
+        val useWebViewTopPadding = ${useWebViewTopPadding ? "true" : "false"}
+        val useWebViewBottomPadding = ${useWebViewBottomPadding ? "true" : "false"}
         val drawBehindStatusBar = BuildConfig.STATUS_BAR_BACKGROUND.trim().lowercase() == "transparent"
         val root = window.decorView
         ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
@@ -1459,9 +1486,9 @@ class MainActivity : BridgeActivity() {
                 if (resId > 0) resources.getDimensionPixelSize(resId) else 0
             } else 0
             val topSystemInset = maxOf(status.top, statusStable.top, cutout.top, fallbackStatusBarHeight)
-            val shouldApplyTopInset = useWebViewPadding && (drawBehindStatusBar || BuildConfig.HIDE_STATUS_BAR)
+            val shouldApplyTopInset = useWebViewTopPadding && (drawBehindStatusBar || BuildConfig.HIDE_STATUS_BAR)
             val topInset = if (shouldApplyTopInset) topSystemInset else 0
-            val bottomInset = if (useWebViewPadding) nav.bottom else 0
+            val bottomInset = if (useWebViewBottomPadding) nav.bottom else 0
             webView.setPadding(nav.left, topInset, nav.right, bottomInset)
             webView.post {
                 val script = "(function(){var t=" + topInset + ";var b=" + bottomInset +
@@ -1723,7 +1750,8 @@ if (!isKotlin) {
     :
     "            // ConvertAPK: WebView 安全区补偿\n" +
     "            webView.setClipToPadding(true);\n" +
-    "            final boolean useWebViewPadding = " + (useWebViewPadding ? "true" : "false") + ";\n" +
+    "            final boolean useWebViewTopPadding = " + (useWebViewTopPadding ? "true" : "false") + ";\n" +
+    "            final boolean useWebViewBottomPadding = " + (useWebViewBottomPadding ? "true" : "false") + ";\n" +
     "            final boolean drawBehindStatusBar = " + (drawBehindStatusBar ? "true" : "false") + ";\n" +
     "            final boolean hideStatusBar = " + (statusBarHidden ? "true" : "false") + ";\n" +
     "            View decor = getWindow().getDecorView();\n" +
@@ -1738,9 +1766,9 @@ if (!isKotlin) {
     "                    fallbackStatusBarHeight = resId > 0 ? getResources().getDimensionPixelSize(resId) : 0;\n" +
     "                }\n" +
     "                int topSystemInset = Math.max(Math.max(status.top, statusStable.top), Math.max(cutout.top, fallbackStatusBarHeight));\n" +
-    "                boolean shouldApplyTopInset = useWebViewPadding && (drawBehindStatusBar || hideStatusBar);\n" +
+    "                boolean shouldApplyTopInset = useWebViewTopPadding && (drawBehindStatusBar || hideStatusBar);\n" +
     "                int topInset = shouldApplyTopInset ? topSystemInset : 0;\n" +
-    "                int bottomInset = useWebViewPadding ? nav.bottom : 0;\n" +
+    "                int bottomInset = useWebViewBottomPadding ? nav.bottom : 0;\n" +
     "                webView.setPadding(nav.left, topInset, nav.right, bottomInset);\n" +
     "                webView.post(() -> webView.evaluateJavascript(\n" +
     "                    \"(function(){var t=\" + topInset + \";var b=\" + bottomInset + \";\" +\n" +
@@ -1952,18 +1980,20 @@ if (!isKotlin) {
   }
 }
 
-if (!useWebViewPadding) {
+if (!useWebViewTopPadding || !useWebViewBottomPadding) {
+  const topExpr = useWebViewTopPadding ? "topInset" : "0";
+  const bottomExpr = useWebViewBottomPadding ? "nav.bottom" : "0";
   text = text.replace(
     /webView\.setPadding\(\s*nav\.left\s*,\s*topInset\s*,\s*nav\.right\s*,\s*nav\.bottom\s*\);/g,
-    "webView.setPadding(nav.left, 0, nav.right, 0);"
+    `webView.setPadding(nav.left, ${topExpr}, nav.right, ${bottomExpr});`
   );
   text = text.replace(
     /webView\.setPadding\(\s*nav\.left\s*,\s*topInset\s*,\s*nav\.right\s*,\s*nav\.bottom\s*\)/g,
-    "webView.setPadding(nav.left, 0, nav.right, 0)"
+    `webView.setPadding(nav.left, ${topExpr}, nav.right, ${bottomExpr})`
   );
   text = text.replace(
     /\+\s*topInset\s*\+\s*";var b="\s*\+\s*nav\.bottom\s*\+/g,
-    '+ 0 + ";var b=" + 0 +'
+    `+ ${topExpr} + ";var b=" + ${bottomExpr} +`
   );
 }
 
