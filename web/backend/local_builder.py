@@ -1211,6 +1211,143 @@ def _sync_minimal_double_click_exit(
             f"[MainActivity] {'enabled' if enable else 'disabled'} minimal double-click-exit: {main_activity}",
         )
 
+def _remove_minimal_download_listener(source: str) -> str:
+    source = re.sub(
+        r"(?ms)\n?\s*// ConvertAPK: download start \(minimal\)\n.*?\n\s*// ConvertAPK: download end \(minimal\)\n?",
+        "\n",
+        source,
+    )
+    return source
+
+def _sync_minimal_download_listener(
+    main_activity: Path,
+    enable: bool,
+    on_log=None,
+) -> None:
+    if not main_activity.exists():
+        return
+    text = main_activity.read_text(encoding="utf-8")
+    if "BridgeActivity" not in text:
+        return
+    is_kotlin = main_activity.suffix.lower() == ".kt"
+    original = text
+    text = _remove_minimal_download_listener(text)
+    if enable:
+        if is_kotlin:
+            text = _insert_after_main_activity_class_open(text, "", is_kotlin=True)
+            text = _ensure_import_line(text, "import android.app.DownloadManager")
+            text = _ensure_import_line(text, "import android.content.Intent")
+            text = _ensure_import_line(text, "import android.net.Uri")
+            text = _ensure_import_line(text, "import android.os.Environment")
+            text = _ensure_import_line(text, "import android.webkit.CookieManager")
+            text = _ensure_import_line(text, "import android.webkit.URLUtil")
+            text = _ensure_import_line(text, "import android.widget.Toast")
+            on_create_snippet = (
+                "        // ConvertAPK: download start (minimal)\n"
+                "        val webView = bridge?.webView\n"
+                "        if (webView != null) {\n"
+                "            webView.setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->\n"
+                "                try {\n"
+                "                    val downloadMode = runCatching { BuildConfig.DOWNLOAD_MODE.trim().lowercase() }.getOrElse { \"picker\" }\n"
+                "                    if (downloadMode != \"silent\") {\n"
+                "                        try {\n"
+                "                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))\n"
+                "                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)\n"
+                "                            startActivity(intent)\n"
+                "                            return@setDownloadListener\n"
+                "                        } catch (_: Exception) {\n"
+                "                        }\n"
+                "                    }\n"
+                "                    val request = DownloadManager.Request(Uri.parse(url))\n"
+                "                    if (!mimeType.isNullOrBlank()) {\n"
+                "                        request.setMimeType(mimeType)\n"
+                "                    }\n"
+                "                    if (!userAgent.isNullOrBlank()) {\n"
+                "                        request.addRequestHeader(\"User-Agent\", userAgent)\n"
+                "                    }\n"
+                "                    val cookie = CookieManager.getInstance().getCookie(url)\n"
+                "                    if (!cookie.isNullOrBlank()) {\n"
+                "                        request.addRequestHeader(\"cookie\", cookie)\n"
+                "                    }\n"
+                "                    val fileName = URLUtil.guessFileName(url, contentDisposition, mimeType)\n"
+                "                    request.setTitle(fileName)\n"
+                "                    request.setDescription(url)\n"
+                "                    request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)\n"
+                "                    request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)\n"
+                "                    val dm = getSystemService(DOWNLOAD_SERVICE) as DownloadManager\n"
+                "                    dm.enqueue(request)\n"
+                "                } catch (_: Exception) {\n"
+                "                    Toast.makeText(this@MainActivity, \"Download failed\", Toast.LENGTH_SHORT).show()\n"
+                "                }\n"
+                "            }\n"
+                "        }\n"
+                "    // ConvertAPK: download end (minimal)\n"
+            )
+        else:
+            text = _ensure_import_line(text, "import android.app.DownloadManager;")
+            text = _ensure_import_line(text, "import android.content.Intent;")
+            text = _ensure_import_line(text, "import android.net.Uri;")
+            text = _ensure_import_line(text, "import android.os.Environment;")
+            text = _ensure_import_line(text, "import android.webkit.CookieManager;")
+            text = _ensure_import_line(text, "import android.webkit.URLUtil;")
+            text = _ensure_import_line(text, "import android.widget.Toast;")
+            on_create_snippet = (
+                "        // ConvertAPK: download start (minimal)\n"
+                "        android.webkit.WebView webView = getBridge() != null ? getBridge().getWebView() : null;\n"
+                "        if (webView != null) {\n"
+                "            webView.setDownloadListener((url, userAgent, contentDisposition, mimeType, _contentLength) -> {\n"
+                "                try {\n"
+                "                    String downloadMode = \"picker\";\n"
+                "                    try {\n"
+                "                        if (BuildConfig.DOWNLOAD_MODE != null) {\n"
+                "                            downloadMode = BuildConfig.DOWNLOAD_MODE.trim().toLowerCase();\n"
+                "                        }\n"
+                "                    } catch (Exception ignored) {\n"
+                "                    }\n"
+                "                    if (!\"silent\".equals(downloadMode)) {\n"
+                "                        try {\n"
+                "                            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));\n"
+                "                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);\n"
+                "                            startActivity(intent);\n"
+                "                            return;\n"
+                "                        } catch (Exception ignored) {\n"
+                "                        }\n"
+                "                    }\n"
+                "                    DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url));\n"
+                "                    if (mimeType != null && !mimeType.isEmpty()) {\n"
+                "                        request.setMimeType(mimeType);\n"
+                "                    }\n"
+                "                    if (userAgent != null && !userAgent.isEmpty()) {\n"
+                "                        request.addRequestHeader(\"User-Agent\", userAgent);\n"
+                "                    }\n"
+                "                    String cookie = CookieManager.getInstance().getCookie(url);\n"
+                "                    if (cookie != null && !cookie.isEmpty()) {\n"
+                "                        request.addRequestHeader(\"cookie\", cookie);\n"
+                "                    }\n"
+                "                    String fileName = URLUtil.guessFileName(url, contentDisposition, mimeType);\n"
+                "                    request.setTitle(fileName);\n"
+                "                    request.setDescription(url);\n"
+                "                    request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);\n"
+                "                    request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName);\n"
+                "                    DownloadManager dm = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);\n"
+                "                    if (dm != null) {\n"
+                "                        dm.enqueue(request);\n"
+                "                    }\n"
+                "                } catch (Exception ignored) {\n"
+                "                    Toast.makeText(MainActivity.this, \"Download failed\", Toast.LENGTH_SHORT).show();\n"
+                "                }\n"
+                "            });\n"
+                "        }\n"
+                "    // ConvertAPK: download end (minimal)\n"
+            )
+        text = _inject_minimal_snippet_into_on_create(text, is_kotlin=is_kotlin, snippet=on_create_snippet)
+    if text != original:
+        main_activity.write_text(text, encoding="utf-8")
+        _log(
+            on_log,
+            f"[MainActivity] {'enabled' if enable else 'disabled'} minimal download-listener: {main_activity}",
+        )
+
 def _replace_template_launcher_icon(project_root: Path, logo_path: Path, on_log=None) -> None:
     if not logo_path.exists():
         return
@@ -1556,6 +1693,7 @@ def run_local_build(
     if not is_web_task and not is_html_task:
         package_name = str(env.get("PACKAGE_NAME", "")).strip()
         double_click_exit_enabled = str(env.get("DOUBLE_CLICK_EXIT", "true")).strip().lower() == "true"
+        minimal_download_listener_enabled = task_mode == "convert"
         main_candidates = list(android_app_dir.rglob("MainActivity.kt")) + list(
             android_app_dir.rglob("MainActivity.java")
         )
@@ -1572,6 +1710,11 @@ def run_local_build(
             _sync_minimal_double_click_exit(
                 main_candidates[0],
                 enable=double_click_exit_enabled,
+                on_log=on_log,
+            )
+            _sync_minimal_download_listener(
+                main_candidates[0],
+                enable=minimal_download_listener_enabled,
                 on_log=on_log,
             )
 

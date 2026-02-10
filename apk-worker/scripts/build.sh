@@ -808,6 +808,7 @@ function writeText(filePath, text) {
 
 const webDir = process.env.WEB_DIR || "dist";
 const injectNewlineFix = String(process.env.INJECT_NEWLINE_FIX || "").toLowerCase() === "true";
+const downloadMode = String(process.env.DOWNLOAD_MODE || "").trim().toLowerCase() === "silent" ? "silent" : "picker";
 const indexHtml = path.join(process.cwd(), webDir, "index.html");
 if (!fs.existsSync(indexHtml)) {
   process.exit(0);
@@ -818,6 +819,7 @@ let html = readText(indexHtml);
 const downloadScript = `<script id="convertapk-download-helper">(function(){
   if (window.__convertapkDownloadHelper) return;
   window.__convertapkDownloadHelper = true;
+  var downloadMode = '${downloadMode}';
   function getAnchor(el){
     while (el && el.tagName !== 'A') el = el.parentElement;
     return el;
@@ -859,7 +861,12 @@ const downloadScript = `<script id="convertapk-download-helper">(function(){
       return false;
     }
   }
-  async function saveBlob(blob, filename){
+  async function maybeShareSavedFile(filename, triggerPicker){
+    if (triggerPicker === false) return;
+    if (downloadMode === 'silent') return;
+    await shareFile(filename);
+  }
+  async function saveBlob(blob, filename, triggerPicker){
     var cap = window.Capacitor;
     if (!cap || !cap.Plugins || !cap.Plugins.Filesystem) return false;
     var dataUrl = await readAsDataUrl(blob);
@@ -867,10 +874,12 @@ const downloadScript = `<script id="convertapk-download-helper">(function(){
     var fsPlugin = cap.Plugins.Filesystem;
     try {
       await fsPlugin.writeFile({ path: filename, data: base64, directory: 'DOCUMENTS', recursive: true });
+      await maybeShareSavedFile(filename, triggerPicker);
       return true;
     } catch (e) {
       try {
         await fsPlugin.writeFile({ path: filename, data: base64, directory: 'DATA', recursive: true });
+        await maybeShareSavedFile(filename, triggerPicker);
         return true;
       } catch (e2) {
         return false;
@@ -882,6 +891,7 @@ const downloadScript = `<script id="convertapk-download-helper">(function(){
     var isBlob = href.startsWith('blob:');
     var isData = href.startsWith('data:');
     if (!isBlob && !isData) {
+      if (downloadMode === 'silent') return false;
       try {
         var url = new URL(href, window.location.href).toString();
         var cap = window.Capacitor;
@@ -898,7 +908,7 @@ const downloadScript = `<script id="convertapk-download-helper">(function(){
     try {
       var res = await fetch(href);
       var blob = await res.blob();
-      return await saveBlob(blob, getFilename(a, href));
+      return await saveBlob(blob, getFilename(a, href), true);
     } catch (e) {
       return false;
     }
@@ -908,7 +918,7 @@ const downloadScript = `<script id="convertapk-download-helper">(function(){
     var file = files[0];
     var name = (file && file.name) || title || 'share';
     try {
-      var ok = await saveBlob(file, name);
+      var ok = await saveBlob(file, name, false);
       if (!ok) return false;
       return await shareFile(name);
     } catch (e) {
@@ -984,7 +994,10 @@ const downloadScript = `<script id="convertapk-download-helper">(function(){
     try {
       var href = this.getAttribute('href') || this.href || '';
       var download = this.getAttribute('download') || this.download;
-      if (download || href.startsWith('blob:') || href.startsWith('data:')) {
+      var isBlob = href.startsWith('blob:');
+      var isData = href.startsWith('data:');
+      var shouldHandle = isBlob || isData || (download && downloadMode !== 'silent');
+      if (shouldHandle) {
         handleDownload(this, href);
         return;
       }
@@ -998,7 +1011,10 @@ const downloadScript = `<script id="convertapk-download-helper">(function(){
       if (evt && evt.type === 'click') {
         var href = this.getAttribute('href') || this.href || '';
         var download = this.getAttribute('download') || this.download;
-        if (download || href.startsWith('blob:') || href.startsWith('data:')) {
+        var isBlob = href.startsWith('blob:');
+        var isData = href.startsWith('data:');
+        var shouldHandle = isBlob || isData || (download && downloadMode !== 'silent');
+        if (shouldHandle) {
           handleDownload(this, href);
           return true;
         }
@@ -1013,7 +1029,10 @@ const downloadScript = `<script id="convertapk-download-helper">(function(){
     var href = a.getAttribute('href') || '';
     var download = a.getAttribute('download') || a.download;
     if (!href) return;
-    if (download || href.startsWith('blob:') || href.startsWith('data:')) {
+    var isBlob = href.startsWith('blob:');
+    var isData = href.startsWith('data:');
+    var shouldHandle = isBlob || isData || (download && downloadMode !== 'silent');
+    if (shouldHandle) {
       e.preventDefault();
       e.stopPropagation();
       handleDownload(a, href);
@@ -2274,6 +2293,130 @@ function syncMinimalDoubleClickExit(source, isKotlinFile, enabled) {
   return updated;
 }
 
+function removeMinimalDownloadListener(source) {
+  source = source.replace(
+    /\n?\s*\/\/ ConvertAPK: download start \(minimal\)\n[\s\S]*?\n\s*\/\/ ConvertAPK: download end \(minimal\)\n?/gm,
+    "\n"
+  );
+  return source;
+}
+
+function syncMinimalDownloadListener(source, isKotlinFile, enabled) {
+  let updated = removeMinimalDownloadListener(source);
+  if (!enabled) {
+    return updated;
+  }
+  if (isKotlinFile) {
+    updated = insertAfterMainActivityClassOpen(updated, "", true);
+    updated = ensureImportLine(updated, "import android.app.DownloadManager");
+    updated = ensureImportLine(updated, "import android.content.Intent");
+    updated = ensureImportLine(updated, "import android.net.Uri");
+    updated = ensureImportLine(updated, "import android.os.Environment");
+    updated = ensureImportLine(updated, "import android.webkit.CookieManager");
+    updated = ensureImportLine(updated, "import android.webkit.URLUtil");
+    updated = ensureImportLine(updated, "import android.widget.Toast");
+    const onCreateSnippet =
+      "        // ConvertAPK: download start (minimal)\n" +
+      "        val webView = bridge?.webView\n" +
+      "        if (webView != null) {\n" +
+      "            webView.setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->\n" +
+      "                try {\n" +
+      "                    val downloadMode = runCatching { BuildConfig.DOWNLOAD_MODE.trim().lowercase() }.getOrElse { \"picker\" }\n" +
+      "                    if (downloadMode != \"silent\") {\n" +
+      "                        try {\n" +
+      "                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))\n" +
+      "                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)\n" +
+      "                            startActivity(intent)\n" +
+      "                            return@setDownloadListener\n" +
+      "                        } catch (_: Exception) {\n" +
+      "                        }\n" +
+      "                    }\n" +
+      "                    val request = DownloadManager.Request(Uri.parse(url))\n" +
+      "                    if (!mimeType.isNullOrBlank()) {\n" +
+      "                        request.setMimeType(mimeType)\n" +
+      "                    }\n" +
+      "                    if (!userAgent.isNullOrBlank()) {\n" +
+      "                        request.addRequestHeader(\"User-Agent\", userAgent)\n" +
+      "                    }\n" +
+      "                    val cookie = CookieManager.getInstance().getCookie(url)\n" +
+      "                    if (!cookie.isNullOrBlank()) {\n" +
+      "                        request.addRequestHeader(\"cookie\", cookie)\n" +
+      "                    }\n" +
+      "                    val fileName = URLUtil.guessFileName(url, contentDisposition, mimeType)\n" +
+      "                    request.setTitle(fileName)\n" +
+      "                    request.setDescription(url)\n" +
+      "                    request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)\n" +
+      "                    request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)\n" +
+      "                    val dm = getSystemService(DOWNLOAD_SERVICE) as DownloadManager\n" +
+      "                    dm.enqueue(request)\n" +
+      "                } catch (_: Exception) {\n" +
+      "                    Toast.makeText(this@MainActivity, \"Download failed\", Toast.LENGTH_SHORT).show()\n" +
+      "                }\n" +
+      "            }\n" +
+      "        }\n" +
+      "    // ConvertAPK: download end (minimal)\n";
+    updated = injectMinimalSnippetIntoOnCreate(updated, true, onCreateSnippet);
+    return updated;
+  }
+  updated = ensureImportLine(updated, "import android.app.DownloadManager;");
+  updated = ensureImportLine(updated, "import android.content.Intent;");
+  updated = ensureImportLine(updated, "import android.net.Uri;");
+  updated = ensureImportLine(updated, "import android.os.Environment;");
+  updated = ensureImportLine(updated, "import android.webkit.CookieManager;");
+  updated = ensureImportLine(updated, "import android.webkit.URLUtil;");
+  updated = ensureImportLine(updated, "import android.widget.Toast;");
+  const onCreateSnippet =
+    "        // ConvertAPK: download start (minimal)\n" +
+    "        android.webkit.WebView webView = getBridge() != null ? getBridge().getWebView() : null;\n" +
+    "        if (webView != null) {\n" +
+    "            webView.setDownloadListener((url, userAgent, contentDisposition, mimeType, _contentLength) -> {\n" +
+    "                try {\n" +
+    "                    String downloadMode = \"picker\";\n" +
+    "                    try {\n" +
+    "                        if (BuildConfig.DOWNLOAD_MODE != null) {\n" +
+    "                            downloadMode = BuildConfig.DOWNLOAD_MODE.trim().toLowerCase();\n" +
+    "                        }\n" +
+    "                    } catch (Exception ignored) {\n" +
+    "                    }\n" +
+    "                    if (!\"silent\".equals(downloadMode)) {\n" +
+    "                        try {\n" +
+    "                            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));\n" +
+    "                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);\n" +
+    "                            startActivity(intent);\n" +
+    "                            return;\n" +
+    "                        } catch (Exception ignored) {\n" +
+    "                        }\n" +
+    "                    }\n" +
+    "                    DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url));\n" +
+    "                    if (mimeType != null && !mimeType.isEmpty()) {\n" +
+    "                        request.setMimeType(mimeType);\n" +
+    "                    }\n" +
+    "                    if (userAgent != null && !userAgent.isEmpty()) {\n" +
+    "                        request.addRequestHeader(\"User-Agent\", userAgent);\n" +
+    "                    }\n" +
+    "                    String cookie = CookieManager.getInstance().getCookie(url);\n" +
+    "                    if (cookie != null && !cookie.isEmpty()) {\n" +
+    "                        request.addRequestHeader(\"cookie\", cookie);\n" +
+    "                    }\n" +
+    "                    String fileName = URLUtil.guessFileName(url, contentDisposition, mimeType);\n" +
+    "                    request.setTitle(fileName);\n" +
+    "                    request.setDescription(url);\n" +
+    "                    request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);\n" +
+    "                    request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName);\n" +
+    "                    DownloadManager dm = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);\n" +
+    "                    if (dm != null) {\n" +
+    "                        dm.enqueue(request);\n" +
+    "                    }\n" +
+    "                } catch (Exception ignored) {\n" +
+    "                    Toast.makeText(MainActivity.this, \"Download failed\", Toast.LENGTH_SHORT).show();\n" +
+    "                }\n" +
+    "            });\n" +
+    "        }\n" +
+    "    // ConvertAPK: download end (minimal)\n";
+  updated = injectMinimalSnippetIntoOnCreate(updated, false, onCreateSnippet);
+  return updated;
+}
+
 function removeMinimalStatusBarHidden(source) {
   source = source.replace(
     /\n?\s*\/\/ ConvertAPK: status-bar-hidden start \(minimal\)\n[\s\S]*?\n\s*\/\/ ConvertAPK: status-bar-hidden end \(minimal\)\n?/gm,
@@ -2397,6 +2540,12 @@ if (skipMainActivityInjection) {
   text = syncMinimalDoubleClickExit(text, isKotlin, doubleClickExit);
   if (beforeMinimalSync !== text) {
     console.log(`[MainActivity] ${doubleClickExit ? "enabled" : "disabled"} minimal double-click-exit`);
+  }
+  const enableMinimalDownloadListener = taskMode === "convert";
+  const beforeMinimalDownloadSync = text;
+  text = syncMinimalDownloadListener(text, isKotlin, enableMinimalDownloadListener);
+  if (beforeMinimalDownloadSync !== text) {
+    console.log(`[MainActivity] ${enableMinimalDownloadListener ? "enabled" : "disabled"} minimal download-listener`);
   }
 }
 
