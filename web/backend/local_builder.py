@@ -1003,6 +1003,153 @@ public class MainActivity extends BridgeActivity {{
     main_activity.write_text(updated, encoding="utf-8")
     _log(on_log, f"[Android] patched MainActivity: {main_activity}")
 
+def _reset_main_activity_if_convertapk_injected(
+    main_activity: Path,
+    package_name: str,
+    on_log=None,
+) -> None:
+    if not main_activity.exists():
+        return
+    text = main_activity.read_text(encoding="utf-8")
+    if "ConvertAPK:" not in text:
+        return
+    resolved_package = str(package_name or "").strip()
+    if not resolved_package:
+        package_match = re.search(r"(?m)^\s*package\s+([A-Za-z0-9_.]+)", text)
+        if package_match:
+            resolved_package = package_match.group(1)
+    if not resolved_package:
+        resolved_package = "com.example.app"
+    if main_activity.suffix.lower() == ".kt":
+        minimal = (
+            f"package {resolved_package}\n\n"
+            "import com.getcapacitor.BridgeActivity\n\n"
+            "class MainActivity : BridgeActivity()\n"
+        )
+    else:
+        minimal = (
+            f"package {resolved_package};\n\n"
+            "import com.getcapacitor.BridgeActivity;\n\n"
+            "public class MainActivity extends BridgeActivity {}\n"
+        )
+    main_activity.write_text(minimal, encoding="utf-8")
+    _log(on_log, f"[MainActivity] reset injected MainActivity to minimal BridgeActivity: {main_activity}")
+
+def _ensure_import_line(source: str, import_line: str) -> str:
+    if import_line in source:
+        return source
+    lines = source.splitlines()
+    insert_at = None
+    for idx, line in enumerate(lines):
+        if line.startswith("import "):
+            insert_at = idx + 1
+    if insert_at is None:
+        for idx, line in enumerate(lines):
+            if line.startswith("package "):
+                insert_at = idx + 1
+                break
+    if insert_at is None:
+        insert_at = 0
+    lines.insert(insert_at, import_line)
+    result = "\n".join(lines)
+    if source.endswith("\n"):
+        result += "\n"
+    return result
+
+def _insert_after_main_activity_class_open(source: str, insert: str) -> str:
+    match = re.search(r"class\s+MainActivity\b[^{]*\{", source)
+    if not match:
+        return source
+    idx = match.end()
+    return source[:idx] + "\n" + insert + source[idx:]
+
+def _remove_minimal_double_click_exit(source: str) -> str:
+    source = re.sub(
+        r"(?ms)\n?\s*// ConvertAPK: double-click-exit state \(minimal\)\n\s*(?:private var|private long)\s+convertApkLastBackPressedAt[^\n]*\n?",
+        "\n",
+        source,
+    )
+    source = re.sub(
+        r"(?ms)\n?\s*// ConvertAPK: double-click-exit start \(minimal\)\n.*?\n\s*// ConvertAPK: double-click-exit end \(minimal\)\n?",
+        "\n",
+        source,
+    )
+    return source
+
+def _sync_minimal_double_click_exit(
+    main_activity: Path,
+    enable: bool,
+    on_log=None,
+) -> None:
+    if not main_activity.exists():
+        return
+    text = main_activity.read_text(encoding="utf-8")
+    if "BridgeActivity" not in text:
+        return
+    is_kotlin = main_activity.suffix.lower() == ".kt"
+    original = text
+    text = _remove_minimal_double_click_exit(text)
+    if enable:
+        if is_kotlin:
+            text = _ensure_import_line(text, "import android.widget.Toast")
+            field_block = (
+                "    // ConvertAPK: double-click-exit state (minimal)\n"
+                "    private var convertApkLastBackPressedAt: Long = 0L\n"
+            )
+            method_block = (
+                "    // ConvertAPK: double-click-exit start (minimal)\n"
+                "    override fun onBackPressed() {\n"
+                "        val webView = bridge?.webView\n"
+                "        if (webView != null && webView.canGoBack()) {\n"
+                "            webView.goBack()\n"
+                "            return\n"
+                "        }\n"
+                "        val now = System.currentTimeMillis()\n"
+                "        if (now - convertApkLastBackPressedAt < 2000) {\n"
+                "            super.onBackPressed()\n"
+                "        } else {\n"
+                "            convertApkLastBackPressedAt = now\n"
+                "            Toast.makeText(this, \"Press back again to exit\", Toast.LENGTH_SHORT).show()\n"
+                "        }\n"
+                "    }\n"
+                "    // ConvertAPK: double-click-exit end (minimal)\n"
+            )
+        else:
+            text = _ensure_import_line(text, "import android.widget.Toast;")
+            field_block = (
+                "    // ConvertAPK: double-click-exit state (minimal)\n"
+                "    private long convertApkLastBackPressedAt = 0L;\n"
+            )
+            method_block = (
+                "    // ConvertAPK: double-click-exit start (minimal)\n"
+                "    @Override\n"
+                "    public void onBackPressed() {\n"
+                "        android.webkit.WebView webView = getBridge() != null ? getBridge().getWebView() : null;\n"
+                "        if (webView != null && webView.canGoBack()) {\n"
+                "            webView.goBack();\n"
+                "            return;\n"
+                "        }\n"
+                "        long now = System.currentTimeMillis();\n"
+                "        if (now - convertApkLastBackPressedAt < 2000) {\n"
+                "            super.onBackPressed();\n"
+                "        } else {\n"
+                "            convertApkLastBackPressedAt = now;\n"
+                "            Toast.makeText(this, \"Press back again to exit\", Toast.LENGTH_SHORT).show();\n"
+                "        }\n"
+                "    }\n"
+                "    // ConvertAPK: double-click-exit end (minimal)\n"
+            )
+        text = _insert_after_main_activity_class_open(text, field_block)
+        class_close = text.rfind("}")
+        if class_close != -1:
+            text = text[:class_close] + "\n" + method_block + "\n" + text[class_close:]
+    if text != original:
+        main_activity.write_text(text, encoding="utf-8")
+        _log(
+            on_log,
+            f"[MainActivity] {'enabled' if enable else 'disabled'} minimal double-click-exit: {main_activity}",
+        )
+
 def _replace_template_launcher_icon(project_root: Path, logo_path: Path, on_log=None) -> None:
     if not logo_path.exists():
         return
@@ -1347,29 +1494,23 @@ def run_local_build(
         _patch_android_build_config(build_gradle, env, on_log=on_log)
     if not is_web_task and not is_html_task:
         package_name = str(env.get("PACKAGE_NAME", "")).strip()
+        double_click_exit_enabled = str(env.get("DOUBLE_CLICK_EXIT", "true")).strip().lower() == "true"
         main_candidates = list(android_app_dir.rglob("MainActivity.kt")) + list(
             android_app_dir.rglob("MainActivity.java")
         )
-        safe_area_top_used, safe_area_bottom_used = _detect_safe_area_usage(
-            project_root, android_app_dir, on_log=on_log
-        )
-        use_webview_top_padding = True
-        use_webview_bottom_padding = not safe_area_bottom_used
         _log(
             on_log,
-            "[Insets] safe-area top auto-detect ignored; forcing useWebViewTopPadding=true, "
-            f"detectedTop={str(safe_area_top_used).lower()}; "
-            "useWebViewTopPadding="
-            f"{str(use_webview_top_padding).lower()}, "
-            "useWebViewBottomPadding="
-            f"{str(use_webview_bottom_padding).lower()}",
+            "[MainActivity] skip ConvertAPK MainActivity injection; keep original Capacitor MainActivity",
         )
         if main_candidates:
-            _patch_capacitor_main_activity(
+            _reset_main_activity_if_convertapk_injected(
                 main_candidates[0],
                 package_name,
-                use_webview_top_padding=use_webview_top_padding,
-                use_webview_bottom_padding=use_webview_bottom_padding,
+                on_log=on_log,
+            )
+            _sync_minimal_double_click_exit(
+                main_candidates[0],
+                enable=double_click_exit_enabled,
                 on_log=on_log,
             )
 

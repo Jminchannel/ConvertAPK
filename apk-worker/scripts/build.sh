@@ -1392,14 +1392,22 @@ const doubleClickExit =
   String(process.env.DOUBLE_CLICK_EXIT || "").trim().toLowerCase() === "true";
 const taskMode = String(process.env.TASK_MODE || "").trim().toLowerCase();
 const allowKotlinPatch = taskMode === "convert";
-const safeAreaUsage = detectSafeAreaUsage(projectRoot, androidDir);
-const useWebViewTopPadding = true;
-const useWebViewBottomPadding = !safeAreaUsage.bottom;
-console.log(
-  `[Insets] safe-area top auto-detect ignored; forcing useWebViewTopPadding=true, detectedTop=${safeAreaUsage.top ? "true" : "false"}; ` +
-  `[Insets] useWebViewTopPadding=${useWebViewTopPadding ? "true" : "false"}, ` +
-  `useWebViewBottomPadding=${useWebViewBottomPadding ? "true" : "false"}`
-);
+const skipMainActivityInjection =
+  String(process.env.CAPACITOR_MINIMAL_MAINACTIVITY || "true").trim().toLowerCase() !== "false";
+let useWebViewTopPadding = true;
+let useWebViewBottomPadding = true;
+if (!skipMainActivityInjection) {
+  const safeAreaUsage = detectSafeAreaUsage(projectRoot, androidDir);
+  useWebViewTopPadding = true;
+  useWebViewBottomPadding = !safeAreaUsage.bottom;
+  console.log(
+    `[Insets] safe-area top auto-detect ignored; forcing useWebViewTopPadding=true, detectedTop=${safeAreaUsage.top ? "true" : "false"}; ` +
+    `[Insets] useWebViewTopPadding=${useWebViewTopPadding ? "true" : "false"}, ` +
+    `useWebViewBottomPadding=${useWebViewBottomPadding ? "true" : "false"}`
+  );
+} else {
+  console.log("[MainActivity] skip ConvertAPK MainActivity injection; keep original Capacitor MainActivity");
+}
 const packageLineMatch = text.match(/^package\s+[^\s]+/m);
 const packageLine = packageNameRaw
   ? `package ${packageNameRaw}`
@@ -2087,6 +2095,134 @@ if (!useWebViewTopPadding || !useWebViewBottomPadding) {
     /\+\s*topInset\s*\+\s*";var b="\s*\+\s*nav\.bottom\s*\+/g,
     `+ ${topExpr} + ";var b=" + ${bottomExpr} +`
   );
+}
+
+function ensureImportLine(source, importLine) {
+  if (source.includes(importLine)) {
+    return source;
+  }
+  const lines = source.split(/\r?\n/);
+  let insertAt = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].startsWith("import ")) {
+      insertAt = i + 1;
+    }
+  }
+  if (insertAt === -1) {
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].startsWith("package ")) {
+        insertAt = i + 1;
+        break;
+      }
+    }
+  }
+  if (insertAt === -1) {
+    insertAt = 0;
+  }
+  lines.splice(insertAt, 0, importLine);
+  return lines.join("\n");
+}
+
+function insertAfterMainActivityClassOpen(source, insert) {
+  const match = source.match(/class\s+MainActivity\b[^{]*\{/m);
+  if (!match) {
+    return source;
+  }
+  const idx = source.indexOf(match[0]) + match[0].length;
+  return source.slice(0, idx) + "\n" + insert + source.slice(idx);
+}
+
+function removeMinimalDoubleClickExit(source) {
+  source = source.replace(
+    /\n?\s*\/\/ ConvertAPK: double-click-exit state \(minimal\)\n\s*(?:private var|private long)\s+convertApkLastBackPressedAt[^\n]*\n?/gm,
+    "\n"
+  );
+  source = source.replace(
+    /\n?\s*\/\/ ConvertAPK: double-click-exit start \(minimal\)\n[\s\S]*?\n\s*\/\/ ConvertAPK: double-click-exit end \(minimal\)\n?/gm,
+    "\n"
+  );
+  return source;
+}
+
+function syncMinimalDoubleClickExit(source, isKotlinFile, enabled) {
+  let updated = removeMinimalDoubleClickExit(source);
+  if (!enabled) {
+    return updated;
+  }
+  if (isKotlinFile) {
+    updated = ensureImportLine(updated, "import android.widget.Toast");
+    const fieldBlock =
+      "    // ConvertAPK: double-click-exit state (minimal)\n" +
+      "    private var convertApkLastBackPressedAt: Long = 0L\n";
+    const methodBlock =
+      "    // ConvertAPK: double-click-exit start (minimal)\n" +
+      "    override fun onBackPressed() {\n" +
+      "        val webView = bridge?.webView\n" +
+      "        if (webView != null && webView.canGoBack()) {\n" +
+      "            webView.goBack()\n" +
+      "            return\n" +
+      "        }\n" +
+      "        val now = System.currentTimeMillis()\n" +
+      "        if (now - convertApkLastBackPressedAt < 2000) {\n" +
+      "            super.onBackPressed()\n" +
+      "        } else {\n" +
+      "            convertApkLastBackPressedAt = now\n" +
+      "            Toast.makeText(this, \"Press back again to exit\", Toast.LENGTH_SHORT).show()\n" +
+      "        }\n" +
+      "    }\n" +
+      "    // ConvertAPK: double-click-exit end (minimal)\n";
+    updated = insertAfterMainActivityClassOpen(updated, fieldBlock);
+    const classClose = updated.lastIndexOf("}");
+    if (classClose !== -1) {
+      updated = updated.slice(0, classClose) + "\n" + methodBlock + "\n" + updated.slice(classClose);
+    }
+    return updated;
+  }
+  updated = ensureImportLine(updated, "import android.widget.Toast;");
+  const fieldBlock =
+    "    // ConvertAPK: double-click-exit state (minimal)\n" +
+    "    private long convertApkLastBackPressedAt = 0L;\n";
+  const methodBlock =
+    "    // ConvertAPK: double-click-exit start (minimal)\n" +
+    "    @Override\n" +
+    "    public void onBackPressed() {\n" +
+    "        android.webkit.WebView webView = getBridge() != null ? getBridge().getWebView() : null;\n" +
+    "        if (webView != null && webView.canGoBack()) {\n" +
+    "            webView.goBack();\n" +
+    "            return;\n" +
+    "        }\n" +
+    "        long now = System.currentTimeMillis();\n" +
+    "        if (now - convertApkLastBackPressedAt < 2000) {\n" +
+    "            super.onBackPressed();\n" +
+    "        } else {\n" +
+    "            convertApkLastBackPressedAt = now;\n" +
+    "            Toast.makeText(this, \"Press back again to exit\", Toast.LENGTH_SHORT).show();\n" +
+    "        }\n" +
+    "    }\n" +
+    "    // ConvertAPK: double-click-exit end (minimal)\n";
+  updated = insertAfterMainActivityClassOpen(updated, fieldBlock);
+  const classClose = updated.lastIndexOf("}");
+  if (classClose !== -1) {
+    updated = updated.slice(0, classClose) + "\n" + methodBlock + "\n" + updated.slice(classClose);
+  }
+  return updated;
+}
+
+if (skipMainActivityInjection) {
+  if (originalText.includes("ConvertAPK:")) {
+    const javaPackageLine = packageLine.endsWith(";") ? packageLine : `${packageLine};`;
+    text = isKotlin
+      ? `${packageLine}\n\nimport com.getcapacitor.BridgeActivity\n\nclass MainActivity : BridgeActivity()\n`
+      : `${javaPackageLine}\n\nimport com.getcapacitor.BridgeActivity;\n\npublic class MainActivity extends BridgeActivity {}\n`;
+    console.log("[MainActivity] detected ConvertAPK markers; reset to minimal BridgeActivity");
+  } else {
+    text = originalText;
+  }
+  const beforeMinimalSync = text;
+  text = syncMinimalDoubleClickExit(text, isKotlin, doubleClickExit);
+  if (beforeMinimalSync !== text) {
+    console.log(`[MainActivity] ${doubleClickExit ? "enabled" : "disabled"} minimal double-click-exit`);
+  }
 }
 
 writeText(mainActivity, text);
