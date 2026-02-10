@@ -2526,18 +2526,19 @@ if (skipMainActivityInjection) {
   } else {
     text = originalText;
   }
+  const enableMinimalBridgeTweaks = taskMode === "convert";
   const beforeMinimalStatusSync = text;
-  text = syncMinimalStatusBarHidden(text, isKotlin, statusBarHidden);
+  text = syncMinimalStatusBarHidden(text, isKotlin, enableMinimalBridgeTweaks && statusBarHidden);
   if (beforeMinimalStatusSync !== text) {
-    console.log(`[MainActivity] ${statusBarHidden ? "enabled" : "disabled"} minimal status-bar-hidden`);
+    console.log(`[MainActivity] ${(enableMinimalBridgeTweaks && statusBarHidden) ? "enabled" : "disabled"} minimal status-bar-hidden`);
   }
   const beforeMinimalSync = text;
-  text = syncMinimalDoubleClickExit(text, isKotlin, doubleClickExit);
+  text = syncMinimalDoubleClickExit(text, isKotlin, enableMinimalBridgeTweaks && doubleClickExit);
   if (beforeMinimalSync !== text) {
-    console.log(`[MainActivity] ${doubleClickExit ? "enabled" : "disabled"} minimal double-click-exit`);
+    console.log(`[MainActivity] ${(enableMinimalBridgeTweaks && doubleClickExit) ? "enabled" : "disabled"} minimal double-click-exit`);
   }
   const minimalDownloadMode = String(process.env.DOWNLOAD_MODE || "").trim().toLowerCase() === "silent" ? "silent" : "picker";
-  const enableMinimalDownloadListener = taskMode === "convert";
+  const enableMinimalDownloadListener = enableMinimalBridgeTweaks;
   const beforeMinimalDownloadSync = text;
   text = syncMinimalDownloadListener(text, isKotlin, enableMinimalDownloadListener, minimalDownloadMode);
   if (beforeMinimalDownloadSync !== text) {
