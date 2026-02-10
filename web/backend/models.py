@@ -40,6 +40,7 @@ class AppConfig(BaseModel):
     webview_user_agent: str = "android"  # android | pc
     # HTML mode download behavior: silent (save directly) | picker (system file manager)
     download_mode: str = "picker"
+    web_fill_mode: str = "contain"
     # Frontend sends short names (e.g. INTERNET) or full names (android.permission.INTERNET)
     permissions: List[str] = []
 
@@ -141,6 +142,14 @@ class AppConfig(BaseModel):
             return "picker"
         return "picker"
 
+    @field_validator("web_fill_mode")
+    @classmethod
+    def validate_web_fill_mode(cls, value: str) -> str:
+        raw = (value or "").strip().lower()
+        if raw in {"contain", "cover"}:
+            return raw
+        return "contain"
+
     @field_validator("output_format")
     @classmethod
     def validate_output_format(cls, value: str) -> str:
@@ -231,4 +240,5 @@ class UpdateTaskRequest(BaseModel):
     status_bar_color: Optional[str] = None  # transparent | #FFFFFF
     webview_user_agent: Optional[str] = None  # android | pc (web mode)
     download_mode: Optional[str] = None  # silent | picker (html mode)
+    web_fill_mode: Optional[str] = None
     permissions: Optional[List[str]] = None

@@ -1347,6 +1347,8 @@ async def update_task(task_id: str, update_data: UpdateTaskRequest):
         style_updates["webview_user_agent"] = update_data.webview_user_agent
     if update_data.download_mode is not None:
         style_updates["download_mode"] = update_data.download_mode
+    if update_data.web_fill_mode is not None:
+        style_updates["web_fill_mode"] = update_data.web_fill_mode
     if update_data.permissions is not None:
         style_updates["permissions"] = update_data.permissions
     if style_updates:

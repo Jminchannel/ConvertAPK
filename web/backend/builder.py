@@ -299,6 +299,7 @@ class APKBuilder:
         status_bar_color: str = "#FFFFFF",
         webview_user_agent: Optional[str] = None,
         download_mode: Optional[str] = None,
+        web_fill_mode: Optional[str] = None,
         permissions: Optional[list[str]] = None,
         keystore_password: Optional[str] = None,
         key_alias: Optional[str] = None,
@@ -380,6 +381,9 @@ class APKBuilder:
                 download_mode_normalized = "picker"
             else:
                 download_mode_normalized = "picker"
+        web_fill_mode_normalized = str(web_fill_mode or "contain").strip().lower()
+        if web_fill_mode_normalized not in {"contain", "cover"}:
+            web_fill_mode_normalized = "contain"
 
         npm_cache_dir = os.getenv('NPM_CONFIG_CACHE', '').strip()
         if not npm_cache_dir:
@@ -405,6 +409,7 @@ class APKBuilder:
             "STATUS_BAR_COLOR": status_bar_color_normalized,
             "WEBVIEW_UA": webview_ua,
             "DOWNLOAD_MODE": download_mode_normalized,
+            "WEB_FILL_MODE": web_fill_mode_normalized,
             # Comma-separated permissions (prefer full names, e.g. android.permission.CAMERA)
             "PERMISSIONS": ",".join([str(p).strip() for p in (permissions or []) if str(p).strip()]),
             "TASK_ID": task_id,
@@ -548,6 +553,8 @@ class APKBuilder:
                 f"STATUS_BAR_COLOR={env.get('STATUS_BAR_COLOR', '#FFFFFF')}",
                 "-e",
                 f"DOWNLOAD_MODE={env.get('DOWNLOAD_MODE', 'picker')}",
+                "-e",
+                f"WEB_FILL_MODE={env.get('WEB_FILL_MODE', 'contain')}",
                 "-e",
                 f"DOUBLE_CLICK_EXIT={env.get('DOUBLE_CLICK_EXIT', 'false')}",
                 "-e",
@@ -1135,6 +1142,7 @@ class BuildTaskRunner:
                 status_bar_color=getattr(task.config, "status_bar_color", "#FFFFFF"),
                 webview_user_agent=getattr(task.config, "webview_user_agent", "android"),
                 download_mode=getattr(task.config, "download_mode", "picker"),
+                web_fill_mode=getattr(task.config, "web_fill_mode", "contain"),
                 permissions=getattr(task.config, "permissions", None),
                 keystore_password=task.config.keystore_password,
                 key_alias=task.config.keystore_alias,

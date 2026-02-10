@@ -607,6 +607,13 @@
                     <option value="picker">{{ t('config.downloadModePicker') }}</option>
                   </select>
                 </div>
+                <div class="form-group">
+                  <label class="form-label">{{ t('config.webFillMode') }}</label>
+                  <select class="form-input form-select" v-model="config.web_fill_mode">
+                    <option value="contain">{{ t('config.webFillModeContain') }}</option>
+                    <option value="cover">{{ t('config.webFillModeCover') }}</option>
+                  </select>
+                </div>
               </div>
 
               <div class="grid grid-2" v-if="mode === 'web'">

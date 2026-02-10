@@ -193,6 +193,7 @@ log_info "OUTPUT_FORMAT 原始值: '${OUTPUT_FORMAT:-未设置}'"
 log_info "APP_NAME: '${APP_NAME:-未设置}'"
 log_info "PACKAGE_NAME: '${PACKAGE_NAME:-未设置}'"
 log_info "DOWNLOAD_MODE: '${DOWNLOAD_MODE:-未设置}'"
+log_info "WEB_FILL_MODE: '${WEB_FILL_MODE:-未设置}'"
 log_info "=================================="
 
 TASK_MODE=${TASK_MODE:-convert}
@@ -395,6 +396,8 @@ const orientationRaw = String(process.env.SCREEN_ORIENTATION || '').trim().toLow
 const screenOrientation = orientationRaw === 'portrait' || orientationRaw === 'landscape' ? orientationRaw : 'auto';
 const downloadModeRaw = String(process.env.DOWNLOAD_MODE || '').trim().toLowerCase();
 const downloadMode = downloadModeRaw === 'silent' ? 'silent' : 'picker';
+const webFillModeRaw = String(process.env.WEB_FILL_MODE || '').trim().toLowerCase();
+const webFillMode = webFillModeRaw === 'cover' ? 'cover' : 'contain';
 
 const stringsFile = path.join(projectRoot, 'app', 'src', 'main', 'res', 'values', 'strings.xml');
 if (fs.existsSync(stringsFile)) {
@@ -442,6 +445,13 @@ if (fs.existsSync(gradleFile)) {
     "DOWNLOAD_MODE",
     `buildConfigField("String", "DOWNLOAD_MODE", "\\"${downloadMode}\\"")`,
     ["SCREEN_ORIENTATION", "DOUBLE_CLICK_EXIT", "LIGHT_STATUS_BAR_ICONS"]
+  );
+  gtext = ensureBuildConfigField(
+    gtext,
+    "String",
+    "WEB_FILL_MODE",
+    `buildConfigField("String", "WEB_FILL_MODE", "\\"${webFillMode}\\"")`,
+    ["DOWNLOAD_MODE", "SCREEN_ORIENTATION", "DOUBLE_CLICK_EXIT"]
   );
   fs.writeFileSync(gradleFile, gtext, 'utf8');
 }

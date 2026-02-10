@@ -109,6 +109,7 @@ fun Html2ApkWebView(startUrl: String, modifier: Modifier = Modifier) {
     var pendingFileCallback by remember { mutableStateOf<ValueCallback<Array<android.net.Uri>>?>(null) }
     var pendingDownload by remember { mutableStateOf<PendingDownload?>(null) }
     val orientationMode = AppConfig.orientationMode
+    val useContainFillMode = shouldUseContainFillMode()
 
     val fileChooserLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult(),
@@ -149,14 +150,18 @@ fun Html2ApkWebView(startUrl: String, modifier: Modifier = Modifier) {
             )
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
-            settings.useWideViewPort = true
-            settings.loadWithOverviewMode = true
+            settings.useWideViewPort = useContainFillMode
+            settings.loadWithOverviewMode = useContainFillMode
             settings.cacheMode = WebSettings.LOAD_DEFAULT
             settings.allowFileAccess = true
             settings.allowContentAccess = true
             settings.allowFileAccessFromFileURLs = true
             settings.allowUniversalAccessFromFileURLs = false
-            setInitialScale(0)
+            if (useContainFillMode) {
+                setInitialScale(0)
+            } else {
+                setInitialScale(100)
+            }
 
             addJavascriptInterface(
                 DownloadBridge(context) { filename, mimeType, bytes ->
@@ -293,6 +298,14 @@ private fun shouldUseFilePickerForDownload(): Boolean {
         (field.get(null) as? String).orEmpty().trim().lowercase()
     }.getOrElse { "" }
     return mode != "silent"
+}
+
+private fun shouldUseContainFillMode(): Boolean {
+    val mode = runCatching {
+        val field = BuildConfig::class.java.getField("WEB_FILL_MODE")
+        (field.get(null) as? String).orEmpty().trim().lowercase()
+    }.getOrElse { "" }
+    return mode != "cover"
 }
 
 private fun saveToDownloads(context: Context, pending: PendingDownload) {

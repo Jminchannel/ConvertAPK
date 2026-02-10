@@ -654,6 +654,9 @@ def _patch_android_build_config(build_gradle: Path, env: Dict[str, str], on_log=
             download_mode = "picker"
         else:
             download_mode = "picker"
+    web_fill_mode = str(env.get("WEB_FILL_MODE", "contain")).strip().lower()
+    if web_fill_mode not in {"contain", "cover"}:
+        web_fill_mode = "contain"
 
     def _insert_after_default_config(line: str) -> None:
         nonlocal text
@@ -682,6 +685,7 @@ def _patch_android_build_config(build_gradle: Path, env: Dict[str, str], on_log=
         _ensure_kts("DOUBLE_CLICK_EXIT", double_click_exit)
         _ensure_kts("SCREEN_ORIENTATION", f'\\"{screen_orientation}\\"')
         _ensure_kts("DOWNLOAD_MODE", f'\\"{download_mode}\\"')
+        _ensure_kts("WEB_FILL_MODE", f'\\"{web_fill_mode}\\"')
 
         if "buildFeatures" not in text:
             text = re.sub(
@@ -709,6 +713,7 @@ def _patch_android_build_config(build_gradle: Path, env: Dict[str, str], on_log=
         _ensure_groovy("DOUBLE_CLICK_EXIT", double_click_exit)
         _ensure_groovy("SCREEN_ORIENTATION", f'\\"{screen_orientation}\\"')
         _ensure_groovy("DOWNLOAD_MODE", f'\\"{download_mode}\\"')
+        _ensure_groovy("WEB_FILL_MODE", f'\\"{web_fill_mode}\\"')
 
         if "buildFeatures" not in text:
             text = re.sub(

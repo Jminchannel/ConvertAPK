@@ -453,6 +453,7 @@ export const useAppState = () => {
     status_bar_color: '#FFFFFF',
     webview_user_agent: 'android',
     download_mode: 'picker',
+    web_fill_mode: 'contain',
     permissions: ['INTERNET', 'ACCESS_NETWORK_STATE'],
     keystore_alias: '',
     keystore_password: '',
@@ -487,6 +488,7 @@ export const useAppState = () => {
       status_bar_style: 'light',
       status_bar_color: '#FFFFFF',
       download_mode: 'picker',
+      web_fill_mode: 'contain',
       permissions: [...permissionsList],
       keystore_alias: 'key0',
       keystore_password: '123456',
@@ -1566,6 +1568,7 @@ export const useAppState = () => {
       status_bar_color: task.config.status_bar_color ?? '#FFFFFF',
       webview_user_agent: task.config.webview_user_agent ?? 'android',
       download_mode: task.config.download_mode ?? 'picker',
+      web_fill_mode: task.config.web_fill_mode ?? 'contain',
       permissions: normalizedPermissions.length ? normalizedPermissions : ['INTERNET', 'ACCESS_NETWORK_STATE'],
       keystore_alias: task.config.keystore_alias || '',
       keystore_password: task.config.keystore_password || '',
@@ -1698,6 +1701,7 @@ export const useAppState = () => {
           status_bar_color: config.value.status_bar_color,
           webview_user_agent: config.value.webview_user_agent,
           download_mode: config.value.download_mode,
+          web_fill_mode: config.value.web_fill_mode,
           permissions: enablePermissions.value ? config.value.permissions : []
         }
         await api.updateTask(updatingTaskId.value, updateData)
@@ -1731,6 +1735,7 @@ export const useAppState = () => {
             status_bar_color: config.value.status_bar_color,
             webview_user_agent: config.value.webview_user_agent,
             download_mode: config.value.download_mode,
+            web_fill_mode: config.value.web_fill_mode,
             permissions: enablePermissions.value ? config.value.permissions : [],
             keystore_alias: config.value.keystore_alias || null,
             keystore_password: config.value.keystore_password || null,
@@ -1806,6 +1811,7 @@ export const useAppState = () => {
       status_bar_color: '#FFFFFF',
       webview_user_agent: 'android',
       download_mode: 'picker',
+      web_fill_mode: 'contain',
       permissions: ['INTERNET', 'ACCESS_NETWORK_STATE'],
       keystore_alias: '',
       keystore_password: '',
