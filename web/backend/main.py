@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from typing import List
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import uuid
 import sys
 import os
@@ -20,6 +20,7 @@ import threading
 import threading
 import urllib.request
 import urllib.error
+import zipfile
 
 from models import (
     BuildTask, BuildTaskCreate, BuildTaskResponse, 
@@ -78,6 +79,68 @@ def _safe_filename(value: str, fallback: str = "app") -> str:
     safe = "".join(ch if ch.isalnum() or ch in ("-", "_") else "-" for ch in raw)
     safe = "-".join(filter(None, safe.split("-")))
     return safe or fallback
+
+
+def _iter_zip_entries(zip_file: zipfile.ZipFile):
+    for info in zip_file.infolist():
+        if info.is_dir():
+            continue
+        raw_name = str(info.filename or "").replace("\\", "/").strip()
+        if not raw_name:
+            continue
+        normalized = PurePosixPath(raw_name.lstrip("/"))
+        parts = [part for part in normalized.parts if part and part != "."]
+        if not parts:
+            continue
+        if any(part == ".." for part in parts):
+            continue
+        yield info, parts
+
+
+def _detect_zip_build_mode(zip_path: Path) -> tuple[str, str | None]:
+    try:
+        with zipfile.ZipFile(zip_path, "r") as archive:
+            index_candidates = []
+            for _, parts in _iter_zip_entries(archive):
+                lower_parts = [part.lower() for part in parts]
+                if any(part in {"node_modules", ".git", "android", "__macosx"} for part in lower_parts):
+                    continue
+                filename = lower_parts[-1]
+                if filename == "package.json":
+                    return "convert", None
+                if filename == "index.html":
+                    entry_name = str(PurePosixPath(*parts))
+                    index_candidates.append((len(parts), len(entry_name), entry_name))
+            if not index_candidates:
+                return "invalid", None
+            index_candidates.sort(key=lambda item: (item[0], item[1], item[2]))
+            return "html", index_candidates[0][2]
+    except zipfile.BadZipFile:
+        raise HTTPException(status_code=400, detail="ZIP format is invalid, please upload again")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Failed to inspect ZIP: {str(exc)}")
+
+
+def _extract_index_html_from_zip(zip_path: Path, zip_entry_name: str, dst_html: Path) -> None:
+    try:
+        with zipfile.ZipFile(zip_path, "r") as archive:
+            try:
+                entry_info = archive.getinfo(zip_entry_name)
+            except KeyError:
+                raise HTTPException(status_code=400, detail="index.html was not found in ZIP")
+            if entry_info.file_size > 20 * 1024 * 1024:
+                raise HTTPException(status_code=400, detail="index.html is too large in ZIP")
+            dst_html.parent.mkdir(parents=True, exist_ok=True)
+            with archive.open(entry_info, "r") as src, open(dst_html, "wb") as dst:
+                shutil.copyfileobj(src, dst)
+    except HTTPException:
+        raise
+    except zipfile.BadZipFile:
+        raise HTTPException(status_code=400, detail="ZIP format is invalid, please upload again")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to extract index.html: {str(exc)}")
 
 FRONTEND_LOGGED = False
 FRONTEND_LOG_PATH = Path(os.getenv("APPDATA", ".")) / "ConvertAPK" / "frontend-resolve.log"
@@ -753,8 +816,24 @@ async def create_task(task_data: BuildTaskCreate):
         src_zip = BACKEND_UPLOAD_DIR / task_data.filename
         if not src_zip.exists():
             raise HTTPException(status_code=400, detail="ZIP文件不存在，请重新上传")
-        dst_zip = task_input_dir / "project.zip"
-        shutil.move(str(src_zip), str(dst_zip))
+        detected_mode, detected_index_entry = _detect_zip_build_mode(src_zip)
+        if detected_mode == "invalid":
+            raise HTTPException(
+                status_code=400,
+                detail="ZIP中未检测到package.json，且未找到index.html，无法识别为Node.js或HTML项目",
+            )
+        if detected_mode == "html":
+            dst_html = task_input_dir / "index.html"
+            _extract_index_html_from_zip(src_zip, detected_index_entry or "index.html", dst_html)
+            mode = "html"
+            html_filename = "index.html"
+            try:
+                src_zip.unlink()
+            except Exception:
+                pass
+        else:
+            dst_zip = task_input_dir / "project.zip"
+            shutil.move(str(src_zip), str(dst_zip))
     elif mode == "html":
         src_html = BACKEND_UPLOAD_DIR / html_filename
         if not src_html.exists():
