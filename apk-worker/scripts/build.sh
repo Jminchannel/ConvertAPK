@@ -258,7 +258,11 @@ const webUrl = (process.env.WEB_URL || '').trim();
 const webViewUaRaw = String(process.env.WEBVIEW_UA || 'android').trim().toLowerCase();
 const webViewUa = (webViewUaRaw === 'pc' || webViewUaRaw === 'desktop' || webViewUaRaw === 'windows') ? 'pc' : 'android';
 const statusBarHidden = String(process.env.STATUS_BAR_HIDDEN || '').trim().toLowerCase() === 'true';
-const statusBarColorRaw = String(process.env.STATUS_BAR_COLOR || 'transparent').trim().toLowerCase();
+const taskMode = String(process.env.TASK_MODE || 'convert').trim().toLowerCase();
+let statusBarColorRaw = String(process.env.STATUS_BAR_COLOR || 'white').trim().toLowerCase();
+if (!statusBarHidden && taskMode === 'convert' && (statusBarColorRaw === 'transparent' || statusBarColorRaw === '@android:color/transparent')) {
+  statusBarColorRaw = 'white';
+}
 const statusBarStyle = String(process.env.STATUS_BAR_STYLE || 'light').trim().toLowerCase();
 const lightStatusBarIcons = statusBarStyle === 'dark';
 const statusBarBackground =
@@ -369,7 +373,11 @@ const packageName = process.env.PACKAGE_NAME || 'com.example.app';
 const versionName = process.env.VERSION_NAME || '1.0.0';
 const versionCode = process.env.VERSION_CODE || '1';
 const statusBarHidden = String(process.env.STATUS_BAR_HIDDEN || '').trim().toLowerCase() === 'true';
-const statusBarColorRaw = String(process.env.STATUS_BAR_COLOR || 'transparent').trim().toLowerCase();
+const taskMode = String(process.env.TASK_MODE || 'convert').trim().toLowerCase();
+let statusBarColorRaw = String(process.env.STATUS_BAR_COLOR || 'white').trim().toLowerCase();
+if (!statusBarHidden && taskMode === 'convert' && (statusBarColorRaw === 'transparent' || statusBarColorRaw === '@android:color/transparent')) {
+  statusBarColorRaw = 'white';
+}
 const statusBarStyle = String(process.env.STATUS_BAR_STYLE || 'light').trim().toLowerCase();
 const lightStatusBarIcons = statusBarStyle === 'dark';
 const statusBarBackground =
@@ -1385,9 +1393,10 @@ const doubleClickExit =
 const taskMode = String(process.env.TASK_MODE || "").trim().toLowerCase();
 const allowKotlinPatch = taskMode === "convert";
 const safeAreaUsage = detectSafeAreaUsage(projectRoot, androidDir);
-const useWebViewTopPadding = !safeAreaUsage.top;
+const useWebViewTopPadding = true;
 const useWebViewBottomPadding = !safeAreaUsage.bottom;
 console.log(
+  `[Insets] safe-area top auto-detect ignored; forcing useWebViewTopPadding=true, detectedTop=${safeAreaUsage.top ? "true" : "false"}; ` +
   `[Insets] useWebViewTopPadding=${useWebViewTopPadding ? "true" : "false"}, ` +
   `useWebViewBottomPadding=${useWebViewBottomPadding ? "true" : "false"}`
 );
@@ -1631,7 +1640,14 @@ class MainActivity : BridgeActivity() {
 
 const statusBarHidden =
   String(process.env.STATUS_BAR_HIDDEN || "").trim().toLowerCase() === "true";
-const statusBarColorRaw = String(process.env.STATUS_BAR_COLOR || "transparent").trim();
+let statusBarColorRaw = String(process.env.STATUS_BAR_COLOR || "white").trim();
+if (
+  taskMode === "convert" &&
+  !statusBarHidden &&
+  ["transparent", "@android:color/transparent"].includes(statusBarColorRaw.toLowerCase())
+) {
+  statusBarColorRaw = "#FFFFFF";
+}
 const statusBarColorLower = statusBarColorRaw.toLowerCase();
 const statusBarIsWhite =
   statusBarColorLower === "white" ||
@@ -2192,8 +2208,15 @@ const hidden = String(process.env.STATUS_BAR_HIDDEN || "")
   .trim()
   .toLowerCase() === "true";
 const style = String(process.env.STATUS_BAR_STYLE || "light").trim().toLowerCase(); // dark | light
-let colorRaw = String(process.env.STATUS_BAR_COLOR || "transparent").trim();
-if (!colorRaw) colorRaw = "transparent";
+let colorRaw = String(process.env.STATUS_BAR_COLOR || "white").trim();
+if (!colorRaw) colorRaw = "white";
+if (
+  taskMode === "convert" &&
+  !hidden &&
+  ["transparent", "@android:color/transparent"].includes(colorRaw.toLowerCase())
+) {
+  colorRaw = "#FFFFFF";
+}
 const colorLower = colorRaw.toLowerCase();
 const statusBarColor =
   colorLower === "transparent" || colorLower === "@android:color/transparent"

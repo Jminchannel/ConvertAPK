@@ -633,7 +633,14 @@ def _patch_android_build_config(build_gradle: Path, env: Dict[str, str], on_log=
     is_kts = build_gradle.name.endswith(".kts")
 
     status_bar_hidden = "true" if str(env.get("STATUS_BAR_HIDDEN", "false")).lower() == "true" else "false"
-    status_bar_color = str(env.get("STATUS_BAR_COLOR", "transparent")).strip().lower()
+    status_bar_color = str(env.get("STATUS_BAR_COLOR", "#FFFFFF")).strip().lower()
+    task_mode = str(env.get("TASK_MODE", "convert")).strip().lower()
+    if (
+        task_mode == "convert"
+        and status_bar_hidden != "true"
+        and status_bar_color in {"transparent", "@android:color/transparent"}
+    ):
+        status_bar_color = "#ffffff"
     status_bar_background = "white" if status_bar_color in {"#ffffff", "white", "#ffffffff"} else "transparent"
     status_bar_style = str(env.get("STATUS_BAR_STYLE", "light")).strip().lower()
     light_status_bar_icons = "true" if status_bar_style == "dark" else "false"
@@ -1115,7 +1122,14 @@ def run_local_build(
                 gradle_text,
             )
             status_bar_hidden = "true" if str(env.get("STATUS_BAR_HIDDEN", "false")).lower() == "true" else "false"
-            status_bar_color = str(env.get("STATUS_BAR_COLOR", "transparent")).strip().lower()
+            status_bar_color = str(env.get("STATUS_BAR_COLOR", "#FFFFFF")).strip().lower()
+            task_mode = str(env.get("TASK_MODE", "convert")).strip().lower()
+            if (
+                task_mode == "convert"
+                and status_bar_hidden != "true"
+                and status_bar_color in {"transparent", "@android:color/transparent"}
+            ):
+                status_bar_color = "#ffffff"
             status_bar_background = "white" if status_bar_color in {"#ffffff", "white", "#ffffffff"} else "transparent"
             status_bar_style = str(env.get("STATUS_BAR_STYLE", "light")).strip().lower()
             light_status_bar_icons = "true" if status_bar_style == "dark" else "false"
@@ -1339,11 +1353,13 @@ def run_local_build(
         safe_area_top_used, safe_area_bottom_used = _detect_safe_area_usage(
             project_root, android_app_dir, on_log=on_log
         )
-        use_webview_top_padding = not safe_area_top_used
+        use_webview_top_padding = True
         use_webview_bottom_padding = not safe_area_bottom_used
         _log(
             on_log,
-            "[Insets] useWebViewTopPadding="
+            "[Insets] safe-area top auto-detect ignored; forcing useWebViewTopPadding=true, "
+            f"detectedTop={str(safe_area_top_used).lower()}; "
+            "useWebViewTopPadding="
             f"{str(use_webview_top_padding).lower()}, "
             "useWebViewBottomPadding="
             f"{str(use_webview_bottom_padding).lower()}",

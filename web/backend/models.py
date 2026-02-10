@@ -35,7 +35,7 @@ class AppConfig(BaseModel):
     # Status Bar
     status_bar_hidden: bool = False
     status_bar_style: str = "light"  # light | dark
-    status_bar_color: str = "transparent"  # transparent | #FFFFFF
+    status_bar_color: str = "#FFFFFF"  # transparent | #FFFFFF
     # WebView UA (web mode)
     webview_user_agent: str = "android"  # android | pc
     # HTML mode download behavior: silent (save directly) | picker (system file manager)
@@ -111,7 +111,7 @@ class AppConfig(BaseModel):
     def validate_status_bar_color(cls, value: str) -> str:
         raw = (value or "").strip()
         if not raw:
-            return "transparent"
+            return "#FFFFFF"
         lower = raw.lower()
         if lower in {"transparent", "@android:color/transparent"}:
             return "transparent"
