@@ -2301,11 +2301,12 @@ function removeMinimalDownloadListener(source) {
   return source;
 }
 
-function syncMinimalDownloadListener(source, isKotlinFile, enabled) {
+function syncMinimalDownloadListener(source, isKotlinFile, enabled, downloadModeValue) {
   let updated = removeMinimalDownloadListener(source);
   if (!enabled) {
     return updated;
   }
+  const normalizedDownloadMode = downloadModeValue === "silent" ? "silent" : "picker";
   if (isKotlinFile) {
     updated = insertAfterMainActivityClassOpen(updated, "", true);
     updated = ensureImportLine(updated, "import android.app.DownloadManager");
@@ -2321,7 +2322,7 @@ function syncMinimalDownloadListener(source, isKotlinFile, enabled) {
       "        if (webView != null) {\n" +
       "            webView.setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->\n" +
       "                try {\n" +
-      "                    val downloadMode = runCatching { BuildConfig.DOWNLOAD_MODE.trim().lowercase() }.getOrElse { \"picker\" }\n" +
+      "                    val downloadMode = \"" + normalizedDownloadMode + "\"\n" +
       "                    if (downloadMode != \"silent\") {\n" +
       "                        try {\n" +
       "                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))\n" +
@@ -2371,13 +2372,7 @@ function syncMinimalDownloadListener(source, isKotlinFile, enabled) {
     "        if (webView != null) {\n" +
     "            webView.setDownloadListener((url, userAgent, contentDisposition, mimeType, _contentLength) -> {\n" +
     "                try {\n" +
-    "                    String downloadMode = \"picker\";\n" +
-    "                    try {\n" +
-    "                        if (BuildConfig.DOWNLOAD_MODE != null) {\n" +
-    "                            downloadMode = BuildConfig.DOWNLOAD_MODE.trim().toLowerCase();\n" +
-    "                        }\n" +
-    "                    } catch (Exception ignored) {\n" +
-    "                    }\n" +
+    "                    String downloadMode = \"" + normalizedDownloadMode + "\";\n" +
     "                    if (!\"silent\".equals(downloadMode)) {\n" +
     "                        try {\n" +
     "                            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));\n" +
@@ -2541,9 +2536,10 @@ if (skipMainActivityInjection) {
   if (beforeMinimalSync !== text) {
     console.log(`[MainActivity] ${doubleClickExit ? "enabled" : "disabled"} minimal double-click-exit`);
   }
+  const minimalDownloadMode = String(process.env.DOWNLOAD_MODE || "").trim().toLowerCase() === "silent" ? "silent" : "picker";
   const enableMinimalDownloadListener = taskMode === "convert";
   const beforeMinimalDownloadSync = text;
-  text = syncMinimalDownloadListener(text, isKotlin, enableMinimalDownloadListener);
+  text = syncMinimalDownloadListener(text, isKotlin, enableMinimalDownloadListener, minimalDownloadMode);
   if (beforeMinimalDownloadSync !== text) {
     console.log(`[MainActivity] ${enableMinimalDownloadListener ? "enabled" : "disabled"} minimal download-listener`);
   }

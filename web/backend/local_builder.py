@@ -1222,6 +1222,7 @@ def _remove_minimal_download_listener(source: str) -> str:
 def _sync_minimal_download_listener(
     main_activity: Path,
     enable: bool,
+    download_mode: str = "picker",
     on_log=None,
 ) -> None:
     if not main_activity.exists():
@@ -1230,6 +1231,7 @@ def _sync_minimal_download_listener(
     if "BridgeActivity" not in text:
         return
     is_kotlin = main_activity.suffix.lower() == ".kt"
+    normalized_download_mode = "silent" if str(download_mode).strip().lower() == "silent" else "picker"
     original = text
     text = _remove_minimal_download_listener(text)
     if enable:
@@ -1248,7 +1250,7 @@ def _sync_minimal_download_listener(
                 "        if (webView != null) {\n"
                 "            webView.setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->\n"
                 "                try {\n"
-                "                    val downloadMode = runCatching { BuildConfig.DOWNLOAD_MODE.trim().lowercase() }.getOrElse { \"picker\" }\n"
+                f"                    val downloadMode = \"{normalized_download_mode}\"\n"
                 "                    if (downloadMode != \"silent\") {\n"
                 "                        try {\n"
                 "                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))\n"
@@ -1297,13 +1299,7 @@ def _sync_minimal_download_listener(
                 "        if (webView != null) {\n"
                 "            webView.setDownloadListener((url, userAgent, contentDisposition, mimeType, _contentLength) -> {\n"
                 "                try {\n"
-                "                    String downloadMode = \"picker\";\n"
-                "                    try {\n"
-                "                        if (BuildConfig.DOWNLOAD_MODE != null) {\n"
-                "                            downloadMode = BuildConfig.DOWNLOAD_MODE.trim().toLowerCase();\n"
-                "                        }\n"
-                "                    } catch (Exception ignored) {\n"
-                "                    }\n"
+                f"                    String downloadMode = \"{normalized_download_mode}\";\n"
                 "                    if (!\"silent\".equals(downloadMode)) {\n"
                 "                        try {\n"
                 "                            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));\n"
@@ -1693,6 +1689,9 @@ def run_local_build(
     if not is_web_task and not is_html_task:
         package_name = str(env.get("PACKAGE_NAME", "")).strip()
         double_click_exit_enabled = str(env.get("DOUBLE_CLICK_EXIT", "true")).strip().lower() == "true"
+        raw_download_mode = str(env.get("DOWNLOAD_MODE", "picker")).strip().lower()
+        if raw_download_mode not in {"silent", "picker"}:
+            raw_download_mode = "picker"
         minimal_download_listener_enabled = task_mode == "convert"
         main_candidates = list(android_app_dir.rglob("MainActivity.kt")) + list(
             android_app_dir.rglob("MainActivity.java")
@@ -1715,6 +1714,7 @@ def run_local_build(
             _sync_minimal_download_listener(
                 main_candidates[0],
                 enable=minimal_download_listener_enabled,
+                download_mode=raw_download_mode,
                 on_log=on_log,
             )
 
