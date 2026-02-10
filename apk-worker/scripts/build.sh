@@ -2158,6 +2158,56 @@ function removeMinimalDoubleClickExit(source) {
   return source;
 }
 
+function injectMinimalSnippetIntoOnCreate(source, isKotlinFile, snippet) {
+  if (!snippet || !snippet.trim()) {
+    return source;
+  }
+  if (source.includes(snippet.trim())) {
+    return source;
+  }
+
+  if (isKotlinFile) {
+    const withSuper = /(override\s+fun\s+onCreate\s*\([^)]*\)\s*\{[\s\S]*?super\.onCreate\s*\(\s*savedInstanceState\s*\)\s*)/m;
+    if (withSuper.test(source)) {
+      return source.replace(withSuper, `$1\n${snippet}`);
+    }
+    const methodStart = /(override\s+fun\s+onCreate\s*\([^)]*\)\s*\{)/m;
+    if (methodStart.test(source)) {
+      return source.replace(methodStart, `$1\n${snippet}`);
+    }
+    const classClose = source.lastIndexOf("}");
+    if (classClose !== -1) {
+      const createMethod =
+        "    override fun onCreate(savedInstanceState: Bundle?) {\n" +
+        "        super.onCreate(savedInstanceState)\n" +
+        snippet +
+        "    }\n\n";
+      return source.slice(0, classClose) + "\n" + createMethod + source.slice(classClose);
+    }
+    return source;
+  }
+
+  const withSuper = /((?:@Override\s+)?protected\s+void\s+onCreate\s*\([^)]*\)\s*\{[\s\S]*?super\.onCreate\s*\(\s*savedInstanceState\s*\)\s*;\s*)/m;
+  if (withSuper.test(source)) {
+    return source.replace(withSuper, `$1\n${snippet}`);
+  }
+  const methodStart = /((?:@Override\s+)?protected\s+void\s+onCreate\s*\([^)]*\)\s*\{)/m;
+  if (methodStart.test(source)) {
+    return source.replace(methodStart, `$1\n${snippet}`);
+  }
+  const classClose = source.lastIndexOf("}");
+  if (classClose !== -1) {
+    const createMethod =
+      "    @Override\n" +
+      "    protected void onCreate(Bundle savedInstanceState) {\n" +
+      "        super.onCreate(savedInstanceState);\n" +
+      snippet +
+      "    }\n\n";
+    return source.slice(0, classClose) + "\n" + createMethod + source.slice(classClose);
+  }
+  return source;
+}
+
 function syncMinimalDoubleClickExit(source, isKotlinFile, enabled) {
   let updated = removeMinimalDoubleClickExit(source);
   if (!enabled) {
@@ -2165,60 +2215,62 @@ function syncMinimalDoubleClickExit(source, isKotlinFile, enabled) {
   }
   if (isKotlinFile) {
     updated = ensureImportLine(updated, "import android.widget.Toast");
+    updated = ensureImportLine(updated, "import android.os.Bundle");
+    updated = ensureImportLine(updated, "import androidx.activity.OnBackPressedCallback");
     const fieldBlock =
       "    // ConvertAPK: double-click-exit state (minimal)\n" +
       "    private var convertApkLastBackPressedAt: Long = 0L\n";
-    const methodBlock =
-      "    // ConvertAPK: double-click-exit start (minimal)\n" +
-      "    override fun onBackPressed() {\n" +
-      "        val webView = bridge?.webView\n" +
-      "        if (webView != null && webView.canGoBack()) {\n" +
-      "            webView.goBack()\n" +
-      "            return\n" +
-      "        }\n" +
-      "        val now = System.currentTimeMillis()\n" +
-      "        if (now - convertApkLastBackPressedAt < 2000) {\n" +
-      "            super.onBackPressed()\n" +
-      "        } else {\n" +
-      "            convertApkLastBackPressedAt = now\n" +
-      "            Toast.makeText(this, \"Press back again to exit\", Toast.LENGTH_SHORT).show()\n" +
-      "        }\n" +
-      "    }\n" +
+    const onCreateSnippet =
+      "        // ConvertAPK: double-click-exit start (minimal)\n" +
+      "        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {\n" +
+      "            override fun handleOnBackPressed() {\n" +
+      "                val webView = bridge?.webView\n" +
+      "                if (webView != null && webView.canGoBack()) {\n" +
+      "                    webView.goBack()\n" +
+      "                    return\n" +
+      "                }\n" +
+      "                val now = System.currentTimeMillis()\n" +
+      "                if (now - convertApkLastBackPressedAt < 2000) {\n" +
+      "                    finish()\n" +
+      "                } else {\n" +
+      "                    convertApkLastBackPressedAt = now\n" +
+      "                    Toast.makeText(this@MainActivity, \"Press back again to exit\", Toast.LENGTH_SHORT).show()\n" +
+      "                }\n" +
+      "            }\n" +
+      "        })\n" +
       "    // ConvertAPK: double-click-exit end (minimal)\n";
     updated = insertAfterMainActivityClassOpen(updated, fieldBlock, true);
-    const classClose = updated.lastIndexOf("}");
-    if (classClose !== -1) {
-      updated = updated.slice(0, classClose) + "\n" + methodBlock + "\n" + updated.slice(classClose);
-    }
+    updated = injectMinimalSnippetIntoOnCreate(updated, true, onCreateSnippet);
     return updated;
   }
   updated = ensureImportLine(updated, "import android.widget.Toast;");
+  updated = ensureImportLine(updated, "import android.os.Bundle;");
+  updated = ensureImportLine(updated, "import androidx.activity.OnBackPressedCallback;");
   const fieldBlock =
     "    // ConvertAPK: double-click-exit state (minimal)\n" +
     "    private long convertApkLastBackPressedAt = 0L;\n";
-  const methodBlock =
-    "    // ConvertAPK: double-click-exit start (minimal)\n" +
-    "    @Override\n" +
-    "    public void onBackPressed() {\n" +
-    "        android.webkit.WebView webView = getBridge() != null ? getBridge().getWebView() : null;\n" +
-    "        if (webView != null && webView.canGoBack()) {\n" +
-    "            webView.goBack();\n" +
-    "            return;\n" +
-    "        }\n" +
-    "        long now = System.currentTimeMillis();\n" +
-    "        if (now - convertApkLastBackPressedAt < 2000) {\n" +
-    "            super.onBackPressed();\n" +
-    "        } else {\n" +
-    "            convertApkLastBackPressedAt = now;\n" +
-    "            Toast.makeText(this, \"Press back again to exit\", Toast.LENGTH_SHORT).show();\n" +
-    "        }\n" +
-    "    }\n" +
+  const onCreateSnippet =
+    "        // ConvertAPK: double-click-exit start (minimal)\n" +
+    "        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {\n" +
+    "            @Override\n" +
+    "            public void handleOnBackPressed() {\n" +
+    "                android.webkit.WebView webView = getBridge() != null ? getBridge().getWebView() : null;\n" +
+    "                if (webView != null && webView.canGoBack()) {\n" +
+    "                    webView.goBack();\n" +
+    "                    return;\n" +
+    "                }\n" +
+    "                long now = System.currentTimeMillis();\n" +
+    "                if (now - convertApkLastBackPressedAt < 2000) {\n" +
+    "                    finish();\n" +
+    "                } else {\n" +
+    "                    convertApkLastBackPressedAt = now;\n" +
+    "                    Toast.makeText(MainActivity.this, \"Press back again to exit\", Toast.LENGTH_SHORT).show();\n" +
+    "                }\n" +
+    "            }\n" +
+    "        });\n" +
     "    // ConvertAPK: double-click-exit end (minimal)\n";
   updated = insertAfterMainActivityClassOpen(updated, fieldBlock, false);
-  const classClose = updated.lastIndexOf("}");
-  if (classClose !== -1) {
-    updated = updated.slice(0, classClose) + "\n" + methodBlock + "\n" + updated.slice(classClose);
-  }
+  updated = injectMinimalSnippetIntoOnCreate(updated, false, onCreateSnippet);
   return updated;
 }
 

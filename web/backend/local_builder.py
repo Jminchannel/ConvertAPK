@@ -1056,12 +1056,67 @@ def _ensure_import_line(source: str, import_line: str) -> str:
         result += "\n"
     return result
 
-def _insert_after_main_activity_class_open(source: str, insert: str) -> str:
+def _insert_after_main_activity_class_open(source: str, insert: str, is_kotlin: bool = False) -> str:
     match = re.search(r"class\s+MainActivity\b[^{]*\{", source)
-    if not match:
+    if match:
+        idx = match.end()
+        return source[:idx] + "\n" + insert + source[idx:]
+    if is_kotlin:
+        decl_match = re.search(r"class\s+MainActivity\b[^\n]*", source)
+        if decl_match:
+            raw_decl = decl_match.group(0)
+            decl = raw_decl.rstrip()
+            if "{" not in decl:
+                replacement = f"{decl} {{\n{insert}}}\n"
+                return source[: decl_match.start()] + replacement + source[decl_match.end() :]
+    return source
+
+
+def _inject_minimal_snippet_into_on_create(source: str, is_kotlin: bool, snippet: str) -> str:
+    if not snippet or not snippet.strip():
         return source
-    idx = match.end()
-    return source[:idx] + "\n" + insert + source[idx:]
+    if snippet.strip() in source:
+        return source
+    if is_kotlin:
+        with_super = re.compile(
+            r"(override\s+fun\s+onCreate\s*\([^)]*\)\s*\{[\s\S]*?super\.onCreate\s*\(\s*savedInstanceState\s*\)\s*)",
+            re.M,
+        )
+        if with_super.search(source):
+            return with_super.sub(lambda m: m.group(1) + "\n" + snippet, source, count=1)
+        method_start = re.compile(r"(override\s+fun\s+onCreate\s*\([^)]*\)\s*\{)", re.M)
+        if method_start.search(source):
+            return method_start.sub(lambda m: m.group(1) + "\n" + snippet, source, count=1)
+        class_close = source.rfind("}")
+        if class_close != -1:
+            create_method = (
+                "    override fun onCreate(savedInstanceState: Bundle?) {\n"
+                "        super.onCreate(savedInstanceState)\n"
+                f"{snippet}"
+                "    }\n\n"
+            )
+            return source[:class_close] + "\n" + create_method + source[class_close:]
+        return source
+    with_super = re.compile(
+        r"((?:@Override\s+)?protected\s+void\s+onCreate\s*\([^)]*\)\s*\{[\s\S]*?super\.onCreate\s*\(\s*savedInstanceState\s*\)\s*;\s*)",
+        re.M,
+    )
+    if with_super.search(source):
+        return with_super.sub(lambda m: m.group(1) + "\n" + snippet, source, count=1)
+    method_start = re.compile(r"((?:@Override\s+)?protected\s+void\s+onCreate\s*\([^)]*\)\s*\{)", re.M)
+    if method_start.search(source):
+        return method_start.sub(lambda m: m.group(1) + "\n" + snippet, source, count=1)
+    class_close = source.rfind("}")
+    if class_close != -1:
+        create_method = (
+            "    @Override\n"
+            "    protected void onCreate(Bundle savedInstanceState) {\n"
+            "        super.onCreate(savedInstanceState);\n"
+            f"{snippet}"
+            "    }\n\n"
+        )
+        return source[:class_close] + "\n" + create_method + source[class_close:]
+    return source
 
 def _remove_minimal_double_click_exit(source: str) -> str:
     source = re.sub(
@@ -1092,57 +1147,63 @@ def _sync_minimal_double_click_exit(
     if enable:
         if is_kotlin:
             text = _ensure_import_line(text, "import android.widget.Toast")
+            text = _ensure_import_line(text, "import android.os.Bundle")
+            text = _ensure_import_line(text, "import androidx.activity.OnBackPressedCallback")
             field_block = (
                 "    // ConvertAPK: double-click-exit state (minimal)\n"
                 "    private var convertApkLastBackPressedAt: Long = 0L\n"
             )
-            method_block = (
-                "    // ConvertAPK: double-click-exit start (minimal)\n"
-                "    override fun onBackPressed() {\n"
-                "        val webView = bridge?.webView\n"
-                "        if (webView != null && webView.canGoBack()) {\n"
-                "            webView.goBack()\n"
-                "            return\n"
-                "        }\n"
-                "        val now = System.currentTimeMillis()\n"
-                "        if (now - convertApkLastBackPressedAt < 2000) {\n"
-                "            super.onBackPressed()\n"
-                "        } else {\n"
-                "            convertApkLastBackPressedAt = now\n"
-                "            Toast.makeText(this, \"Press back again to exit\", Toast.LENGTH_SHORT).show()\n"
-                "        }\n"
-                "    }\n"
+            on_create_snippet = (
+                "        // ConvertAPK: double-click-exit start (minimal)\n"
+                "        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {\n"
+                "            override fun handleOnBackPressed() {\n"
+                "                val webView = bridge?.webView\n"
+                "                if (webView != null && webView.canGoBack()) {\n"
+                "                    webView.goBack()\n"
+                "                    return\n"
+                "                }\n"
+                "                val now = System.currentTimeMillis()\n"
+                "                if (now - convertApkLastBackPressedAt < 2000) {\n"
+                "                    finish()\n"
+                "                } else {\n"
+                "                    convertApkLastBackPressedAt = now\n"
+                "                    Toast.makeText(this@MainActivity, \"Press back again to exit\", Toast.LENGTH_SHORT).show()\n"
+                "                }\n"
+                "            }\n"
+                "        })\n"
                 "    // ConvertAPK: double-click-exit end (minimal)\n"
             )
         else:
             text = _ensure_import_line(text, "import android.widget.Toast;")
+            text = _ensure_import_line(text, "import android.os.Bundle;")
+            text = _ensure_import_line(text, "import androidx.activity.OnBackPressedCallback;")
             field_block = (
                 "    // ConvertAPK: double-click-exit state (minimal)\n"
                 "    private long convertApkLastBackPressedAt = 0L;\n"
             )
-            method_block = (
-                "    // ConvertAPK: double-click-exit start (minimal)\n"
-                "    @Override\n"
-                "    public void onBackPressed() {\n"
-                "        android.webkit.WebView webView = getBridge() != null ? getBridge().getWebView() : null;\n"
-                "        if (webView != null && webView.canGoBack()) {\n"
-                "            webView.goBack();\n"
-                "            return;\n"
-                "        }\n"
-                "        long now = System.currentTimeMillis();\n"
-                "        if (now - convertApkLastBackPressedAt < 2000) {\n"
-                "            super.onBackPressed();\n"
-                "        } else {\n"
-                "            convertApkLastBackPressedAt = now;\n"
-                "            Toast.makeText(this, \"Press back again to exit\", Toast.LENGTH_SHORT).show();\n"
-                "        }\n"
-                "    }\n"
+            on_create_snippet = (
+                "        // ConvertAPK: double-click-exit start (minimal)\n"
+                "        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {\n"
+                "            @Override\n"
+                "            public void handleOnBackPressed() {\n"
+                "                android.webkit.WebView webView = getBridge() != null ? getBridge().getWebView() : null;\n"
+                "                if (webView != null && webView.canGoBack()) {\n"
+                "                    webView.goBack();\n"
+                "                    return;\n"
+                "                }\n"
+                "                long now = System.currentTimeMillis();\n"
+                "                if (now - convertApkLastBackPressedAt < 2000) {\n"
+                "                    finish();\n"
+                "                } else {\n"
+                "                    convertApkLastBackPressedAt = now;\n"
+                "                    Toast.makeText(MainActivity.this, \"Press back again to exit\", Toast.LENGTH_SHORT).show();\n"
+                "                }\n"
+                "            }\n"
+                "        });\n"
                 "    // ConvertAPK: double-click-exit end (minimal)\n"
             )
-        text = _insert_after_main_activity_class_open(text, field_block)
-        class_close = text.rfind("}")
-        if class_close != -1:
-            text = text[:class_close] + "\n" + method_block + "\n" + text[class_close:]
+        text = _insert_after_main_activity_class_open(text, field_block, is_kotlin=is_kotlin)
+        text = _inject_minimal_snippet_into_on_create(text, is_kotlin=is_kotlin, snippet=on_create_snippet)
     if text != original:
         main_activity.write_text(text, encoding="utf-8")
         _log(
