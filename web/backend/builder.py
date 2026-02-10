@@ -296,7 +296,7 @@ class APKBuilder:
         double_click_exit: bool = True,
         status_bar_hidden: bool = False,
         status_bar_style: str = "light",
-        status_bar_color: str = "transparent",
+        status_bar_color: str = "#FFFFFF",
         webview_user_agent: Optional[str] = None,
         download_mode: Optional[str] = None,
         permissions: Optional[list[str]] = None,
@@ -358,8 +358,17 @@ class APKBuilder:
         output_format_normalized = (output_format or "apk").strip().lower()
         if output_format_normalized not in {"apk", "aab"}:
             output_format_normalized = "apk"
+        status_bar_color_normalized = str(status_bar_color or "").strip()
+        if not status_bar_color_normalized:
+            status_bar_color_normalized = "#FFFFFF"
+        if (
+            task_mode_normalized == "convert"
+            and not status_bar_hidden
+            and status_bar_color_normalized.lower() in {"transparent", "@android:color/transparent"}
+        ):
+            status_bar_color_normalized = "#FFFFFF"
         if not status_bar_hidden:
-            status_bar_style = "dark" if _is_light_color(status_bar_color) else "light"
+            status_bar_style = "dark" if _is_light_color(status_bar_color_normalized) else "light"
         webview_ua = str(webview_user_agent or "").strip().lower()
         if webview_ua in {"pc", "desktop", "windows"}:
             webview_ua = "pc"
@@ -393,7 +402,7 @@ class APKBuilder:
             "DOUBLE_CLICK_EXIT": "true" if double_click_exit else "false",
             "STATUS_BAR_HIDDEN": "true" if status_bar_hidden else "false",
             "STATUS_BAR_STYLE": status_bar_style or "light",
-            "STATUS_BAR_COLOR": status_bar_color or "transparent",
+            "STATUS_BAR_COLOR": status_bar_color_normalized,
             "WEBVIEW_UA": webview_ua,
             "DOWNLOAD_MODE": download_mode_normalized,
             # Comma-separated permissions (prefer full names, e.g. android.permission.CAMERA)
@@ -536,7 +545,7 @@ class APKBuilder:
                 "-e",
                 f"STATUS_BAR_STYLE={env.get('STATUS_BAR_STYLE', 'light')}",
                 "-e",
-                f"STATUS_BAR_COLOR={env.get('STATUS_BAR_COLOR', 'transparent')}",
+                f"STATUS_BAR_COLOR={env.get('STATUS_BAR_COLOR', '#FFFFFF')}",
                 "-e",
                 f"DOWNLOAD_MODE={env.get('DOWNLOAD_MODE', 'picker')}",
                 "-e",
@@ -1123,7 +1132,7 @@ class BuildTaskRunner:
                 double_click_exit=getattr(task.config, "double_click_exit", True),
                 status_bar_hidden=getattr(task.config, "status_bar_hidden", False),
                 status_bar_style=getattr(task.config, "status_bar_style", "light"),
-                status_bar_color=getattr(task.config, "status_bar_color", "transparent"),
+                status_bar_color=getattr(task.config, "status_bar_color", "#FFFFFF"),
                 webview_user_agent=getattr(task.config, "webview_user_agent", "android"),
                 download_mode=getattr(task.config, "download_mode", "picker"),
                 permissions=getattr(task.config, "permissions", None),
