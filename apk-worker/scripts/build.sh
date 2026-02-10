@@ -767,25 +767,39 @@ if [ ! -d "$WEB_DIR" ]; then
     exit 1
 fi
 
-# 注入前端下载处理脚本（拦截 blob/data 下载并尝试保存）
+# 注入前端下载处理脚本（换行修复默认关闭，避免影响页面布局）
 log_info "注入前端下载处理脚本..."
-WEB_DIR="$WEB_DIR" node << 'NODE'
+ENABLE_NEWLINE_FIX_RAW="$(printf '%s' "${ENABLE_NEWLINE_FIX:-false}" | tr '[:upper:]' '[:lower:]')"
+INJECT_NEWLINE_FIX="false"
+case "$ENABLE_NEWLINE_FIX_RAW" in
+    1|true|yes|on)
+        INJECT_NEWLINE_FIX="true"
+        ;;
+esac
+if [ "$INJECT_NEWLINE_FIX" = "true" ]; then
+    log_warning "已启用换行修复脚本注入（可能影响页面布局）"
+else
+    log_info "默认禁用换行修复脚本注入"
+fi
+
+WEB_DIR="$WEB_DIR" INJECT_NEWLINE_FIX="$INJECT_NEWLINE_FIX" node << 'NODE'
 const fs = require("fs");
 const path = require("path");
 
-function readText(file) {
+function readText(filePath) {
   try {
-    return fs.readFileSync(file, "utf8");
+    return fs.readFileSync(filePath, "utf8");
   } catch (err) {
-    return fs.readFileSync(file, "latin1");
+    return fs.readFileSync(filePath, "latin1");
   }
 }
 
-function writeText(file, text) {
-  fs.writeFileSync(file, text, "utf8");
+function writeText(filePath, text) {
+  fs.writeFileSync(filePath, text, "utf8");
 }
 
 const webDir = process.env.WEB_DIR || "dist";
+const injectNewlineFix = String(process.env.INJECT_NEWLINE_FIX || "").toLowerCase() === "true";
 const indexHtml = path.join(process.cwd(), webDir, "index.html");
 if (!fs.existsSync(indexHtml)) {
   process.exit(0);
@@ -793,282 +807,269 @@ if (!fs.existsSync(indexHtml)) {
 
 let html = readText(indexHtml);
 
-const downloadScript =
-  "<script id=\"convertapk-download-helper\">(function(){\n" +
-  "  if (window.__convertapkDownloadHelper) return;\n" +
-  "  window.__convertapkDownloadHelper = true;\n" +
-  "  function getAnchor(el){\n" +
-  "    while (el && el.tagName !== 'A') el = el.parentElement;\n" +
-  "    return el;\n" +
-  "  }\n" +
-  "  function getFilename(a, href){\n" +
-  "    var name = (a.getAttribute('download') || a.download || '').trim();\n" +
-  "    if (name) return name;\n" +
-  "    try {\n" +
-  "      var url = new URL(href, window.location.href);\n" +
-  "      name = url.pathname.split('/').pop() || 'download';\n" +
-  "    } catch (e) {\n" +
-  "      name = 'download';\n" +
-  "    }\n" +
-  "    return name;\n" +
-  "  }\n" +
-  "  function readAsDataUrl(blob){\n" +
-  "    return new Promise(function(resolve, reject){\n" +
-  "      var reader = new FileReader();\n" +
-  "      reader.onload = function(){ resolve(reader.result || ''); };\n" +
-  "      reader.onerror = function(){ reject(reader.error); };\n" +
-  "      reader.readAsDataURL(blob);\n" +
-  "    });\n" +
-  "  }\n" +
-  "  async function shareFile(filename){\n" +
-  "    try {\n" +
-  "      var cap = window.Capacitor;\n" +
-  "      if (!cap || !cap.Plugins || !cap.Plugins.Share || !cap.Plugins.Filesystem) return false;\n" +
-  "      var fsPlugin = cap.Plugins.Filesystem;\n" +
-  "      var uriResult = await fsPlugin.getUri({ path: filename, directory: 'DOCUMENTS' });\n" +
-  "      var fileUrl = uriResult && uriResult.uri ? uriResult.uri : '';\n" +
-  "      if (!fileUrl) {\n" +
-  "        uriResult = await fsPlugin.getUri({ path: filename, directory: 'DATA' });\n" +
-  "        fileUrl = uriResult && uriResult.uri ? uriResult.uri : '';\n" +
-  "      }\n" +
-  "      if (!fileUrl) return false;\n" +
-  "      await cap.Plugins.Share.share({ title: filename, text: filename, url: fileUrl });\n" +
-  "      return true;\n" +
-  "    } catch (e) {\n" +
-  "      return false;\n" +
-  "    }\n" +
-  "  }\n" +
-  "  async function saveBlob(blob, filename){\n" +
-  "    var cap = window.Capacitor;\n" +
-  "    if (!cap || !cap.Plugins || !cap.Plugins.Filesystem) return false;\n" +
-  "    var dataUrl = await readAsDataUrl(blob);\n" +
-  "    var base64 = String(dataUrl).split(',')[1] || '';\n" +
-  "    var fsPlugin = cap.Plugins.Filesystem;\n" +
-  "    try {\n" +
-  "      await fsPlugin.writeFile({ path: filename, data: base64, directory: 'DOCUMENTS', recursive: true });\n" +
-  "      return true;\n" +
-  "    } catch (e) {\n" +
-  "      try {\n" +
-  "        await fsPlugin.writeFile({ path: filename, data: base64, directory: 'DATA', recursive: true });\n" +
-  "        return true;\n" +
-  "      } catch (e2) {\n" +
-  "        return false;\n" +
-  "      }\n" +
-  "    }\n" +
-  "  }\n" +
-  "  async function handleDownload(a, href){\n" +
-  "    if (!href) return false;\n" +
-  "    var isBlob = href.startsWith('blob:');\n" +
-  "    var isData = href.startsWith('data:');\n" +
-  "    if (!isBlob && !isData) {\n" +
-  "      try {\n" +
-  "        var url = new URL(href, window.location.href).toString();\n" +
-  "        var cap = window.Capacitor;\n" +
-  "        if (cap && cap.Plugins && cap.Plugins.Browser) {\n" +
-  "          cap.Plugins.Browser.open({ url: url });\n" +
-  "          return true;\n" +
-  "        }\n" +
-  "        window.open(url, '_blank');\n" +
-  "        return true;\n" +
-  "      } catch (e) {\n" +
-  "        return false;\n" +
-  "      }\n" +
-  "    }\n" +
-  "    try {\n" +
-  "      var res = await fetch(href);\n" +
-  "      var blob = await res.blob();\n" +
-  "      return await saveBlob(blob, getFilename(a, href));\n" +
-  "    } catch (e) {\n" +
-  "      return false;\n" +
-  "    }\n" +
-  "  }\n" +
-  "  async function shareFiles(files, title){\n" +
-  "    if (!files || !files.length) return false;\n" +
-  "    var file = files[0];\n" +
-  "    var name = (file && file.name) || title || 'share';\n" +
-  "    try {\n" +
-  "      var ok = await saveBlob(file, name);\n" +
-  "      if (!ok) return false;\n" +
-  "      return await shareFile(name);\n" +
-  "    } catch (e) {\n" +
-  "      return false;\n" +
-  "    }\n" +
-  "  }\n" +
-  "  (function(){\n" +
-  "    if (!navigator) return;\n" +
-  "    var cap = window.Capacitor;\n" +
-  "    if (!cap || !cap.Plugins || !cap.Plugins.Share || !cap.Plugins.Filesystem) return;\n" +
-  "    var origCanShare = navigator.canShare ? navigator.canShare.bind(navigator) : null;\n" +
-  "    navigator.canShare = function(data){\n" +
-  "      if (data && data.files && data.files.length) return true;\n" +
-  "      return origCanShare ? origCanShare(data) : false;\n" +
-  "    };\n" +
-  "    if (navigator.share) {\n" +
-  "      var origShare = navigator.share.bind(navigator);\n" +
-  "      navigator.share = async function(data){\n" +
-  "        if (data && data.files && data.files.length) {\n" +
-  "          var ok = await shareFiles(data.files, data.title || data.text || '');\n" +
-  "          if (ok) return;\n" +
-  "        }\n" +
-  "        return origShare(data);\n" +
-  "      };\n" +
-  "    } else {\n" +
-  "      navigator.share = async function(data){\n" +
-  "        if (data && data.files && data.files.length) {\n" +
-  "          var ok = await shareFiles(data.files, data.title || data.text || '');\n" +
-  "          if (ok) return;\n" +
-  "        }\n" +
-  "        throw new Error('share not supported');\n" +
-  "      };\n" +
-  "    }\n" +
-  "  })();\n" +
-  "  function hookJsPdfSave(){\n" +
-  "    try {\n" +
-  "      var JSPDF = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;\n" +
-  "      if (!JSPDF || !JSPDF.API || JSPDF.API.__convertapkSavePatched) return false;\n" +
-  "      var origSave = JSPDF.API.save;\n" +
-  "      JSPDF.API.save = function(filename){\n" +
-  "        try {\n" +
-  "          var blob = this.output('blob');\n" +
-  "          saveBlob(blob, filename || 'download.pdf');\n" +
-  "          return;\n" +
-  "        } catch (e) {\n" +
-  "        }\n" +
-  "        return origSave ? origSave.apply(this, arguments) : undefined;\n" +
-  "      };\n" +
-  "      JSPDF.API.__convertapkSavePatched = true;\n" +
-  "      return true;\n" +
-  "    } catch (e) {\n" +
-  "      return false;\n" +
-  "    }\n" +
-  "  }\n" +
-  "  var _pdfTries = 0;\n" +
-  "  var _pdfTimer = setInterval(function(){\n" +
-  "    _pdfTries += 1;\n" +
-  "    if (hookJsPdfSave() || _pdfTries > 20) clearInterval(_pdfTimer);\n" +
-  "  }, 500);\n" +
-  "  if (navigator) {\n" +
-  "    try {\n" +
-  "      navigator.msSaveOrOpenBlob = function(blob, name){ saveBlob(blob, name || 'download'); return true; };\n" +
-  "      navigator.msSaveBlob = function(blob, name){ saveBlob(blob, name || 'download'); return true; };\n" +
-  "    } catch (e) {\n" +
-  "    }\n" +
-  "  }\n" +
-  "  try {\n" +
-  "    window.saveAs = function(blob, name){ return saveBlob(blob, name || 'download'); };\n" +
-  "  } catch (e) {\n" +
-  "  }\n" +
-  "  var _origClick = HTMLAnchorElement.prototype.click;\n" +
-  "  HTMLAnchorElement.prototype.click = function(){\n" +
-  "    try {\n" +
-  "      var href = this.getAttribute('href') || this.href || '';\n" +
-  "      var download = this.getAttribute('download') || this.download;\n" +
-  "      if (download || href.startsWith('blob:') || href.startsWith('data:')) {\n" +
-  "        handleDownload(this, href);\n" +
-  "        return;\n" +
-  "      }\n" +
-  "    } catch (e) {\n" +
-  "    }\n" +
-  "    return _origClick.call(this);\n" +
-  "  };\n" +
-  "  var _origDispatch = HTMLAnchorElement.prototype.dispatchEvent;\n" +
-  "  HTMLAnchorElement.prototype.dispatchEvent = function(evt){\n" +
-  "    try {\n" +
-  "      if (evt && evt.type === 'click') {\n" +
-  "        var href = this.getAttribute('href') || this.href || '';\n" +
-  "        var download = this.getAttribute('download') || this.download;\n" +
-  "        if (download || href.startsWith('blob:') || href.startsWith('data:')) {\n" +
-  "          handleDownload(this, href);\n" +
-  "          return true;\n" +
-  "        }\n" +
-  "      }\n" +
-  "    } catch (e) {\n" +
-  "    }\n" +
-  "    return _origDispatch.call(this, evt);\n" +
-  "  };\n" +
-  "  document.addEventListener('click', function(e){\n" +
-  "    var a = getAnchor(e.target);\n" +
-  "    if (!a) return;\n" +
-  "    var href = a.getAttribute('href') || '';\n" +
-  "    var download = a.getAttribute('download') || a.download;\n" +
-  "    if (!href) return;\n" +
-  "    if (download || href.startsWith('blob:') || href.startsWith('data:')) {\n" +
-  "      e.preventDefault();\n" +
-  "      e.stopPropagation();\n" +
-  "      handleDownload(a, href);\n" +
-  "    }\n" +
-  "  }, true);\n" +
-  "})();</script>";
+const downloadScript = `<script id="convertapk-download-helper">(function(){
+  if (window.__convertapkDownloadHelper) return;
+  window.__convertapkDownloadHelper = true;
+  function getAnchor(el){
+    while (el && el.tagName !== 'A') el = el.parentElement;
+    return el;
+  }
+  function getFilename(a, href){
+    var name = (a.getAttribute('download') || a.download || '').trim();
+    if (name) return name;
+    try {
+      var url = new URL(href, window.location.href);
+      name = url.pathname.split('/').pop() || 'download';
+    } catch (e) {
+      name = 'download';
+    }
+    return name;
+  }
+  function readAsDataUrl(blob){
+    return new Promise(function(resolve, reject){
+      var reader = new FileReader();
+      reader.onload = function(){ resolve(reader.result || ''); };
+      reader.onerror = function(){ reject(reader.error); };
+      reader.readAsDataURL(blob);
+    });
+  }
+  async function shareFile(filename){
+    try {
+      var cap = window.Capacitor;
+      if (!cap || !cap.Plugins || !cap.Plugins.Share || !cap.Plugins.Filesystem) return false;
+      var fsPlugin = cap.Plugins.Filesystem;
+      var uriResult = await fsPlugin.getUri({ path: filename, directory: 'DOCUMENTS' });
+      var fileUrl = uriResult && uriResult.uri ? uriResult.uri : '';
+      if (!fileUrl) {
+        uriResult = await fsPlugin.getUri({ path: filename, directory: 'DATA' });
+        fileUrl = uriResult && uriResult.uri ? uriResult.uri : '';
+      }
+      if (!fileUrl) return false;
+      await cap.Plugins.Share.share({ title: filename, text: filename, url: fileUrl });
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+  async function saveBlob(blob, filename){
+    var cap = window.Capacitor;
+    if (!cap || !cap.Plugins || !cap.Plugins.Filesystem) return false;
+    var dataUrl = await readAsDataUrl(blob);
+    var base64 = String(dataUrl).split(',')[1] || '';
+    var fsPlugin = cap.Plugins.Filesystem;
+    try {
+      await fsPlugin.writeFile({ path: filename, data: base64, directory: 'DOCUMENTS', recursive: true });
+      return true;
+    } catch (e) {
+      try {
+        await fsPlugin.writeFile({ path: filename, data: base64, directory: 'DATA', recursive: true });
+        return true;
+      } catch (e2) {
+        return false;
+      }
+    }
+  }
+  async function handleDownload(a, href){
+    if (!href) return false;
+    var isBlob = href.startsWith('blob:');
+    var isData = href.startsWith('data:');
+    if (!isBlob && !isData) {
+      try {
+        var url = new URL(href, window.location.href).toString();
+        var cap = window.Capacitor;
+        if (cap && cap.Plugins && cap.Plugins.Browser) {
+          cap.Plugins.Browser.open({ url: url });
+          return true;
+        }
+        window.open(url, '_blank');
+        return true;
+      } catch (e) {
+        return false;
+      }
+    }
+    try {
+      var res = await fetch(href);
+      var blob = await res.blob();
+      return await saveBlob(blob, getFilename(a, href));
+    } catch (e) {
+      return false;
+    }
+  }
+  async function shareFiles(files, title){
+    if (!files || !files.length) return false;
+    var file = files[0];
+    var name = (file && file.name) || title || 'share';
+    try {
+      var ok = await saveBlob(file, name);
+      if (!ok) return false;
+      return await shareFile(name);
+    } catch (e) {
+      return false;
+    }
+  }
+  (function(){
+    if (!navigator) return;
+    var cap = window.Capacitor;
+    if (!cap || !cap.Plugins || !cap.Plugins.Share || !cap.Plugins.Filesystem) return;
+    var origCanShare = navigator.canShare ? navigator.canShare.bind(navigator) : null;
+    navigator.canShare = function(data){
+      if (data && data.files && data.files.length) return true;
+      return origCanShare ? origCanShare(data) : false;
+    };
+    if (navigator.share) {
+      var origShare = navigator.share.bind(navigator);
+      navigator.share = async function(data){
+        if (data && data.files && data.files.length) {
+          var ok = await shareFiles(data.files, data.title || data.text || '');
+          if (ok) return;
+        }
+        return origShare(data);
+      };
+    } else {
+      navigator.share = async function(data){
+        if (data && data.files && data.files.length) {
+          var ok = await shareFiles(data.files, data.title || data.text || '');
+          if (ok) return;
+        }
+        throw new Error('share not supported');
+      };
+    }
+  })();
+  function hookJsPdfSave(){
+    try {
+      var JSPDF = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
+      if (!JSPDF || !JSPDF.API || JSPDF.API.__convertapkSavePatched) return false;
+      var origSave = JSPDF.API.save;
+      JSPDF.API.save = function(filename){
+        try {
+          var blob = this.output('blob');
+          saveBlob(blob, filename || 'download.pdf');
+          return;
+        } catch (e) {
+        }
+        return origSave ? origSave.apply(this, arguments) : undefined;
+      };
+      JSPDF.API.__convertapkSavePatched = true;
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+  var _pdfTries = 0;
+  var _pdfTimer = setInterval(function(){
+    _pdfTries += 1;
+    if (hookJsPdfSave() || _pdfTries > 20) clearInterval(_pdfTimer);
+  }, 500);
+  if (navigator) {
+    try {
+      navigator.msSaveOrOpenBlob = function(blob, name){ saveBlob(blob, name || 'download'); return true; };
+      navigator.msSaveBlob = function(blob, name){ saveBlob(blob, name || 'download'); return true; };
+    } catch (e) {
+    }
+  }
+  try {
+    window.saveAs = function(blob, name){ return saveBlob(blob, name || 'download'); };
+  } catch (e) {
+  }
+  var _origClick = HTMLAnchorElement.prototype.click;
+  HTMLAnchorElement.prototype.click = function(){
+    try {
+      var href = this.getAttribute('href') || this.href || '';
+      var download = this.getAttribute('download') || this.download;
+      if (download || href.startsWith('blob:') || href.startsWith('data:')) {
+        handleDownload(this, href);
+        return;
+      }
+    } catch (e) {
+    }
+    return _origClick.call(this);
+  };
+  var _origDispatch = HTMLAnchorElement.prototype.dispatchEvent;
+  HTMLAnchorElement.prototype.dispatchEvent = function(evt){
+    try {
+      if (evt && evt.type === 'click') {
+        var href = this.getAttribute('href') || this.href || '';
+        var download = this.getAttribute('download') || this.download;
+        if (download || href.startsWith('blob:') || href.startsWith('data:')) {
+          handleDownload(this, href);
+          return true;
+        }
+      }
+    } catch (e) {
+    }
+    return _origDispatch.call(this, evt);
+  };
+  document.addEventListener('click', function(e){
+    var a = getAnchor(e.target);
+    if (!a) return;
+    var href = a.getAttribute('href') || '';
+    var download = a.getAttribute('download') || a.download;
+    if (!href) return;
+    if (download || href.startsWith('blob:') || href.startsWith('data:')) {
+      e.preventDefault();
+      e.stopPropagation();
+      handleDownload(a, href);
+    }
+  }, true);
+})();</script>`;
 
-const newlineScript =
-  "<script id=\"convertapk-newline-fix\">(function(){\n" +
-  "  if (window.__convertapkNewlineFix) return;\n" +
-  "  window.__convertapkNewlineFix = true;\n" +
-  "  function shouldSkip(node){\n" +
-  "    if (!node || !node.parentElement) return true;\n" +
-  "    var tag = node.parentElement.tagName || '';\n" +
-  "    return ['SCRIPT','STYLE','TEXTAREA','CODE','PRE','INPUT'].includes(tag);\n" +
-  "  }\n" +
-  "  function replaceNode(node){\n" +
-  "    var text = node.nodeValue || '';\n" +
-  "    if (text.indexOf('\\\\n') === -1) return;\n" +
-  "    var parts = text.split('\\\\n');\n" +
-  "    var frag = document.createDocumentFragment();\n" +
-  "    for (var i = 0; i < parts.length; i++) {\n" +
-  "      frag.appendChild(document.createTextNode(parts[i]));\n" +
-  "      if (i < parts.length - 1) frag.appendChild(document.createElement('br'));\n" +
-  "    }\n" +
-  "    if (node.parentNode) node.parentNode.replaceChild(frag, node);\n" +
-  "  }\n" +
-  "  function walk(){\n" +
-  "    var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);\n" +
-  "    var n; var list = [];\n" +
-  "    while ((n = walker.nextNode())) {\n" +
-  "      if (shouldSkip(n)) continue;\n" +
-  "      if (n.nodeValue && n.nodeValue.indexOf('\\\\n') !== -1) list.push(n);\n" +
-  "    }\n" +
-  "    for (var i = 0; i < list.length; i++) replaceNode(list[i]);\n" +
-  "  }\n" +
-  "  function run(){\n" +
-  "    if (!document.body) return;\n" +
-  "    walk();\n" +
-  "  }\n" +
-  "  if (document.readyState === 'loading') {\n" +
-  "    document.addEventListener('DOMContentLoaded', run);\n" +
-  "  } else {\n" +
-  "    run();\n" +
-  "  }\n" +
-  "  var scheduled = false;\n" +
-  "  var obs = new MutationObserver(function(){\n" +
-  "    if (scheduled) return;\n" +
-  "    scheduled = true;\n" +
-  "    setTimeout(function(){ scheduled = false; run(); }, 50);\n" +
-  "  });\n" +
-  "  if (document.body) obs.observe(document.body, { childList: true, subtree: true });\n" +
-  "})();</script>";
+const newlineScript = `<script id="convertapk-newline-fix">(function(){
+  if (window.__convertapkNewlineFix) return;
+  window.__convertapkNewlineFix = true;
+  function shouldSkip(node){
+    if (!node || !node.parentElement) return true;
+    var tag = node.parentElement.tagName || '';
+    if (['SCRIPT','STYLE','TEXTAREA','CODE','PRE','INPUT'].includes(tag)) return true;
+    // 仅在显式标记的容器内处理，避免全局布局抖动
+    return !node.parentElement.closest('[data-convertapk-newline-fix="true"]');
+  }
+  function replaceNode(node){
+    var text = node.nodeValue || '';
+    if (text.indexOf('\\n') === -1) return;
+    var parts = text.split('\\n');
+    var frag = document.createDocumentFragment();
+    for (var i = 0; i < parts.length; i++) {
+      frag.appendChild(document.createTextNode(parts[i]));
+      if (i < parts.length - 1) frag.appendChild(document.createElement('br'));
+    }
+    if (node.parentNode) node.parentNode.replaceChild(frag, node);
+  }
+  function walk(){
+    if (!document.body) return;
+    var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    var n; var list = [];
+    while ((n = walker.nextNode())) {
+      if (shouldSkip(n)) continue;
+      if (n.nodeValue && n.nodeValue.indexOf('\\n') !== -1) list.push(n);
+    }
+    for (var i = 0; i < list.length; i++) replaceNode(list[i]);
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', walk);
+  } else {
+    walk();
+  }
+})();</script>`;
 
 let insert = "";
 if (!html.includes("convertapk-download-helper")) {
-  insert += downloadScript + "\\n";
+  insert += downloadScript + "\n";
 }
-if (!html.includes("convertapk-newline-fix")) {
-  insert += newlineScript + "\\n";
+if (injectNewlineFix && !html.includes("convertapk-newline-fix")) {
+  insert += newlineScript + "\n";
 }
 if (!insert) {
   process.exit(0);
 }
 
-if (html.includes("</body>")) {
-  html = html.replace("</body>", insert + "</body>");
+if (/<\/body>/i.test(html)) {
+  html = html.replace(/<\/body>/i, insert + "</body>");
 } else {
-  html += "\\n" + insert;
+  html += "\n" + insert;
 }
 
 writeText(indexHtml, html);
 NODE
-
-# ============================================
-# 步骤 2: 初始化 Capacitor
 # ============================================
 log_info "Step 2: 初始化 Capacitor..."
 

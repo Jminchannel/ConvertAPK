@@ -19,6 +19,17 @@
           </div>
         </div>
 
+        <button
+          v-if="isMobileShell"
+          class="mobile-header-theme-btn no-drag"
+          @click="toggleTheme"
+          :title="currentTheme === 'dark' ? t('theme.light') : t('theme.dark')"
+          :aria-label="currentTheme === 'dark' ? t('theme.light') : t('theme.dark')"
+        >
+          <span v-if="currentTheme === 'dark'">&#x2600;</span>
+          <span v-else>&#x1F319;</span>
+        </button>
+
 
         <div class="header-actions no-drag">
           <!-- Theme -->
@@ -75,10 +86,20 @@
     <!-- Main Content -->
     <main class="main" ref="mainRef">
       <div class="container mobile-main-container">
-        <div v-if="isMobileShell" class="mobile-page-head">
+        <div v-if="isMobileShell" ref="mobilePageHeadRef" class="mobile-page-head">
           <div class="mobile-page-head-title">{{ mobileTab === 'profile' ? mobileSettingsLabel : mobileTabTitle }}</div>
           <div class="mobile-page-head-subtitle">{{ mobileTabSubtitle }}</div>
         </div>
+
+        <div
+          class="mobile-swipe-stage"
+          :class="{ 'mobile-swipe-dragging': mobileSwipeDragging }"
+          :style="isMobileShell ? mobileSwipeStyle : null"
+          @touchstart="handleMobileSwipeStart"
+          @touchmove="handleMobileSwipeMove"
+          @touchend="handleMobileSwipeEnd"
+          @touchcancel="handleMobileSwipeCancel"
+        >
 
         <div
           v-if="activeAnnouncement"
@@ -99,7 +120,10 @@
         </div>
 
         <!-- Mode Tabs -->
-        <div class="mode-tabs mobile-build-only" v-show="!isMobileShell || mobileTab === 'build'">
+        <div
+          class="mode-tabs mobile-build-only"
+          v-show="!isMobileShell || mobileTab === 'build'"
+        >
           <button class="mode-tab" :class="{ active: mode === 'convert' }" @click="handleModeChange('convert')">
             <span class="mode-icon">📦</span>
             {{ t('mode.apk') }}
@@ -115,7 +139,10 @@
         </div>
 
         <!-- Steps -->
-        <div class="steps mobile-build-only" v-show="!isMobileShell || mobileTab === 'build'">
+        <div
+          class="steps mobile-build-only"
+          v-show="!isMobileShell || mobileTab === 'build'"
+        >
           <div class="step" :class="{ active: currentStep === 1, completed: currentStep > 1 }">
             <div class="step-number">{{ currentStep > 1 ? '✓' : '1' }}</div>
             <div class="step-text">
@@ -134,7 +161,7 @@
 
         <div class="grid grid-auto mobile-content-grid">
           <!-- Left -->
-          <div class="stack mobile-page mobile-page-build" v-show="!isMobileShell || mobileTab === 'build'">
+          <div class="stack mobile-page mobile-page-build" :class="isMobileShell ? mobilePageAnimClass : ''" v-show="!isMobileShell || mobileTab === 'build'">
             <!-- Guide (convert only) -->
             <div class="card" v-if="mode === 'convert'">
               <div class="card-header">
@@ -751,6 +778,7 @@
           <div
             ref="tasksSection"
             class="card mobile-page mobile-page-tasks"
+            :class="isMobileShell ? mobilePageAnimClass : ''"
             v-show="!isMobileShell || mobileTab === 'tasks'"
           >
             <div class="card-header">
@@ -818,10 +846,10 @@
                       <span class="action-icon">&#x2B07;</span>
                     </button>
                     <div v-if="openDownloadMenu === task.id" class="dropdown-menu">
-                      <a class="dropdown-item" :href="getDownloadUrl(task.id)" @click="closeDownloadMenu">
+                      <a class="dropdown-item" :href="getDownloadUrl(task.id)" @click.prevent="downloadTaskArtifact(task.id, 'apk')">
                         {{ t('tasks.download') }}
                       </a>
-                      <a class="dropdown-item" :href="getKeystoreUrl(task.id)" @click="closeDownloadMenu">
+                      <a class="dropdown-item" :href="getKeystoreUrl(task.id)" @click.prevent="downloadTaskArtifact(task.id, 'signed')">
                         {{ t('tasks.downloadSigned') }}
                       </a>
                     </div>
@@ -903,6 +931,7 @@
             v-if="isMobileShell"
             ref="profileSection"
             class="card mobile-page mobile-page-profile"
+            :class="isMobileShell ? mobilePageAnimClass : ''"
             v-show="mobileTab === 'profile'"
           >
             <div class="mobile-profile-actions">
@@ -942,19 +971,20 @@
             </div>
           </div>
         </div>
+        </div>
       </div>
     </main>
 
     <nav v-if="isMobileShell" class="mobile-bottom-nav no-drag">
-      <button class="mobile-tab-btn" :class="{ active: mobileTab === 'build' }" @click="switchMobileTab('build')">
+      <button class="mobile-tab-btn" :class="{ active: mobileTab === 'build' }" @click="switchMobileTab('build', { animate: false })">
         <span class="mobile-tab-icon">&#x1F6E0;</span>
         <span class="mobile-tab-label">{{ t('config.title') }}</span>
       </button>
-      <button class="mobile-tab-btn" :class="{ active: mobileTab === 'tasks' }" @click="switchMobileTab('tasks')">
+      <button class="mobile-tab-btn" :class="{ active: mobileTab === 'tasks' }" @click="switchMobileTab('tasks', { animate: false })">
         <span class="mobile-tab-icon">&#x1F4CB;</span>
         <span class="mobile-tab-label">{{ t('tasks.title') }}</span>
       </button>
-      <button class="mobile-tab-btn" :class="{ active: mobileTab === 'profile' }" @click="switchMobileTab('profile')">
+      <button class="mobile-tab-btn" :class="{ active: mobileTab === 'profile' }" @click="switchMobileTab('profile', { animate: false })">
         <span class="mobile-tab-icon">&#x2699;</span>
         <span class="mobile-tab-label">{{ mobileSettingsLabel }}</span>
       </button>
@@ -1737,18 +1767,87 @@ export default defineComponent({
   display: none;
 }
 
+.mobile-header-theme-btn {
+  display: none;
+}
+
+.mobile-swipe-stage {
+  width: 100%;
+}
+
 @keyframes mobilePageFade {
   from {
-    opacity: 0;
-    transform: translateY(10px);
+    transform: translateY(4px);
   }
   to {
-    opacity: 1;
     transform: translateY(0);
   }
 }
 
+@keyframes mobilePageSlideFromRight {
+  from {
+    transform: translateX(16px);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes mobilePageSlideFromLeft {
+  from {
+    transform: translateX(-16px);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
 @media (max-width: 640px) {
+  .mobile-shell-active .header-content {
+    position: relative;
+  }
+
+  .mobile-shell-active .mobile-header-theme-btn {
+    position: absolute;
+    right: 16px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    -webkit-appearance: none;
+    appearance: none;
+    color: var(--text-main);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    z-index: 2;
+    outline: none;
+    box-shadow: none;
+    -webkit-tap-highlight-color: transparent;
+    transition: opacity 0.2s ease, transform 0.15s ease;
+  }
+
+  .mobile-shell-active .mobile-header-theme-btn:hover {
+    opacity: 0.85;
+  }
+
+  .mobile-shell-active .mobile-header-theme-btn:focus,
+  .mobile-shell-active .mobile-header-theme-btn:focus-visible {
+    outline: none;
+    box-shadow: none;
+  }
+
+  .mobile-shell-active .mobile-header-theme-btn:active {
+    transform: translateY(-50%) scale(0.96);
+    box-shadow: none;
+  }
+
   .mobile-shell-active .header {
     position: sticky;
     top: 0;
@@ -1763,6 +1862,11 @@ export default defineComponent({
 
   .mobile-main-container {
     padding-bottom: 12px;
+  }
+
+  .mobile-shell-active .mobile-swipe-stage {
+    will-change: transform;
+    touch-action: pan-y;
   }
 
   .mobile-page-head {
@@ -1803,8 +1907,23 @@ export default defineComponent({
     gap: 14px;
   }
 
-  .mobile-page {
-    animation: mobilePageFade 0.22s ease;
+  .mobile-shell-active .mobile-page {
+    backface-visibility: hidden;
+    transform: translateZ(0);
+  }
+
+  .mobile-page-fade {
+    animation: none;
+  }
+
+  .mobile-page-swipe-left {
+    animation: mobilePageSlideFromRight 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+    will-change: transform;
+  }
+
+  .mobile-page-swipe-right {
+    animation: mobilePageSlideFromLeft 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+    will-change: transform;
   }
 
   .mobile-shell-active .card {
@@ -1927,6 +2046,9 @@ export default defineComponent({
     border: none;
     border-radius: 12px;
     background: transparent;
+    outline: none;
+    box-shadow: none;
+    -webkit-tap-highlight-color: transparent;
     color: var(--text-sub);
     display: flex;
     flex-direction: column;
@@ -1938,10 +2060,17 @@ export default defineComponent({
     transition: all 0.2s ease;
   }
 
+  .mobile-tab-btn:focus,
+  .mobile-tab-btn:focus-visible,
+  .mobile-tab-btn:active {
+    outline: none;
+    box-shadow: none;
+  }
+
   .mobile-tab-btn.active {
     color: #fff;
     background: var(--primary-gradient);
-    box-shadow: var(--shadow-glow);
+    box-shadow: none;
   }
 
   .light-theme .mobile-tab-btn.active {

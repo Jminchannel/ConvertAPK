@@ -102,6 +102,7 @@ export const useAppState = () => {
   // Modes & feature state
   const mode = ref('convert') // convert | web | html
   const mainRef = ref(null)
+  const mobilePageHeadRef = ref(null)
   const convertUploadSection = ref(null)
   const htmlUploadSection = ref(null)
   const webUrlSection = ref(null)
@@ -132,6 +133,30 @@ export const useAppState = () => {
     if (mobileTab.value === 'profile') return t('settings.feedbackSection')
     return mode.value === 'web' ? t('web.urlHint') : t('config.subtitle')
   })
+  const mobileTabs = ['build', 'tasks', 'profile']
+  const mobilePageAnimClass = ref('')
+  const mobileSwipeOffsetX = ref(0)
+  const mobileSwipeDragging = ref(false)
+  const mobileSwipeTracking = ref(false)
+  let mobileSwipeStartX = 0
+  let mobileSwipeStartY = 0
+  let mobileSwipeStartTime = 0
+  let mobileSwipeAnimTimer = null
+
+  const getMobileTabIndex = (tab) => mobileTabs.indexOf(tab)
+
+  const setMobilePageTransition = (fromTab, toTab) => {
+    if (!isMobileShell.value) return
+    const fromIndex = getMobileTabIndex(fromTab)
+    const toIndex = getMobileTabIndex(toTab)
+    if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return
+    mobilePageAnimClass.value = toIndex > fromIndex ? 'mobile-page-swipe-left' : 'mobile-page-swipe-right'
+    if (mobileSwipeAnimTimer) clearTimeout(mobileSwipeAnimTimer)
+    mobileSwipeAnimTimer = setTimeout(() => {
+      mobilePageAnimClass.value = ''
+      mobileSwipeAnimTimer = null
+    }, 280)
+  }
 
   const isMobileViewport = () => {
     if (typeof window === 'undefined') return false
@@ -143,52 +168,173 @@ export const useAppState = () => {
     isMobileShell.value = isMobileViewport()
     if (!isMobileShell.value) {
       mobileTab.value = 'build'
+      mobilePageAnimClass.value = ''
+      mobileSwipeOffsetX.value = 0
+      mobileSwipeDragging.value = false
+      mobileSwipeTracking.value = false
+      if (mobileSwipeAnimTimer) {
+        clearTimeout(mobileSwipeAnimTimer)
+        mobileSwipeAnimTimer = null
+      }
     }
   }
 
-  const scrollWithinMain = async (target) => {
+  const shouldIgnoreMobileSwipeTarget = (target) => {
+    if (!target || typeof target.closest !== 'function') return false
+    return Boolean(
+      target.closest(
+        'input, textarea, select, [contenteditable="true"], .cm-editor, .html-editor-toolbar, .html-error-list, .download-dropdown, .lang-menu'
+      )
+    )
+  }
+
+  const scrollWithinMain = async (target, offsetTop = 12) => {
     if (!target) return
     await nextTick()
     if (mainRef.value) {
       const container = mainRef.value
       const containerRect = container.getBoundingClientRect()
       const targetRect = target.getBoundingClientRect()
-      const offset = targetRect.top - containerRect.top + container.scrollTop - 12
+      const offset = targetRect.top - containerRect.top + container.scrollTop - offsetTop
       container.scrollTo({ top: Math.max(0, offset), behavior: 'smooth' })
       return
     }
     target.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
+  const scrollToMobileHeadAnchor = async () => {
+    if (!isMobileShell.value) return
+    if (mobilePageHeadRef.value) {
+      await scrollWithinMain(mobilePageHeadRef.value, 0)
+      return
+    }
+    if (mainRef.value) {
+      mainRef.value.scrollTo({ top: 0, behavior: 'smooth' })
+    }
+  }
+
   const scrollToProjectSection = async () => {
     if (!isMobileViewport()) return
+    if (isMobileShell.value) {
+      await scrollToMobileHeadAnchor()
+      return
+    }
     const target = mode.value === 'convert'
       ? convertUploadSection.value
       : (mode.value === 'html' ? htmlUploadSection.value : webUrlSection.value)
     await scrollWithinMain(target)
   }
 
-  const switchMobileTab = async (tab) => {
+  const switchMobileTab = async (tab, options = {}) => {
     if (tab !== 'build' && tab !== 'tasks' && tab !== 'profile') return
+    const shouldAnimate = Boolean(options.animate)
+    const previousTab = mobileTab.value
+    if (shouldAnimate && previousTab !== tab) {
+      setMobilePageTransition(previousTab, tab)
+    } else if (previousTab !== tab) {
+      mobilePageAnimClass.value = ''
+      if (mobileSwipeAnimTimer) {
+        clearTimeout(mobileSwipeAnimTimer)
+        mobileSwipeAnimTimer = null
+      }
+    }
     mobileTab.value = tab
     showLangMenu.value = false
     closeDownloadMenu()
     if (!isMobileShell.value) return
-    if (tab === 'build') {
-      await scrollToProjectSection()
-      return
-    }
-    if (tab === 'tasks') {
-      await scrollWithinMain(tasksSection.value)
-      return
-    }
-    await scrollWithinMain(profileSection.value)
+    await scrollToMobileHeadAnchor()
   }
+
+  const handleMobileSwipeStart = (event) => {
+    if (!isMobileShell.value) return
+    if (!event.touches || event.touches.length !== 1) return
+    if (shouldIgnoreMobileSwipeTarget(event.target)) return
+    const touch = event.touches[0]
+    mobileSwipeTracking.value = true
+    mobileSwipeDragging.value = false
+    mobileSwipeOffsetX.value = 0
+    mobileSwipeStartX = touch.clientX
+    mobileSwipeStartY = touch.clientY
+    mobileSwipeStartTime = Date.now()
+  }
+
+  const handleMobileSwipeMove = (event) => {
+    if (!mobileSwipeTracking.value) return
+    if (!event.touches || event.touches.length !== 1) return
+    const touch = event.touches[0]
+    const dx = touch.clientX - mobileSwipeStartX
+    const dy = touch.clientY - mobileSwipeStartY
+
+    if (!mobileSwipeDragging.value) {
+      if (Math.abs(dx) < 8) return
+      if (Math.abs(dy) > Math.abs(dx) * 0.9) {
+        mobileSwipeTracking.value = false
+        mobileSwipeOffsetX.value = 0
+        return
+      }
+      mobileSwipeDragging.value = true
+    }
+
+    event.preventDefault()
+    const currentIndex = getMobileTabIndex(mobileTab.value)
+    const atFirst = currentIndex <= 0
+    const atLast = currentIndex >= mobileTabs.length - 1
+    let effectiveDx = dx
+    if ((effectiveDx > 0 && atFirst) || (effectiveDx < 0 && atLast)) {
+      effectiveDx *= 0.28
+    }
+    mobileSwipeOffsetX.value = Math.max(-120, Math.min(120, effectiveDx))
+  }
+
+  const finishMobileSwipe = (cancelled = false) => {
+    if (!mobileSwipeTracking.value) {
+      mobileSwipeDragging.value = false
+      mobileSwipeOffsetX.value = 0
+      return
+    }
+    const dx = mobileSwipeOffsetX.value
+    const elapsed = Math.max(1, Date.now() - mobileSwipeStartTime)
+    const velocity = Math.abs(dx) / elapsed
+    const shouldSwitch = !cancelled && mobileSwipeDragging.value && (Math.abs(dx) >= 56 || velocity >= 0.45)
+
+    if (shouldSwitch) {
+      const currentIndex = getMobileTabIndex(mobileTab.value)
+      const nextIndex = dx < 0 ? currentIndex + 1 : currentIndex - 1
+      const nextTab = mobileTabs[nextIndex]
+      if (nextTab) {
+        switchMobileTab(nextTab, { animate: true })
+      }
+    }
+
+    mobileSwipeTracking.value = false
+    mobileSwipeDragging.value = false
+    mobileSwipeOffsetX.value = 0
+  }
+
+  const handleMobileSwipeEnd = () => {
+    finishMobileSwipe(false)
+  }
+
+  const handleMobileSwipeCancel = () => {
+    finishMobileSwipe(true)
+  }
+
+  const mobileSwipeStyle = computed(() => {
+    if (!isMobileShell.value) return null
+    return {
+      transform: `translate3d(${mobileSwipeOffsetX.value}px, 0, 0)`,
+      transition: mobileSwipeDragging.value ? 'none' : 'transform 260ms cubic-bezier(0.22, 1, 0.36, 1)'
+    }
+  })
 
   const handleModeChange = (value) => {
     mode.value = value
     if (isMobileShell.value) {
+      const previousTab = mobileTab.value
       mobileTab.value = 'build'
+      if (previousTab !== 'build') {
+        setMobilePageTransition(previousTab, 'build')
+      }
     }
     resetForm()
     scrollToProjectSection()
@@ -574,6 +720,141 @@ export const useAppState = () => {
   }
   const getDownloadUrl = (taskId) => api.getDownloadUrl(taskId)
   const getKeystoreUrl = (taskId) => api.getKeystoreUrl(taskId)
+  const nativeAdRequesting = ref(false)
+
+  const hasAndroidAdBridge = () => {
+    if (typeof window === 'undefined') return false
+    return (
+      typeof window.sendToApp === 'function' ||
+      Boolean(window.AdBridge && typeof window.AdBridge.playAd === 'function')
+    )
+  }
+
+  const shouldGateDownloadWithNativeAd = () => {
+    if (!isMobileShell.value) return false
+    return hasAndroidAdBridge()
+  }
+
+  const parseNativeAdResult = (payload) => {
+    if (typeof payload === 'string') {
+      try {
+        payload = JSON.parse(payload)
+      } catch {
+        return { code: 10002, message: '广告结果解析失败' }
+      }
+    }
+    if (!payload || typeof payload !== 'object') {
+      return { code: 10002, message: '广告结果无效' }
+    }
+    const code = Number(payload.code)
+    const message = typeof payload.message === 'string' ? payload.message : ''
+    return {
+      code: Number.isFinite(code) ? code : 10002,
+      message
+    }
+  }
+
+  const restoreAdCallback = (key, previous) => {
+    if (typeof previous === 'function') {
+      window[key] = previous
+      return
+    }
+    try {
+      delete window[key]
+    } catch {
+      window[key] = undefined
+    }
+  }
+
+  const requestNativeRewardAd = (timeoutMs = 15000) => new Promise((resolve) => {
+    if (!hasAndroidAdBridge()) {
+      resolve({ code: 10004, message: '当前环境不支持原生广告' })
+      return
+    }
+
+    let finished = false
+    const prevPlayAdBack = window.playAdBack
+    const prevNativeAdCallback = window.__nativeAdCallback
+    const timer = setTimeout(() => {
+      finish({ code: 10005, message: '广告响应超时' })
+    }, timeoutMs)
+
+    const cleanup = () => {
+      clearTimeout(timer)
+      restoreAdCallback('playAdBack', prevPlayAdBack)
+      restoreAdCallback('__nativeAdCallback', prevNativeAdCallback)
+    }
+
+    const finish = (payload) => {
+      if (finished) return
+      finished = true
+      cleanup()
+      resolve(parseNativeAdResult(payload))
+    }
+
+    const handleAdCallback = (payload) => {
+      const result = parseNativeAdResult(payload)
+      // 10000 仅表示开始播放，不是最终结果
+      if (result.code === 10000) return
+      finish(result)
+    }
+
+    window.playAdBack = handleAdCallback
+    window.__nativeAdCallback = handleAdCallback
+
+    try {
+      if (typeof window.sendToApp === 'function') {
+        window.sendToApp('playAd', '')
+        return
+      }
+      if (window.AdBridge && typeof window.AdBridge.playAd === 'function') {
+        window.AdBridge.playAd()
+        return
+      }
+      finish({ code: 10004, message: '当前环境不支持原生广告' })
+    } catch (error) {
+      finish({ code: 10002, message: error?.message || '广告调用失败' })
+    }
+  })
+
+  const triggerTaskDownload = (url) => {
+    if (!url || typeof document === 'undefined') return
+    const link = document.createElement('a')
+    link.href = url
+    link.rel = 'noopener'
+    link.style.display = 'none'
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+  }
+
+  const downloadTaskArtifact = async (taskId, artifactType = 'apk') => {
+    const url = artifactType === 'signed' ? getKeystoreUrl(taskId) : getDownloadUrl(taskId)
+    closeDownloadMenu()
+    if (!url) return
+
+    if (!shouldGateDownloadWithNativeAd()) {
+      triggerTaskDownload(url)
+      return
+    }
+
+    if (nativeAdRequesting.value) {
+      showToast('广告加载中，请稍候', 'error')
+      return
+    }
+
+    nativeAdRequesting.value = true
+    try {
+      const result = await requestNativeRewardAd()
+      if (result.code !== 10001) {
+        showToast(result.message || '广告未完成，暂不可下载', 'error')
+        return
+      }
+      triggerTaskDownload(url)
+    } finally {
+      nativeAdRequesting.value = false
+    }
+  }
   const isQueuedTask = (task) => {
     if (task?.status === 'pending') return true
     if (task?.status !== 'processing') return false
@@ -1709,6 +1990,13 @@ export const useAppState = () => {
     stopPolling()
     document.removeEventListener('click', handleClickOutside)
     window.removeEventListener('resize', updateMobileShell)
+    if (mobileSwipeAnimTimer) {
+      clearTimeout(mobileSwipeAnimTimer)
+      mobileSwipeAnimTimer = null
+    }
+    mobileSwipeTracking.value = false
+    mobileSwipeDragging.value = false
+    mobileSwipeOffsetX.value = 0
     if (appIcon.value && !appIcon.value.startsWith('/api/')) URL.revokeObjectURL(appIcon.value)
     if (cropperImageSrc.value) URL.revokeObjectURL(cropperImageSrc.value)
     if (htmlDiagnosticsHandle) {
@@ -1746,6 +2034,7 @@ export const useAppState = () => {
     handleClickOutside,
     mode,
     mainRef,
+    mobilePageHeadRef,
     convertUploadSection,
     htmlUploadSection,
     webUrlSection,
@@ -1764,8 +2053,15 @@ export const useAppState = () => {
     mobileSettingsLabel,
     mobileTabTitle,
     mobileTabSubtitle,
+    mobilePageAnimClass,
+    mobileSwipeStyle,
+    mobileSwipeDragging,
     isMobileViewport,
     switchMobileTab,
+    handleMobileSwipeStart,
+    handleMobileSwipeMove,
+    handleMobileSwipeEnd,
+    handleMobileSwipeCancel,
     scrollToProjectSection,
     handleModeChange,
     jsTemplate,
@@ -1884,6 +2180,7 @@ export const useAppState = () => {
     getTaskIcon,
     getDownloadUrl,
     getKeystoreUrl,
+    downloadTaskArtifact,
     isQueuedTask,
     isCancelableTask,
     triggerFileInput,
