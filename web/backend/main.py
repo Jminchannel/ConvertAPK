@@ -123,24 +123,56 @@ def _detect_zip_build_mode(zip_path: Path) -> tuple[str, str | None]:
         raise HTTPException(status_code=400, detail=f"Failed to inspect ZIP: {str(exc)}")
 
 
-def _extract_index_html_from_zip(zip_path: Path, zip_entry_name: str, dst_html: Path) -> None:
+def _extract_html_assets_from_zip(zip_path: Path, zip_entry_name: str, dst_assets_dir: Path) -> None:
     try:
         with zipfile.ZipFile(zip_path, "r") as archive:
-            try:
-                entry_info = archive.getinfo(zip_entry_name)
-            except KeyError:
+            normalized_index = PurePosixPath(str(zip_entry_name or "").replace("\\", "/").lstrip("/"))
+            index_parts = [part for part in normalized_index.parts if part and part != "."]
+            if not index_parts or index_parts[-1].lower() != "index.html":
                 raise HTTPException(status_code=400, detail="index.html was not found in ZIP")
-            if entry_info.file_size > 20 * 1024 * 1024:
-                raise HTTPException(status_code=400, detail="index.html is too large in ZIP")
-            dst_html.parent.mkdir(parents=True, exist_ok=True)
-            with archive.open(entry_info, "r") as src, open(dst_html, "wb") as dst:
-                shutil.copyfileobj(src, dst)
+
+            root_parts = index_parts[:-1]
+            total_size = 0
+            extracted_count = 0
+            max_total_size = 1024 * 1024 * 1024
+            max_single_size = 200 * 1024 * 1024
+            root_parts_tuple = tuple(root_parts)
+
+            dst_assets_dir.mkdir(parents=True, exist_ok=True)
+
+            for info, parts in _iter_zip_entries(archive):
+                lower_parts = [part.lower() for part in parts]
+                if any(part in {"node_modules", ".git", "android", "__macosx"} for part in lower_parts):
+                    continue
+                if root_parts and tuple(parts[: len(root_parts_tuple)]) != root_parts_tuple:
+                    continue
+
+                relative_parts = parts[len(root_parts_tuple):] if root_parts else parts
+                if not relative_parts:
+                    continue
+
+                file_size = int(info.file_size or 0)
+                if file_size > max_single_size:
+                    raise HTTPException(status_code=400, detail="A file in ZIP is too large")
+
+                total_size += file_size
+                if total_size > max_total_size:
+                    raise HTTPException(status_code=400, detail="ZIP assets are too large")
+
+                dst_file = dst_assets_dir.joinpath(*relative_parts)
+                dst_file.parent.mkdir(parents=True, exist_ok=True)
+                with archive.open(info, "r") as src, open(dst_file, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+                extracted_count += 1
+
+            if extracted_count <= 0 or not (dst_assets_dir / "index.html").exists():
+                raise HTTPException(status_code=400, detail="index.html was not found in ZIP")
     except HTTPException:
         raise
     except zipfile.BadZipFile:
         raise HTTPException(status_code=400, detail="ZIP format is invalid, please upload again")
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to extract index.html: {str(exc)}")
+        raise HTTPException(status_code=500, detail=f"Failed to extract HTML assets: {str(exc)}")
 
 FRONTEND_LOGGED = False
 FRONTEND_LOG_PATH = Path(os.getenv("APPDATA", ".")) / "ConvertAPK" / "frontend-resolve.log"
@@ -823,8 +855,10 @@ async def create_task(task_data: BuildTaskCreate):
                 detail="ZIP中未检测到package.json，且未找到index.html，无法识别为Node.js或HTML项目",
             )
         if detected_mode == "html":
+            dst_assets_dir = task_input_dir / "html_assets"
+            _extract_html_assets_from_zip(src_zip, detected_index_entry or "index.html", dst_assets_dir)
             dst_html = task_input_dir / "index.html"
-            _extract_index_html_from_zip(src_zip, detected_index_entry or "index.html", dst_html)
+            shutil.copy2(str(dst_assets_dir / "index.html"), str(dst_html))
             mode = "html"
             html_filename = "index.html"
             try:

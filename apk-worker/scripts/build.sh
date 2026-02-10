@@ -333,7 +333,13 @@ elif [ "$TASK_MODE" = "html" ]; then
     HTML_ROOT="$PROJECT_ROOT/html2apkdemo"
     rm -rf "$HTML_ROOT"
     mkdir -p "$HTML_ROOT"
-    cp "$HTML_FILE" "$HTML_ROOT/index.html"
+    HTML_ASSETS_DIR="$INPUT_DIR/html_assets"
+    if [ -d "$HTML_ASSETS_DIR" ] && [ -f "$HTML_ASSETS_DIR/index.html" ]; then
+        cp -R "$HTML_ASSETS_DIR"/. "$HTML_ROOT"/
+        log_info "Copied full HTML assets from: $HTML_ASSETS_DIR"
+    else
+        cp "$HTML_FILE" "$HTML_ROOT/index.html"
+    fi
 
     LIBS_ZIP="$INPUT_DIR/libs.zip"
     if [ -f "$LIBS_ZIP" ]; then
