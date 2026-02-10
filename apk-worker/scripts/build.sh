@@ -2124,13 +2124,26 @@ function ensureImportLine(source, importLine) {
   return lines.join("\n");
 }
 
-function insertAfterMainActivityClassOpen(source, insert) {
+function insertAfterMainActivityClassOpen(source, insert, isKotlinFile = false) {
   const match = source.match(/class\s+MainActivity\b[^{]*\{/m);
-  if (!match) {
-    return source;
+  if (match) {
+    const idx = source.indexOf(match[0]) + match[0].length;
+    return source.slice(0, idx) + "\n" + insert + source.slice(idx);
   }
-  const idx = source.indexOf(match[0]) + match[0].length;
-  return source.slice(0, idx) + "\n" + insert + source.slice(idx);
+  if (isKotlinFile) {
+    const kotlinDecl = source.match(/class\s+MainActivity\b[^\n]*/m);
+    if (kotlinDecl) {
+      const rawDecl = kotlinDecl[0];
+      const decl = rawDecl.trimEnd();
+      if (!decl.includes("{")) {
+        const start = source.indexOf(rawDecl);
+        const end = start + rawDecl.length;
+        const replacement = `${decl} {\n${insert}}\n`;
+        return source.slice(0, start) + replacement + source.slice(end);
+      }
+    }
+  }
+  return source;
 }
 
 function removeMinimalDoubleClickExit(source) {
@@ -2172,7 +2185,7 @@ function syncMinimalDoubleClickExit(source, isKotlinFile, enabled) {
       "        }\n" +
       "    }\n" +
       "    // ConvertAPK: double-click-exit end (minimal)\n";
-    updated = insertAfterMainActivityClassOpen(updated, fieldBlock);
+    updated = insertAfterMainActivityClassOpen(updated, fieldBlock, true);
     const classClose = updated.lastIndexOf("}");
     if (classClose !== -1) {
       updated = updated.slice(0, classClose) + "\n" + methodBlock + "\n" + updated.slice(classClose);
@@ -2201,7 +2214,111 @@ function syncMinimalDoubleClickExit(source, isKotlinFile, enabled) {
     "        }\n" +
     "    }\n" +
     "    // ConvertAPK: double-click-exit end (minimal)\n";
-  updated = insertAfterMainActivityClassOpen(updated, fieldBlock);
+  updated = insertAfterMainActivityClassOpen(updated, fieldBlock, false);
+  const classClose = updated.lastIndexOf("}");
+  if (classClose !== -1) {
+    updated = updated.slice(0, classClose) + "\n" + methodBlock + "\n" + updated.slice(classClose);
+  }
+  return updated;
+}
+
+function removeMinimalStatusBarHidden(source) {
+  source = source.replace(
+    /\n?\s*\/\/ ConvertAPK: status-bar-hidden start \(minimal\)\n[\s\S]*?\n\s*\/\/ ConvertAPK: status-bar-hidden end \(minimal\)\n?/gm,
+    "\n"
+  );
+  return source;
+}
+
+function syncMinimalStatusBarHidden(source, isKotlinFile, enabled) {
+  let updated = removeMinimalStatusBarHidden(source);
+  if (!enabled) {
+    return updated;
+  }
+  if (isKotlinFile) {
+    updated = ensureImportLine(updated, "import android.os.Build");
+    updated = ensureImportLine(updated, "import android.os.Bundle");
+    updated = ensureImportLine(updated, "import android.view.View");
+    updated = ensureImportLine(updated, "import android.view.WindowInsets");
+    updated = ensureImportLine(updated, "import android.view.WindowManager");
+    const methodBlock =
+      "    // ConvertAPK: status-bar-hidden start (minimal)\n" +
+      "    override fun onCreate(savedInstanceState: Bundle?) {\n" +
+      "        super.onCreate(savedInstanceState)\n" +
+      "        applyConvertApkStatusBarHidden()\n" +
+      "    }\n\n" +
+      "    override fun onWindowFocusChanged(hasFocus: Boolean) {\n" +
+      "        super.onWindowFocusChanged(hasFocus)\n" +
+      "        if (hasFocus) {\n" +
+      "            applyConvertApkStatusBarHidden()\n" +
+      "        }\n" +
+      "    }\n\n" +
+      "    private fun applyConvertApkStatusBarHidden() {\n" +
+      "        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {\n" +
+      "            window.setDecorFitsSystemWindows(false)\n" +
+      "            val controller = window.insetsController\n" +
+      "            if (controller != null) {\n" +
+      "                controller.hide(WindowInsets.Type.statusBars())\n" +
+      "                controller.show(WindowInsets.Type.navigationBars())\n" +
+      "            }\n" +
+      "        } else {\n" +
+      "            @Suppress(\"DEPRECATION\")\n" +
+      "            window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)\n" +
+      "            @Suppress(\"DEPRECATION\")\n" +
+      "            window.decorView.systemUiVisibility =\n" +
+      "                View.SYSTEM_UI_FLAG_FULLSCREEN or\n" +
+      "                View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or\n" +
+      "                View.SYSTEM_UI_FLAG_LAYOUT_STABLE\n" +
+      "        }\n" +
+      "    }\n" +
+      "    // ConvertAPK: status-bar-hidden end (minimal)\n";
+    const normalized = insertAfterMainActivityClassOpen(updated, "", true);
+    updated = normalized;
+    const classClose = updated.lastIndexOf("}");
+    if (classClose !== -1) {
+      updated = updated.slice(0, classClose) + "\n" + methodBlock + "\n" + updated.slice(classClose);
+    }
+    return updated;
+  }
+  updated = ensureImportLine(updated, "import android.os.Build;");
+  updated = ensureImportLine(updated, "import android.os.Bundle;");
+  updated = ensureImportLine(updated, "import android.view.View;");
+  updated = ensureImportLine(updated, "import android.view.WindowInsets;");
+  updated = ensureImportLine(updated, "import android.view.WindowManager;");
+  const methodBlock =
+    "    // ConvertAPK: status-bar-hidden start (minimal)\n" +
+    "    @Override\n" +
+    "    protected void onCreate(Bundle savedInstanceState) {\n" +
+    "        super.onCreate(savedInstanceState);\n" +
+    "        applyConvertApkStatusBarHidden();\n" +
+    "    }\n\n" +
+    "    @Override\n" +
+    "    public void onWindowFocusChanged(boolean hasFocus) {\n" +
+    "        super.onWindowFocusChanged(hasFocus);\n" +
+    "        if (hasFocus) {\n" +
+    "            applyConvertApkStatusBarHidden();\n" +
+    "        }\n" +
+    "    }\n\n" +
+    "    private void applyConvertApkStatusBarHidden() {\n" +
+    "        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {\n" +
+    "            getWindow().setDecorFitsSystemWindows(false);\n" +
+    "            android.view.WindowInsetsController controller = getWindow().getInsetsController();\n" +
+    "            if (controller != null) {\n" +
+    "                controller.hide(WindowInsets.Type.statusBars());\n" +
+    "                controller.show(WindowInsets.Type.navigationBars());\n" +
+    "            }\n" +
+    "        } else {\n" +
+    "            getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);\n" +
+    "            getWindow().getDecorView().setSystemUiVisibility(\n" +
+    "                View.SYSTEM_UI_FLAG_FULLSCREEN |\n" +
+    "                View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN |\n" +
+    "                View.SYSTEM_UI_FLAG_LAYOUT_STABLE\n" +
+    "            );\n" +
+    "        }\n" +
+    "    }\n" +
+    "    // ConvertAPK: status-bar-hidden end (minimal)\n";
+  const normalized = insertAfterMainActivityClassOpen(updated, "", false);
+  updated = normalized;
   const classClose = updated.lastIndexOf("}");
   if (classClose !== -1) {
     updated = updated.slice(0, classClose) + "\n" + methodBlock + "\n" + updated.slice(classClose);
@@ -2218,6 +2335,11 @@ if (skipMainActivityInjection) {
     console.log("[MainActivity] detected ConvertAPK markers; reset to minimal BridgeActivity");
   } else {
     text = originalText;
+  }
+  const beforeMinimalStatusSync = text;
+  text = syncMinimalStatusBarHidden(text, isKotlin, statusBarHidden);
+  if (beforeMinimalStatusSync !== text) {
+    console.log(`[MainActivity] ${statusBarHidden ? "enabled" : "disabled"} minimal status-bar-hidden`);
   }
   const beforeMinimalSync = text;
   text = syncMinimalDoubleClickExit(text, isKotlin, doubleClickExit);
