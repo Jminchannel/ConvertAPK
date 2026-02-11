@@ -242,34 +242,6 @@ async function fetchWithRetry(url, retries = 2) {
   throw lastError || new Error("fetch failed");
 }
 
-async function finalizeDownloadedFile(tempPath, localPath) {
-  const maxRetries = 4;
-  let lastError = null;
-  for (let attempt = 0; attempt < maxRetries; attempt += 1) {
-    try {
-      await fsp.rm(localPath, { force: true }).catch(() => {});
-      await fsp.rename(tempPath, localPath);
-      return;
-    } catch (error) {
-      lastError = error;
-      const code = String(error?.code || "");
-      if (code === "EPERM" || code === "EACCES" || code === "EBUSY" || code === "EXDEV" || code === "EEXIST") {
-        try {
-          await fsp.copyFile(tempPath, localPath);
-          await fsp.rm(tempPath, { force: true }).catch(() => {});
-          return;
-        } catch {
-          // 继续重试
-        }
-      }
-      if (attempt < maxRetries - 1) {
-        await new Promise((resolve) => setTimeout(resolve, 120 * (attempt + 1)));
-      }
-    }
-  }
-  throw lastError || new Error("finalize downloaded file failed");
-}
-
 async function downloadRemoteAsset(remoteUrl) {
   const canonical = canonicalRemoteUrl(remoteUrl);
   if (remoteToLocal.has(canonical)) {
@@ -285,17 +257,16 @@ async function downloadRemoteAsset(remoteUrl) {
   const localDir = path.dirname(localPath);
   await fsp.mkdir(localDir, { recursive: true });
 
-  const tempPath = `${localPath}.part`;
   try {
+    await fsp.rm(localPath, { force: true }).catch(() => {});
     if (response.body) {
-      await pipeline(Readable.fromWeb(response.body), fs.createWriteStream(tempPath));
+      await pipeline(Readable.fromWeb(response.body), fs.createWriteStream(localPath));
     } else {
       const buf = Buffer.from(await response.arrayBuffer());
-      await fsp.writeFile(tempPath, buf);
+      await fsp.writeFile(localPath, buf);
     }
-    await finalizeDownloadedFile(tempPath, localPath);
   } catch (error) {
-    await fsp.rm(tempPath, { force: true }).catch(() => {});
+    await fsp.rm(localPath, { force: true }).catch(() => {});
     throw error;
   }
 
@@ -575,6 +546,25 @@ async function collectFiles(dir, extensions) {
   return found;
 }
 
+async function cleanupPartFiles(dir) {
+  const stack = [dir];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    const entries = await fsp.readdir(current, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      const full = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name === ".git" || entry.name === "node_modules" || entry.name === ".gradle") continue;
+        stack.push(full);
+        continue;
+      }
+      if (entry.name.endsWith(".part")) {
+        await fsp.rm(full, { force: true }).catch(() => {});
+      }
+    }
+  }
+}
+
 async function main() {
   const stat = await fsp.stat(entryFile).catch(() => null);
   if (!stat || !stat.isFile()) {
@@ -610,6 +600,8 @@ async function main() {
       break;
     }
   }
+
+  await cleanupPartFiles(rootDir);
 
   console.log(
     `[offlineize] done. downloaded=${downloadCount}, rewritten=${replaceCount}, failed=${failCount}, root=${path.relative(process.cwd(), rootDir).replace(/\\/g, "/")}`

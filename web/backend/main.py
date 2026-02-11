@@ -20,6 +20,7 @@ import struct
 import zlib
 import threading
 import threading
+import time
 import urllib.request
 import urllib.error
 import urllib.parse
@@ -397,7 +398,8 @@ def _run_offlineize_script(entry_html: Path, allow_urls: list[str]) -> dict:
     if not entry_html.exists():
         return {"ok": False, "failed_urls": [], "error": f"entry html not found: {entry_html}"}
 
-    command = [_resolve_node_executable(), str(CDN_LOCALIZE_SCRIPT_PATH), str(entry_html)]
+    entry_abs = entry_html.resolve()
+    command = [_resolve_node_executable(), str(CDN_LOCALIZE_SCRIPT_PATH), str(entry_abs)]
     for url in allow_urls:
         normalized = str(url or "").strip()
         if normalized:
@@ -412,7 +414,7 @@ def _run_offlineize_script(entry_html: Path, allow_urls: list[str]) -> dict:
     try:
         completed = subprocess.run(
             command,
-            cwd=str(entry_html.parent),
+            cwd=str(entry_abs.parent),
             env=process_env,
             capture_output=True,
             text=True,
@@ -434,10 +436,13 @@ def _run_offlineize_script(entry_html: Path, allow_urls: list[str]) -> dict:
     lines = _split_process_output(completed.stdout) + _split_process_output(completed.stderr)
     failed_urls = _collect_failed_urls(lines)
     if completed.returncode != 0:
+        detail = ""
+        if lines:
+            detail = f": {' | '.join(lines[-4:])}"
         return {
             "ok": False,
             "failed_urls": failed_urls,
-            "error": f"offlineize exit code {completed.returncode}",
+            "error": f"offlineize exit code {completed.returncode}{detail}",
         }
     return {"ok": True, "failed_urls": failed_urls, "error": ""}
 
@@ -478,6 +483,29 @@ def _pack_dir_to_zip(src_dir: Path, dst_zip: Path) -> None:
             archive.write(file_path, file_path.relative_to(src_dir).as_posix())
 
 
+def _replace_dir_with_retry(src_dir: Path, dst_dir: Path, retries: int = 4) -> bool:
+    """优先 move，失败时重试并回退 copy，返回是否使用了 move"""
+    if dst_dir.exists():
+        shutil.rmtree(dst_dir, ignore_errors=True)
+    last_error = None
+    for attempt in range(max(1, retries)):
+        try:
+            shutil.move(str(src_dir), str(dst_dir))
+            return True
+        except Exception as exc:
+            last_error = exc
+            if attempt < retries - 1:
+                time.sleep(0.15 * (attempt + 1))
+    try:
+        dst_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(src_dir, dst_dir, dirs_exist_ok=True)
+        return False
+    except Exception:
+        if last_error:
+            raise last_error
+        raise
+
+
 def _preprocess_html_task_input(task_input_dir: Path, allow_urls: list[str]) -> dict:
     html_index = task_input_dir / "index.html"
     html_assets_dir = task_input_dir / "html_assets"
@@ -508,10 +536,9 @@ def _preprocess_html_task_input(task_input_dir: Path, allow_urls: list[str]) -> 
                 "log_lines": [f"[CDN] HTML 外链预处理执行失败，已保留原始外链：{run_result.get('error') or 'unknown error'}"],
             }
 
-        if html_assets_dir.exists():
-            shutil.rmtree(html_assets_dir, ignore_errors=True)
-        shutil.move(str(temp_dir), str(html_assets_dir))
-        temp_dir = None
+        used_move = _replace_dir_with_retry(temp_dir, html_assets_dir)
+        if used_move:
+            temp_dir = None
         if html_assets_index.exists():
             shutil.copy2(str(html_assets_index), str(html_index))
         return {"preprocessed": True, "failed_urls": failed_urls, "log_lines": ["[CDN] HTML 外链预处理完成。"]}
