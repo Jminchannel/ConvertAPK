@@ -492,25 +492,25 @@
                 :class="{ 'is-warning': cdnLocalizeAdvised }"
               >
                 <div class="cdn-localize-banner-content">
-                  <div class="cdn-localize-banner-title">CDN 外链本地化</div>
-                  <div v-if="cdnScanLoading" class="cdn-localize-banner-subtitle">正在扫描外链资源...</div>
+                  <div class="cdn-localize-banner-title">{{ t('cdnLocalize.title') }}</div>
+                  <div v-if="cdnScanLoading" class="cdn-localize-banner-subtitle">{{ t('cdnLocalize.scanning') }}</div>
                   <div v-else-if="hasCdnExternalLinks" class="cdn-localize-banner-subtitle">
-                    检测到 {{ cdnLinkItems.length }} 条外链，已选 {{ cdnSelectedCount }} 条。建议开启本地化，避免 APP 首启离线时样式丢失。
+                    {{ t('cdnLocalize.detected', { total: cdnLinkItems.length, selected: cdnSelectedCount }) }}
                   </div>
                   <div v-else class="cdn-localize-banner-subtitle">
-                    当前未检测到外链资源。导入新文件后可重新扫描。
+                    {{ t('cdnLocalize.noLinks') }}
                   </div>
                 </div>
                 <div class="cdn-localize-banner-actions">
                   <label class="settings-checkbox" style="margin: 0;">
                     <input type="checkbox" v-model="cdnLocalizeEnabled" @change="handleCdnLocalizeEnabledChange" />
-                    启用本地化
+                    {{ t('cdnLocalize.enable') }}
                   </label>
                   <button class="btn btn-ghost btn-sm" @click="rescanExternalLinks({ openModal: false })" :disabled="cdnScanLoading">
-                    重新扫描
+                    {{ t('cdnLocalize.rescan') }}
                   </button>
                   <button class="btn btn-primary btn-sm" @click="openCdnLocalizeModal" :disabled="cdnScanLoading || !hasCdnExternalLinks">
-                    选择外链
+                    {{ t('cdnLocalize.selectLinks') }}
                   </button>
                 </div>
               </div>
@@ -1168,16 +1168,16 @@
       <div v-if="showCdnLocalizeModal" class="cdn-localize-overlay" @click.self="closeCdnLocalizeModal">
         <div class="cdn-localize-dialog">
           <div class="cdn-localize-dialog-header">
-            <div class="cdn-localize-dialog-title">选择需要本地化的外链资源</div>
+            <div class="cdn-localize-dialog-title">{{ t('cdnLocalize.dialogTitle') }}</div>
             <button class="cdn-localize-close-btn" @click="closeCdnLocalizeModal">x</button>
           </div>
           <div class="cdn-localize-dialog-body">
             <div class="cdn-localize-toolbar">
               <div class="cdn-localize-toolbar-left">
-                <button class="btn btn-ghost btn-sm" @click="selectAllCdnLinks">全选</button>
-                <button class="btn btn-ghost btn-sm" @click="clearCdnLinkSelection">清空</button>
+                <button class="btn btn-ghost btn-sm" @click="selectAllCdnLinks">{{ t('cdnLocalize.selectAll') }}</button>
+                <button class="btn btn-ghost btn-sm" @click="clearCdnLinkSelection">{{ t('cdnLocalize.clear') }}</button>
               </div>
-              <div class="cdn-localize-toolbar-count">已选 {{ cdnSelectedCount }} / {{ cdnLinkItems.length }}</div>
+              <div class="cdn-localize-toolbar-count">{{ t('cdnLocalize.selectedCount', { selected: cdnSelectedCount, total: cdnLinkItems.length }) }}</div>
             </div>
 
             <div v-if="cdnLinkItems.length" class="cdn-localize-list">
@@ -1195,9 +1195,9 @@
                 <div class="cdn-localize-item-content">
                   <div class="cdn-localize-item-url">{{ item.url }}</div>
                   <div class="cdn-localize-item-meta">
-                    <span>{{ item.type || 'other' }}</span>
-                    <span>{{ item.occurrences || 0 }} 次引用</span>
-                    <span>{{ item.file_count || 0 }} 个文件</span>
+                    <span>{{ getCdnTypeLabel(item.type) }}</span>
+                    <span>{{ t('cdnLocalize.occurrences', { count: item.occurrences || 0 }) }}</span>
+                    <span>{{ t('cdnLocalize.fileCount', { count: item.file_count || 0 }) }}</span>
                   </div>
                   <div v-if="item.files && item.files.length" class="cdn-localize-item-files">
                     {{ item.files.join(' · ') }}
@@ -1206,12 +1206,12 @@
               </label>
             </div>
             <div v-else class="empty-state">
-              <div class="empty-text">未检测到可本地化的外链</div>
+              <div class="empty-text">{{ t('cdnLocalize.empty') }}</div>
             </div>
           </div>
           <div class="cdn-localize-dialog-footer">
-            <div class="cdn-localize-tip">建议保持本地化开启，避免 APP 首启离线时样式丢失。</div>
-            <button class="btn btn-primary btn-sm" @click="closeCdnLocalizeModal">完成</button>
+            <div class="cdn-localize-tip">{{ t('cdnLocalize.tip') }}</div>
+            <button class="btn btn-primary btn-sm" @click="closeCdnLocalizeModal">{{ t('cdnLocalize.done') }}</button>
           </div>
         </div>
       </div>

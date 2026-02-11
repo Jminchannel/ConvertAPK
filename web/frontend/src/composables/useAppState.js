@@ -911,6 +911,13 @@ export const useAppState = () => {
 
   const isCdnLinkSelected = (url) => cdnSelectedUrls.value.includes(url)
 
+  const getCdnTypeLabel = (rawType) => {
+    const normalizedType = String(rawType || 'other').trim().toLowerCase() || 'other'
+    const key = `cdnLocalize.type.${normalizedType}`
+    const translated = t(key)
+    return translated === key ? normalizedType : translated
+  }
+
   const toggleCdnLinkSelection = (url, checked) => {
     const targetUrl = String(url || '').trim()
     if (!targetUrl) return
@@ -966,7 +973,7 @@ export const useAppState = () => {
       cdnSelectedUrls.value = []
       cdnLocalizeEnabled.value = true
       showCdnLocalizeModal.value = false
-      showToast('外链扫描失败，已切换为全部外链本地化。', 'error')
+      showToast(t('cdnLocalize.scanFailed'), 'error')
       return null
     } finally {
       cdnScanLoading.value = false
@@ -976,14 +983,14 @@ export const useAppState = () => {
   const rescanExternalLinks = async (options = {}) => {
     if (mode.value === 'convert' && uploadedFile.value?.filename) {
       if (uploadedFile.value?.reused) {
-        showToast('复用历史任务时无法重新扫描，请重新上传项目文件。', 'error')
+        showToast(t('cdnLocalize.rescanReuseConvert'), 'error')
         return null
       }
       return await scanUploadedExternalLinks({ mode: 'convert', filename: uploadedFile.value.filename }, options)
     }
     if (mode.value === 'html' && uploadedHtmlFile.value?.filename) {
       if (uploadedHtmlFile.value?.reused) {
-        showToast('复用历史任务时无法重新扫描，请重新上传 HTML 文件。', 'error')
+        showToast(t('cdnLocalize.rescanReuseHtml'), 'error')
         return null
       }
       return await scanUploadedExternalLinks({ mode: 'html', html_filename: uploadedHtmlFile.value.filename }, options)
@@ -2421,6 +2428,7 @@ export const useAppState = () => {
     selectAllCdnLinks,
     clearCdnLinkSelection,
     isCdnLinkSelected,
+    getCdnTypeLabel,
     toggleCdnLinkSelection,
     handleCdnLocalizeEnabledChange,
     openCdnLocalizeModal,
