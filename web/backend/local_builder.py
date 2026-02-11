@@ -536,13 +536,37 @@ def _resolve_templates_root() -> Path:
 def _offlineize_html_assets(entry_html: Path, env: Dict[str, str], on_log=None) -> None:
     if not entry_html.exists():
         return
+    enabled = str(env.get("CDN_LOCALIZE_ENABLED", "true")).strip().lower() == "true"
+    if not enabled:
+        _log(on_log, "[HTML] CDN localize disabled, skip offlineize")
+        return
     script_path = Path(__file__).resolve().parents[2] / "apk-worker" / "scripts" / "offlineize_html_assets.mjs"
     if not script_path.exists():
         _log(on_log, f"[HTML] offlineize script not found: {script_path}")
         return
     node_cmd = _resolve_node_tool(env, "node")
+    cmd = [node_cmd, str(script_path), str(entry_html)]
+    allow_urls: list[str] = []
+    raw_allow_json = str(env.get("CDN_LOCALIZE_URLS_JSON", "") or "").strip()
+    if raw_allow_json:
+        try:
+            parsed_allow = json.loads(raw_allow_json)
+            if isinstance(parsed_allow, list):
+                seen_urls: set[str] = set()
+                for item in parsed_allow:
+                    url = str(item or "").strip()
+                    if not url or url in seen_urls:
+                        continue
+                    seen_urls.add(url)
+                    allow_urls.append(url)
+        except Exception as exc:
+            _log(on_log, f"[HTML] invalid CDN_LOCALIZE_URLS_JSON, fallback to all links: {exc}")
+    for allow_url in allow_urls:
+        cmd.extend(["--allow-url", allow_url])
+    if allow_urls:
+        _log(on_log, f"[HTML] offlineize only selected links: {len(allow_urls)}")
     try:
-        _run_cmd([node_cmd, str(script_path), str(entry_html)], cwd=entry_html.parent, env=env, on_log=on_log)
+        _run_cmd(cmd, cwd=entry_html.parent, env=env, on_log=on_log)
     except Exception as exc:
         _log(on_log, f"[HTML] offlineize failed, keep original links: {exc}")
 
@@ -1639,6 +1663,7 @@ def run_local_build(
 
         progress(35, "Step 2: 准备 Capacitor...")
         _log(on_log, "Step 2: 准备 Capacitor...")
+        _offlineize_html_assets(web_dir / "index.html", process_env, on_log=on_log)
         _ensure_dep(pkg, process_env, "@capacitor/core", dev=False, on_log=on_log)
         _ensure_dep(pkg, process_env, "@capacitor/cli", dev=True, on_log=on_log)
 

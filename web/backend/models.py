@@ -182,6 +182,8 @@ class BuildTask(BaseModel):
     download_url: Optional[str] = None
     output_filename: Optional[str] = None
     logs: List[str] = []
+    cdn_localize_enabled: bool = False
+    cdn_localize_urls: List[str] = []
     reuse_keystore_from: Optional[str] = None  # 复用某个任务的签名密钥
 
 
@@ -195,6 +197,8 @@ class BuildTaskCreate(BaseModel):
     html_filename: Optional[str] = None
     icon_filename: Optional[str] = None
     keystore_filename: Optional[str] = None
+    cdn_localize_enabled: Optional[bool] = None
+    cdn_localize_urls: List[str] = []
     config: AppConfig
     reuse_keystore_from: Optional[str] = None  # 复用某个任务的签名密钥
 
@@ -221,7 +225,8 @@ class BuildTaskResponse(BaseModel):
     output_filename: Optional[str] = None
     logs: List[str] = []
     reuse_keystore_from: Optional[str] = None
-
+    cdn_localize_enabled: bool = False
+    cdn_localize_urls: List[str] = []
 
 class UpdateTaskRequest(BaseModel):
     """更新任务请求"""
@@ -242,3 +247,5 @@ class UpdateTaskRequest(BaseModel):
     download_mode: Optional[str] = None  # silent | picker (html mode)
     web_fill_mode: Optional[str] = None
     permissions: Optional[List[str]] = None
+    cdn_localize_enabled: Optional[bool] = None
+    cdn_localize_urls: Optional[List[str]] = None

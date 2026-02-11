@@ -4,6 +4,7 @@ APK Builder 模块
 支持任务队列，限制并发构建数量
 """
 import os
+import json
 import shutil
 import subprocess
 import threading
@@ -304,7 +305,9 @@ class APKBuilder:
         keystore_password: Optional[str] = None,
         key_alias: Optional[str] = None,
         key_password: Optional[str] = None,
-        reuse_keystore_from: Optional[str] = None
+        reuse_keystore_from: Optional[str] = None,
+        cdn_localize_enabled: bool = True,
+        cdn_localize_urls: Optional[list[str]] = None,
     ) -> dict:
         """
         准备构建环境
@@ -384,6 +387,15 @@ class APKBuilder:
         web_fill_mode_normalized = str(web_fill_mode or "contain").strip().lower()
         if web_fill_mode_normalized not in {"contain", "cover"}:
             web_fill_mode_normalized = "contain"
+        cdn_urls_normalized: list[str] = []
+        if isinstance(cdn_localize_urls, list):
+            seen_urls: set[str] = set()
+            for item in cdn_localize_urls:
+                text = str(item or "").strip()
+                if not text or text in seen_urls:
+                    continue
+                seen_urls.add(text)
+                cdn_urls_normalized.append(text)
 
         npm_cache_dir = os.getenv('NPM_CONFIG_CACHE', '').strip()
         if not npm_cache_dir:
@@ -410,6 +422,8 @@ class APKBuilder:
             "WEBVIEW_UA": webview_ua,
             "DOWNLOAD_MODE": download_mode_normalized,
             "WEB_FILL_MODE": web_fill_mode_normalized,
+            "CDN_LOCALIZE_ENABLED": "true" if cdn_localize_enabled else "false",
+            "CDN_LOCALIZE_URLS_JSON": json.dumps(cdn_urls_normalized, ensure_ascii=False),
             # Comma-separated permissions (prefer full names, e.g. android.permission.CAMERA)
             "PERMISSIONS": ",".join([str(p).strip() for p in (permissions or []) if str(p).strip()]),
             "TASK_ID": task_id,
@@ -555,6 +569,10 @@ class APKBuilder:
                 f"DOWNLOAD_MODE={env.get('DOWNLOAD_MODE', 'picker')}",
                 "-e",
                 f"WEB_FILL_MODE={env.get('WEB_FILL_MODE', 'contain')}",
+                "-e",
+                f"CDN_LOCALIZE_ENABLED={env.get('CDN_LOCALIZE_ENABLED', 'true')}",
+                "-e",
+                f"CDN_LOCALIZE_URLS_JSON={env.get('CDN_LOCALIZE_URLS_JSON', '[]')}",
                 "-e",
                 f"DOUBLE_CLICK_EXIT={env.get('DOUBLE_CLICK_EXIT', 'false')}",
                 "-e",
@@ -1147,7 +1165,9 @@ class BuildTaskRunner:
                 keystore_password=task.config.keystore_password,
                 key_alias=task.config.keystore_alias,
                 key_password=task.config.key_password,
-                reuse_keystore_from=task.reuse_keystore_from
+                reuse_keystore_from=task.reuse_keystore_from,
+                cdn_localize_enabled=getattr(task, "cdn_localize_enabled", True),
+                cdn_localize_urls=getattr(task, "cdn_localize_urls", None),
             )
             
             # 运行Docker构建

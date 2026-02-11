@@ -13,6 +13,7 @@ import sys
 import os
 import json
 import shutil
+import re
 import binascii
 import struct
 import zlib
@@ -20,6 +21,7 @@ import threading
 import threading
 import urllib.request
 import urllib.error
+import urllib.parse
 import zipfile
 
 from models import (
@@ -173,6 +175,163 @@ def _extract_html_assets_from_zip(zip_path: Path, zip_entry_name: str, dst_asset
         raise HTTPException(status_code=400, detail="ZIP format is invalid, please upload again")
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to extract HTML assets: {str(exc)}")
+
+
+EXTERNAL_LINK_PATTERN = re.compile(r'(?P<url>(?:https?:)?//[^\s"\'<>()`]+)', re.IGNORECASE)
+EXTERNAL_LINK_SCAN_EXTENSIONS = {
+    ".html", ".htm", ".css", ".js", ".mjs", ".cjs",
+    ".json", ".ts", ".tsx", ".jsx", ".vue", ".xml",
+}
+EXTERNAL_LINK_SCAN_SKIP_DIRS = {"node_modules", ".git", "android", "__macosx", ".gradle"}
+EXTERNAL_LINK_SCAN_MAX_FILE_BYTES = 2 * 1024 * 1024
+EXTERNAL_LINK_SCAN_MAX_FILES_PER_ARCHIVE = 1500
+EXTERNAL_LINK_SCAN_MAX_MATCHES_PER_FILE = 5000
+
+
+def _resolve_upload_file(filename: str) -> Path:
+    name = str(filename or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="filename is required")
+    root = BACKEND_UPLOAD_DIR.resolve()
+    candidate = (BACKEND_UPLOAD_DIR / name).resolve()
+    try:
+        candidate.relative_to(root)
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid filename")
+    return candidate
+
+
+def _normalize_external_url(raw_url: str) -> str | None:
+    value = str(raw_url or "").strip()
+    if not value:
+        return None
+    if value.startswith("//"):
+        value = f"https:{value}"
+    try:
+        parsed = urllib.parse.urlsplit(value)
+    except Exception:
+        return None
+    scheme = (parsed.scheme or "").strip().lower()
+    if scheme not in {"http", "https"}:
+        return None
+    netloc = (parsed.netloc or "").strip()
+    if not netloc:
+        return None
+    path = parsed.path or "/"
+    return urllib.parse.urlunsplit((scheme, netloc, path, parsed.query, ""))
+
+
+def _normalize_cdn_localize_urls(values) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    result: list[str] = []
+    seen: set[str] = set()
+    for item in values:
+        normalized = _normalize_external_url(str(item or ""))
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        result.append(normalized)
+    return result
+
+
+def _guess_external_url_type(url: str) -> str:
+    path = (urllib.parse.urlsplit(url).path or "").lower()
+    if path.endswith(".css"):
+        return "css"
+    if path.endswith((".js", ".mjs", ".cjs")):
+        return "script"
+    if path.endswith((".woff", ".woff2", ".ttf", ".otf", ".eot")):
+        return "font"
+    if path.endswith((".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico", ".avif")):
+        return "image"
+    if path.endswith((".mp3", ".wav", ".ogg", ".aac", ".m4a", ".flac", ".mp4", ".webm", ".mov")):
+        return "media"
+    return "other"
+
+
+def _collect_external_links_from_text(text: str, file_label: str, collector: dict[str, dict]) -> None:
+    match_count = 0
+    for match in EXTERNAL_LINK_PATTERN.finditer(text):
+        if match_count >= EXTERNAL_LINK_SCAN_MAX_MATCHES_PER_FILE:
+            break
+        normalized = _normalize_external_url(match.group("url"))
+        if not normalized:
+            continue
+        item = collector.setdefault(
+            normalized,
+            {"url": normalized, "occurrences": 0, "files": set(), "types": set()},
+        )
+        item["occurrences"] += 1
+        item["files"].add(file_label)
+        item["types"].add(_guess_external_url_type(normalized))
+        match_count += 1
+
+
+def _build_external_link_items(collector: dict[str, dict]) -> list[dict]:
+    items: list[dict] = []
+    for raw in collector.values():
+        file_list = sorted(str(item) for item in raw["files"])
+        type_list = sorted(str(item) for item in raw["types"])
+        item_type = type_list[0] if len(type_list) == 1 else "mixed"
+        items.append(
+            {
+                "url": raw["url"],
+                "type": item_type,
+                "occurrences": int(raw["occurrences"]),
+                "file_count": len(file_list),
+                "files": file_list[:8],
+            }
+        )
+    items.sort(key=lambda x: (-x["occurrences"], -x["file_count"], x["url"]))
+    return items
+
+
+def _scan_external_links_in_zip(zip_path: Path) -> list[dict]:
+    collector: dict[str, dict] = {}
+    scanned_files = 0
+    try:
+        with zipfile.ZipFile(zip_path, "r") as archive:
+            for info, parts in _iter_zip_entries(archive):
+                if scanned_files >= EXTERNAL_LINK_SCAN_MAX_FILES_PER_ARCHIVE:
+                    break
+                lower_parts = [part.lower() for part in parts]
+                if any(part in EXTERNAL_LINK_SCAN_SKIP_DIRS for part in lower_parts):
+                    continue
+                suffix = PurePosixPath(parts[-1]).suffix.lower()
+                if suffix not in EXTERNAL_LINK_SCAN_EXTENSIONS:
+                    continue
+                file_size = int(info.file_size or 0)
+                if file_size <= 0 or file_size > EXTERNAL_LINK_SCAN_MAX_FILE_BYTES:
+                    continue
+                try:
+                    with archive.open(info, "r") as source:
+                        content = source.read(EXTERNAL_LINK_SCAN_MAX_FILE_BYTES + 1)
+                    if len(content) > EXTERNAL_LINK_SCAN_MAX_FILE_BYTES:
+                        continue
+                    text = content.decode("utf-8", errors="ignore")
+                except Exception:
+                    continue
+                scanned_files += 1
+                file_label = str(PurePosixPath(*parts))
+                _collect_external_links_from_text(text, file_label, collector)
+    except zipfile.BadZipFile:
+        raise HTTPException(status_code=400, detail="ZIP format is invalid, please upload again")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to scan ZIP external links: {str(exc)}")
+    return _build_external_link_items(collector)
+
+
+def _scan_external_links_in_html(html_path: Path) -> list[dict]:
+    collector: dict[str, dict] = {}
+    try:
+        text = html_path.read_text(encoding="utf-8", errors="ignore")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to read HTML file: {str(exc)}")
+    _collect_external_links_from_text(text, html_path.name, collector)
+    return _build_external_link_items(collector)
 
 FRONTEND_LOGGED = False
 FRONTEND_LOG_PATH = Path(os.getenv("APPDATA", ".")) / "ConvertAPK" / "frontend-resolve.log"
@@ -718,6 +877,46 @@ async def upload_html(file: UploadFile = File(...)):
     }
 
 
+@app.post("/api/external-links/scan")
+async def scan_external_links(payload: dict = Body(...)):
+    mode = str(payload.get("mode", "") or "").strip().lower()
+    filename = str(payload.get("filename", "") or "").strip()
+    html_filename = str(payload.get("html_filename", "") or "").strip()
+
+    if mode not in {"convert", "html"}:
+        if filename.lower().endswith(".zip"):
+            mode = "convert"
+        elif filename.lower().endswith((".html", ".htm")):
+            mode = "html"
+        elif html_filename.lower().endswith((".html", ".htm")):
+            mode = "html"
+
+    if mode == "convert":
+        if not filename:
+            raise HTTPException(status_code=400, detail="filename is required for convert mode")
+        if not filename.lower().endswith(".zip"):
+            raise HTTPException(status_code=400, detail="convert mode requires zip filename")
+        zip_path = _resolve_upload_file(filename)
+        if not zip_path.exists():
+            raise HTTPException(status_code=404, detail="uploaded zip file not found")
+        items = _scan_external_links_in_zip(zip_path)
+        return {"mode": "convert", "count": len(items), "items": items}
+
+    if mode == "html":
+        html_name = html_filename or filename
+        if not html_name:
+            raise HTTPException(status_code=400, detail="html filename is required for html mode")
+        if not html_name.lower().endswith((".html", ".htm")):
+            raise HTTPException(status_code=400, detail="html mode requires .html/.htm filename")
+        html_path = _resolve_upload_file(html_name)
+        if not html_path.exists():
+            raise HTTPException(status_code=404, detail="uploaded html file not found")
+        items = _scan_external_links_in_html(html_path)
+        return {"mode": "html", "count": len(items), "items": items}
+
+    raise HTTPException(status_code=400, detail="mode must be convert or html")
+
+
 @app.post("/api/upload-icon")
 async def upload_icon(file: UploadFile = File(...)):
     """上传应用图标（PNG格式，1024x1024）"""
@@ -875,6 +1074,14 @@ async def create_task(task_data: BuildTaskCreate):
         dst_html = task_input_dir / "index.html"
         shutil.move(str(src_html), str(dst_html))
 
+    cdn_localize_urls = _normalize_cdn_localize_urls(task_data.cdn_localize_urls)
+    if mode in {"convert", "html"}:
+        cdn_localize_enabled = True if task_data.cdn_localize_enabled is None else bool(task_data.cdn_localize_enabled)
+    else:
+        cdn_localize_enabled = False
+    if not cdn_localize_enabled:
+        cdn_localize_urls = []
+
     if quick_generate:
         version_name, version_code = _alloc_quick_generate_versions()
         effective_config = AppConfig(
@@ -960,6 +1167,8 @@ async def create_task(task_data: BuildTaskCreate):
         progress=0,
         message="等待构建中",
         reuse_keystore_from=reuse_from,
+        cdn_localize_enabled=cdn_localize_enabled,
+        cdn_localize_urls=cdn_localize_urls,
     )
 
     tasks_db[task_id] = task
@@ -1358,6 +1567,19 @@ async def update_task(task_id: str, update_data: UpdateTaskRequest):
             task.config = AppConfig(**config_data)
         except Exception as e:
             raise HTTPException(status_code=400, detail=str(e))
+
+    if task.mode in {"convert", "html"}:
+        if update_data.cdn_localize_enabled is not None:
+            task.cdn_localize_enabled = bool(update_data.cdn_localize_enabled)
+        if update_data.cdn_localize_urls is not None:
+            task.cdn_localize_urls = _normalize_cdn_localize_urls(update_data.cdn_localize_urls)
+            if update_data.cdn_localize_enabled is None and task.cdn_localize_urls:
+                task.cdn_localize_enabled = True
+        if not task.cdn_localize_enabled:
+            task.cdn_localize_urls = []
+    else:
+        task.cdn_localize_enabled = False
+        task.cdn_localize_urls = []
     
     # 重置任务状态
     task.status = BuildStatus.PENDING

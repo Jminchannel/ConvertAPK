@@ -7,9 +7,25 @@ import crypto from "node:crypto";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 
-const entryArg = process.argv[2];
+const cliArgs = process.argv.slice(2);
+let entryArg = "";
+const rawAllowUrls = [];
+for (let i = 0; i < cliArgs.length; i += 1) {
+  const arg = cliArgs[i];
+  if (arg === "--allow-url") {
+    if (i + 1 < cliArgs.length) {
+      rawAllowUrls.push(cliArgs[i + 1]);
+      i += 1;
+    }
+    continue;
+  }
+  if (!entryArg && !String(arg || "").startsWith("--")) {
+    entryArg = arg;
+  }
+}
+
 if (!entryArg) {
-  console.error("[offlineize] usage: node offlineize_html_assets.mjs <path-to-index.html>");
+  console.error("[offlineize] usage: node offlineize_html_assets.mjs <path-to-index.html> [--allow-url <url>...]");
   process.exit(2);
 }
 
@@ -82,6 +98,20 @@ function canonicalRemoteUrl(raw) {
   u.hash = "";
   return u.toString();
 }
+
+function normalizeAllowUrl(raw) {
+  const value = String(raw || "").trim();
+  if (!value) return "";
+  const candidate = value.startsWith("//") ? `https:${value}` : value;
+  if (!/^https?:\/\//i.test(candidate)) return "";
+  try {
+    return canonicalRemoteUrl(candidate);
+  } catch {
+    return "";
+  }
+}
+
+const allowCanonicalUrls = new Set(rawAllowUrls.map(normalizeAllowUrl).filter(Boolean));
 
 function sanitizeSegment(seg) {
   const clean = String(seg || "")
@@ -232,6 +262,17 @@ async function downloadRemoteAsset(remoteUrl) {
 async function localizeUrl(rawUrl, ownerFile, baseUrl = "") {
   const remote = toRemoteUrl(rawUrl, baseUrl);
   if (!remote) return rawUrl;
+  if (allowCanonicalUrls.size > 0) {
+    let canonical = "";
+    try {
+      canonical = canonicalRemoteUrl(remote);
+    } catch {
+      return rawUrl;
+    }
+    if (!allowCanonicalUrls.has(canonical)) {
+      return rawUrl;
+    }
+  }
 
   try {
     const localPath = await downloadRemoteAsset(remote);
@@ -407,4 +448,3 @@ main().catch((error) => {
   console.error(`[offlineize] fatal: ${error.message || error}`);
   process.exit(1);
 });
-

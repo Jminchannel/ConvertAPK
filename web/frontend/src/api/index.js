@@ -71,6 +71,11 @@ export const uploadHtml = async (file, onProgress) => {
 
 
 // 上传签名文件（.jks / .keystore）
+export const scanExternalLinks = async (payload) => {
+  const response = await api.post('/external-links/scan', payload || {})
+  return response.data
+}
+
 export const uploadKeystore = async (file) => {
   const formData = new FormData()
   formData.append('file', file)

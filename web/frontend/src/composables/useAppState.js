@@ -377,6 +377,15 @@ export const useAppState = () => {
   const uploadProgress = ref(0)
   const htmlUploadProgress = ref(0)
   const isCreating = ref(false)
+  const cdnScanLoading = ref(false)
+  const showCdnLocalizeModal = ref(false)
+  const cdnLinkItems = ref([])
+  const cdnSelectedUrls = ref([])
+  const cdnLocalizeEnabled = ref(true)
+  const hasCdnExternalLinks = computed(() => cdnLinkItems.value.length > 0)
+  const cdnSelectedCount = computed(() => cdnSelectedUrls.value.length)
+  const cdnAllSelected = computed(() => hasCdnExternalLinks.value && cdnSelectedUrls.value.length === cdnLinkItems.value.length)
+  const cdnLocalizeAdvised = computed(() => (mode.value === 'convert' || mode.value === 'html') && hasCdnExternalLinks.value && !cdnLocalizeEnabled.value)
   const isHtmlUploading = computed(() => htmlUploadProgress.value > 0 && htmlUploadProgress.value < 100)
   const htmlEditorContentEmpty = computed(() => !htmlEditorContent.value.trim())
   const htmlErrorCount = computed(() => htmlEditorMarkers.value.filter((marker) => marker.severity === 'error').length)
@@ -864,6 +873,123 @@ export const useAppState = () => {
   }
   const isCancelableTask = (task) => task?.status === 'pending' || task?.status === 'processing'
 
+  const resetCdnLocalizationState = (enabled = false) => {
+    cdnLinkItems.value = []
+    cdnSelectedUrls.value = []
+    cdnLocalizeEnabled.value = Boolean(enabled)
+    cdnScanLoading.value = false
+    showCdnLocalizeModal.value = false
+  }
+
+  const normalizeCdnLinkItems = (items) => {
+    const source = Array.isArray(items) ? items : []
+    const dedupMap = new Map()
+    for (const raw of source) {
+      const url = String(raw?.url || '').trim()
+      if (!url || dedupMap.has(url)) continue
+      dedupMap.set(url, {
+        url,
+        type: String(raw?.type || 'other'),
+        occurrences: Number(raw?.occurrences || 0),
+        file_count: Number(raw?.file_count || 0),
+        files: Array.isArray(raw?.files) ? raw.files.map((file) => String(file || '')).filter(Boolean).slice(0, 8) : []
+      })
+    }
+    return Array.from(dedupMap.values())
+  }
+
+  const selectAllCdnLinks = () => {
+    cdnSelectedUrls.value = cdnLinkItems.value.map((item) => item.url)
+    cdnLocalizeEnabled.value = cdnSelectedUrls.value.length > 0
+  }
+
+  const clearCdnLinkSelection = () => {
+    cdnSelectedUrls.value = []
+    cdnLocalizeEnabled.value = false
+  }
+
+  const isCdnLinkSelected = (url) => cdnSelectedUrls.value.includes(url)
+
+  const toggleCdnLinkSelection = (url, checked) => {
+    const targetUrl = String(url || '').trim()
+    if (!targetUrl) return
+    const selectedSet = new Set(cdnSelectedUrls.value)
+    if (checked) selectedSet.add(targetUrl)
+    else selectedSet.delete(targetUrl)
+    cdnSelectedUrls.value = Array.from(selectedSet)
+    if (cdnSelectedUrls.value.length <= 0) {
+      cdnLocalizeEnabled.value = false
+    } else if (!cdnLocalizeEnabled.value) {
+      cdnLocalizeEnabled.value = true
+    }
+  }
+
+  const handleCdnLocalizeEnabledChange = () => {
+    if (!cdnLocalizeEnabled.value) return
+    if (hasCdnExternalLinks.value && cdnSelectedUrls.value.length <= 0) {
+      selectAllCdnLinks()
+    }
+  }
+
+  const openCdnLocalizeModal = () => {
+    if (!hasCdnExternalLinks.value) return
+    showCdnLocalizeModal.value = true
+  }
+
+  const closeCdnLocalizeModal = () => {
+    showCdnLocalizeModal.value = false
+  }
+
+  const scanUploadedExternalLinks = async (payload, options = {}) => {
+    const scanPayload = payload && typeof payload === 'object' ? payload : {}
+    const shouldOpenModal = options.openModal !== false
+    const rawMode = String(scanPayload.mode || '').trim().toLowerCase()
+    if (rawMode !== 'convert' && rawMode !== 'html') return null
+    cdnScanLoading.value = true
+    try {
+      const result = await api.scanExternalLinks(scanPayload)
+      const items = normalizeCdnLinkItems(result?.items)
+      cdnLinkItems.value = items
+      if (items.length > 0) {
+        cdnSelectedUrls.value = items.map((item) => item.url)
+        cdnLocalizeEnabled.value = true
+        if (shouldOpenModal) showCdnLocalizeModal.value = true
+      } else {
+        cdnSelectedUrls.value = []
+        cdnLocalizeEnabled.value = false
+        showCdnLocalizeModal.value = false
+      }
+      return { ...result, items }
+    } catch (_) {
+      cdnLinkItems.value = []
+      cdnSelectedUrls.value = []
+      cdnLocalizeEnabled.value = true
+      showCdnLocalizeModal.value = false
+      showToast('外链扫描失败，已切换为全部外链本地化。', 'error')
+      return null
+    } finally {
+      cdnScanLoading.value = false
+    }
+  }
+
+  const rescanExternalLinks = async (options = {}) => {
+    if (mode.value === 'convert' && uploadedFile.value?.filename) {
+      if (uploadedFile.value?.reused) {
+        showToast('复用历史任务时无法重新扫描，请重新上传项目文件。', 'error')
+        return null
+      }
+      return await scanUploadedExternalLinks({ mode: 'convert', filename: uploadedFile.value.filename }, options)
+    }
+    if (mode.value === 'html' && uploadedHtmlFile.value?.filename) {
+      if (uploadedHtmlFile.value?.reused) {
+        showToast('复用历史任务时无法重新扫描，请重新上传 HTML 文件。', 'error')
+        return null
+      }
+      return await scanUploadedExternalLinks({ mode: 'html', html_filename: uploadedHtmlFile.value.filename }, options)
+    }
+    return null
+  }
+
   // Upload
   const triggerFileInput = () => fileInput.value?.click?.()
   const handleFileSelect = async (event) => {
@@ -878,10 +1004,12 @@ export const useAppState = () => {
   }
   const uploadFile = async (file) => {
     try {
+      resetCdnLocalizationState(false)
       uploadProgress.value = 0
       const result = await api.uploadFile(file, (progress) => (uploadProgress.value = progress))
       uploadedFile.value = result
       currentStep.value = 2
+      await scanUploadedExternalLinks({ mode: 'convert', filename: result.filename }, { openModal: true })
       showToast(t('toast.uploadSuccess'), 'success')
     } catch (error) {
       showToast(t('toast.uploadFailed') + ': ' + (error.response?.data?.detail || error.message), 'error')
@@ -947,16 +1075,25 @@ export const useAppState = () => {
 
   const uploadHtml = async (file, options = {}) => {
     const shouldOpenPreview = options.openPreview !== false
+    const shouldOpenCdnModal = options.openCdnModal !== false
     const previewContent = typeof options.previewContent === 'string' ? options.previewContent : ''
     try {
+      resetCdnLocalizationState(false)
       htmlUploadProgress.value = 0
       const result = await api.uploadHtml(file, (progress) => (htmlUploadProgress.value = progress))
       uploadedHtmlFile.value = result
       currentStep.value = 2
+      const scanResult = await scanUploadedExternalLinks(
+        { mode: 'html', html_filename: result.filename },
+        { openModal: shouldOpenCdnModal }
+      )
       showToast(t('toast.uploadSuccess'), 'success')
       if (shouldOpenPreview) {
-        const content = previewContent || htmlEditorContent.value || htmlSavedContent.value || ''
-        openHtmlPreview(content)
+        const shouldSkipPreview = shouldOpenCdnModal && (scanResult?.items?.length || 0) > 0
+        if (!shouldSkipPreview) {
+          const content = previewContent || htmlEditorContent.value || htmlSavedContent.value || ''
+          openHtmlPreview(content)
+        }
       }
       return result
     } catch (error) {
@@ -1550,6 +1687,17 @@ export const useAppState = () => {
     webUrl.value = task.web_url || ''
     enableAds.value = false
     adConfig.value = { appId: '', appKey: '', placementId: '' }
+    const isCdnCapableMode = mode.value === 'convert' || mode.value === 'html'
+    const taskCdnUrls = Array.isArray(task.cdn_localize_urls)
+      ? task.cdn_localize_urls.map((item) => String(item || '').trim()).filter(Boolean)
+      : []
+    cdnLocalizeEnabled.value = isCdnCapableMode ? Boolean(task.cdn_localize_enabled) : false
+    cdnSelectedUrls.value = isCdnCapableMode && cdnLocalizeEnabled.value ? taskCdnUrls : []
+    cdnLinkItems.value = isCdnCapableMode
+      ? taskCdnUrls.map((url) => ({ url, type: 'other', occurrences: 0, file_count: 0, files: [] }))
+      : []
+    showCdnLocalizeModal.value = false
+    cdnScanLoading.value = false
 
     const normalizedPermissions = normalizePermissionsForUi(task.config?.permissions || [])
     previousVersionName.value = task.config.version_name || '1.0.0'
@@ -1641,10 +1789,28 @@ export const useAppState = () => {
     }
 
     const file = new File([htmlSavedContent.value], 'index.html', { type: 'text/html' })
-    const result = await uploadHtml(file, { openPreview: false, previewContent: htmlSavedContent.value })
+    const result = await uploadHtml(file, { openPreview: false, openCdnModal: false, previewContent: htmlSavedContent.value })
     if (!result) return null
     uploadedHtmlFile.value = result
     return result.filename
+  }
+
+  const buildCdnLocalizePayload = () => {
+    if (mode.value !== 'convert' && mode.value !== 'html') {
+      return { cdn_localize_enabled: false, cdn_localize_urls: [] }
+    }
+    const normalizedUrls = Array.from(
+      new Set(
+        (Array.isArray(cdnSelectedUrls.value) ? cdnSelectedUrls.value : [])
+          .map((item) => String(item || '').trim())
+          .filter(Boolean)
+      )
+    )
+    const enabled = Boolean(cdnLocalizeEnabled.value)
+    return {
+      cdn_localize_enabled: enabled,
+      cdn_localize_urls: enabled ? normalizedUrls : []
+    }
   }
 
   // Create/Update task
@@ -1702,7 +1868,8 @@ export const useAppState = () => {
           webview_user_agent: config.value.webview_user_agent,
           download_mode: config.value.download_mode,
           web_fill_mode: config.value.web_fill_mode,
-          permissions: enablePermissions.value ? config.value.permissions : []
+          permissions: enablePermissions.value ? config.value.permissions : [],
+          ...buildCdnLocalizePayload()
         }
         await api.updateTask(updatingTaskId.value, updateData)
         currentStep.value = 3
@@ -1722,6 +1889,7 @@ export const useAppState = () => {
           html_filename: mode.value === 'html' ? htmlFilename : null,
           icon_filename: isQuickGenerate ? null : (uploadedIcon.value?.filename || null),
           keystore_filename: isQuickGenerate ? null : (uploadedKeystore.value?.filename || null),
+          ...buildCdnLocalizePayload(),
           config: {
             app_name: config.value.app_name,
             package_name: config.value.package_name.trim(),
@@ -1768,6 +1936,7 @@ export const useAppState = () => {
     enableAds.value = false
     enablePermissions.value = false
     adConfig.value = { appId: '', appKey: '', placementId: '' }
+    resetCdnLocalizationState(false)
     uploadedFile.value = null
     uploadProgress.value = 0
     uploadedHtmlFile.value = null
@@ -2102,6 +2271,15 @@ export const useAppState = () => {
     uploadProgress,
     htmlUploadProgress,
     isCreating,
+    cdnScanLoading,
+    showCdnLocalizeModal,
+    cdnLinkItems,
+    cdnSelectedUrls,
+    cdnLocalizeEnabled,
+    hasCdnExternalLinks,
+    cdnSelectedCount,
+    cdnAllSelected,
+    cdnLocalizeAdvised,
     isHtmlUploading,
     htmlEditorContentEmpty,
     htmlErrorCount,
@@ -2189,6 +2367,16 @@ export const useAppState = () => {
     downloadTaskArtifact,
     isQueuedTask,
     isCancelableTask,
+    resetCdnLocalizationState,
+    selectAllCdnLinks,
+    clearCdnLinkSelection,
+    isCdnLinkSelected,
+    toggleCdnLinkSelection,
+    handleCdnLocalizeEnabledChange,
+    openCdnLocalizeModal,
+    closeCdnLocalizeModal,
+    scanUploadedExternalLinks,
+    rescanExternalLinks,
     triggerFileInput,
     handleFileSelect,
     handleDrop,

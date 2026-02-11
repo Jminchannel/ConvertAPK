@@ -57,6 +57,52 @@ check_error() {
     fi
 }
 
+runOfflineizeAssets() {
+    local entryHtml="$1"
+    local stepLabel="${2:-Step 1.5}"
+    local enabledRaw
+    enabledRaw="$(printf '%s' "${CDN_LOCALIZE_ENABLED:-true}" | tr '[:upper:]' '[:lower:]')"
+    if [ "$enabledRaw" != "true" ]; then
+        log_info "CDN localize disabled, skip offlineize"
+        return 0
+    fi
+    local scriptPath="/workspace/scripts/offlineize_html_assets.mjs"
+    if [ ! -f "$scriptPath" ]; then
+        log_warning "Offlineize script not found: $scriptPath"
+        return 0
+    fi
+    if [ ! -f "$entryHtml" ]; then
+        log_warning "Offlineize entry html not found: $entryHtml"
+        return 0
+    fi
+
+    local -a cmd=(node "$scriptPath" "$entryHtml")
+    local urlsJson="${CDN_LOCALIZE_URLS_JSON:-}"
+    local allowCount=0
+    if [ -n "$urlsJson" ] && [ "$urlsJson" != "[]" ]; then
+        local allowUrls
+        allowUrls="$(node -e 'const raw=String(process.argv[1]||"").trim();let data=[];try{data=JSON.parse(raw)}catch{};if(!Array.isArray(data)){process.exit(0)};const seen=new Set();for(const item of data){const url=String(item||"").trim();if(!url||seen.has(url))continue;seen.add(url);process.stdout.write(url+"\\n");}' "$urlsJson" 2>/dev/null || true)"
+        if [ -n "$allowUrls" ]; then
+            while IFS= read -r url; do
+                [ -z "$url" ] && continue
+                cmd+=(--allow-url "$url")
+                allowCount=$((allowCount + 1))
+            done <<< "$allowUrls"
+        fi
+    fi
+
+    if [ "$allowCount" -gt 0 ]; then
+        log_info "$stepLabel: offlineize selected remote assets ($allowCount urls)..."
+    else
+        log_info "$stepLabel: offlineize remote assets..."
+    fi
+    if "${cmd[@]}"; then
+        log_info "Offlineize complete"
+    else
+        log_warning "Offlineize failed; keep original remote URLs"
+    fi
+}
+
 normalizeProjectRootForBuild() {
     local projectRoot="$1"
     if [ -z "$projectRoot" ] || [ ! -d "$projectRoot" ]; then
@@ -358,17 +404,7 @@ elif [ "$TASK_MODE" = "html" ]; then
         rm -rf "$TMP_LIBS_DIR"
     fi
 
-    OFFLINEIZE_SCRIPT="/workspace/scripts/offlineize_html_assets.mjs"
-    if [ -f "$OFFLINEIZE_SCRIPT" ]; then
-        log_info "Step 1.5: offlineize remote assets..."
-        if node "$OFFLINEIZE_SCRIPT" "$HTML_ROOT/index.html"; then
-            log_info "Offlineize complete"
-        else
-            log_warning "Offlineize failed; keep original remote URLs"
-        fi
-    else
-        log_warning "Offlineize script not found: $OFFLINEIZE_SCRIPT"
-    fi
+    runOfflineizeAssets "$HTML_ROOT/index.html" "Step 1.5"
 
     PROJECT_ROOT="$PROJECT_ROOT" node << 'NODE'
 const fs = require('fs');
@@ -789,6 +825,10 @@ fi
 if [ ! -d "$WEB_DIR" ]; then
     log_error "Web 输出目录不存在: $WEB_DIR"
     exit 1
+fi
+
+if [ "$TASK_MODE" = "convert" ]; then
+    runOfflineizeAssets "$WEB_DIR/index.html" "Step 1.5"
 fi
 
 # 注入前端下载处理脚本（换行修复默认关闭，避免影响页面布局）
