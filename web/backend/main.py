@@ -14,6 +14,7 @@ import os
 import json
 import shutil
 import re
+import subprocess
 import binascii
 import struct
 import zlib
@@ -332,6 +333,281 @@ def _scan_external_links_in_html(html_path: Path) -> list[dict]:
         raise HTTPException(status_code=500, detail=f"Failed to read HTML file: {str(exc)}")
     _collect_external_links_from_text(text, html_path.name, collector)
     return _build_external_link_items(collector)
+
+
+CDN_LOCALIZE_SCRIPT_PATH = Path(__file__).resolve().parents[2] / "apk-worker" / "scripts" / "offlineize_html_assets.mjs"
+CDN_LOCALIZE_FAILED_PATTERN = re.compile(r"\[offlineize\]\s+failed:\s+(?P<url>\S+)", re.IGNORECASE)
+CDN_LOCALIZE_TIMEOUT_SECONDS = 300
+CDN_LOCALIZE_SKIP_DIRS = {"node_modules", ".git", "android", "__macosx", ".gradle"}
+
+
+def _append_task_log(task: BuildTask, message: str) -> None:
+    """向任务日志追加一行（带时间戳）"""
+    if not message:
+        return
+    logs = task.logs if isinstance(task.logs, list) else []
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    logs.append(f"[{timestamp}] {message}")
+    if len(logs) > 500:
+        logs = logs[-500:]
+    task.logs = logs
+
+
+def _resolve_node_executable() -> str:
+    """优先使用环境配置中的 Node，可回退到系统 PATH"""
+    try:
+        status = env_setup.get_status()
+        node_dir = str((status or {}).get("paths", {}).get("node", "")).strip()
+        if node_dir:
+            node_name = "node.exe" if os.name == "nt" else "node"
+            candidate = Path(node_dir) / node_name
+            if candidate.exists():
+                return str(candidate)
+    except Exception:
+        pass
+    return "node"
+
+
+def _split_process_output(text: str) -> list[str]:
+    return [line.strip() for line in str(text or "").splitlines() if str(line).strip()]
+
+
+def _collect_failed_urls(lines: list[str]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for line in lines:
+        match = CDN_LOCALIZE_FAILED_PATTERN.search(line)
+        if not match:
+            continue
+        url = str(match.group("url") or "").strip()
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        result.append(url)
+    return result
+
+
+def _run_offlineize_script(entry_html: Path, allow_urls: list[str]) -> dict:
+    if not CDN_LOCALIZE_SCRIPT_PATH.exists():
+        return {
+            "ok": False,
+            "failed_urls": [],
+            "error": f"offlineize script not found: {CDN_LOCALIZE_SCRIPT_PATH}",
+        }
+    if not entry_html.exists():
+        return {"ok": False, "failed_urls": [], "error": f"entry html not found: {entry_html}"}
+
+    command = [_resolve_node_executable(), str(CDN_LOCALIZE_SCRIPT_PATH), str(entry_html)]
+    for url in allow_urls:
+        normalized = str(url or "").strip()
+        if normalized:
+            command.extend(["--allow-url", normalized])
+
+    process_env = os.environ.copy()
+    try:
+        process_env.update(env_setup.get_env_overrides())
+    except Exception:
+        pass
+
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=str(entry_html.parent),
+            env=process_env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=CDN_LOCALIZE_TIMEOUT_SECONDS,
+        )
+    except FileNotFoundError as exc:
+        return {"ok": False, "failed_urls": [], "error": f"node runtime not found: {exc}"}
+    except subprocess.TimeoutExpired:
+        return {
+            "ok": False,
+            "failed_urls": [],
+            "error": f"offlineize timeout after {CDN_LOCALIZE_TIMEOUT_SECONDS}s",
+        }
+    except Exception as exc:
+        return {"ok": False, "failed_urls": [], "error": f"offlineize failed: {str(exc)}"}
+
+    lines = _split_process_output(completed.stdout) + _split_process_output(completed.stderr)
+    failed_urls = _collect_failed_urls(lines)
+    if completed.returncode != 0:
+        return {
+            "ok": False,
+            "failed_urls": failed_urls,
+            "error": f"offlineize exit code {completed.returncode}",
+        }
+    return {"ok": True, "failed_urls": failed_urls, "error": ""}
+
+
+def _pick_zip_index_entry(zip_path: Path) -> str | None:
+    candidates: list[tuple[int, int, str]] = []
+    try:
+        with zipfile.ZipFile(zip_path, "r") as archive:
+            for _, parts in _iter_zip_entries(archive):
+                lower_parts = [part.lower() for part in parts]
+                if any(part in CDN_LOCALIZE_SKIP_DIRS for part in lower_parts):
+                    continue
+                if lower_parts[-1] != "index.html":
+                    continue
+                entry_name = str(PurePosixPath(*parts))
+                candidates.append((len(parts), len(entry_name), entry_name))
+    except Exception:
+        return None
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: (item[0], item[1], item[2]))
+    return candidates[0][2]
+
+
+def _extract_zip_to_dir(zip_path: Path, dst_dir: Path) -> None:
+    with zipfile.ZipFile(zip_path, "r") as archive:
+        for info, parts in _iter_zip_entries(archive):
+            target = dst_dir.joinpath(*parts)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with archive.open(info, "r") as source, open(target, "wb") as output:
+                shutil.copyfileobj(source, output)
+
+
+def _pack_dir_to_zip(src_dir: Path, dst_zip: Path) -> None:
+    with zipfile.ZipFile(dst_zip, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        files = sorted([path for path in src_dir.rglob("*") if path.is_file()], key=lambda item: item.as_posix())
+        for file_path in files:
+            archive.write(file_path, file_path.relative_to(src_dir).as_posix())
+
+
+def _preprocess_html_task_input(task_input_dir: Path, allow_urls: list[str]) -> dict:
+    html_index = task_input_dir / "index.html"
+    html_assets_dir = task_input_dir / "html_assets"
+    html_assets_index = html_assets_dir / "index.html"
+
+    if not html_assets_index.exists():
+        if not html_index.exists():
+            return {
+                "preprocessed": False,
+                "failed_urls": [],
+                "log_lines": ["[CDN] 未找到 HTML 入口文件，跳过预处理。"],
+            }
+        html_assets_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(str(html_index), str(html_assets_index))
+
+    temp_dir = task_input_dir / "_tmp_cdn_localize_html"
+    if temp_dir.exists():
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+    try:
+        shutil.copytree(html_assets_dir, temp_dir)
+        run_result = _run_offlineize_script(temp_dir / "index.html", allow_urls)
+        failed_urls = run_result.get("failed_urls", [])
+        if not run_result.get("ok"):
+            return {
+                "preprocessed": False,
+                "failed_urls": failed_urls,
+                "log_lines": [f"[CDN] HTML 外链预处理执行失败，已保留原始外链：{run_result.get('error') or 'unknown error'}"],
+            }
+
+        if html_assets_dir.exists():
+            shutil.rmtree(html_assets_dir, ignore_errors=True)
+        shutil.move(str(temp_dir), str(html_assets_dir))
+        temp_dir = None
+        if html_assets_index.exists():
+            shutil.copy2(str(html_assets_index), str(html_index))
+        return {"preprocessed": True, "failed_urls": failed_urls, "log_lines": ["[CDN] HTML 外链预处理完成。"]}
+    except Exception as exc:
+        return {
+            "preprocessed": False,
+            "failed_urls": [],
+            "log_lines": [f"[CDN] HTML 外链预处理异常，已保留原始外链：{str(exc)}"],
+        }
+    finally:
+        if temp_dir and Path(temp_dir).exists():
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def _preprocess_convert_task_input(task_input_dir: Path, allow_urls: list[str]) -> dict:
+    project_zip = task_input_dir / "project.zip"
+    if not project_zip.exists():
+        return {
+            "preprocessed": False,
+            "failed_urls": [],
+            "log_lines": ["[CDN] 未找到 project.zip，跳过外链预处理。"],
+        }
+
+    entry_name = _pick_zip_index_entry(project_zip)
+    if not entry_name:
+        return {
+            "preprocessed": False,
+            "failed_urls": [],
+            "log_lines": ["[CDN] ZIP 中未检测到 index.html，跳过外链预处理。"],
+        }
+
+    temp_dir = task_input_dir / "_tmp_cdn_localize_zip"
+    if temp_dir.exists():
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+    try:
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        _extract_zip_to_dir(project_zip, temp_dir)
+        entry_path = temp_dir.joinpath(*PurePosixPath(entry_name).parts)
+        run_result = _run_offlineize_script(entry_path, allow_urls)
+        failed_urls = run_result.get("failed_urls", [])
+        if not run_result.get("ok"):
+            return {
+                "preprocessed": False,
+                "failed_urls": failed_urls,
+                "log_lines": [f"[CDN] ZIP 外链预处理执行失败，已保留原始外链：{run_result.get('error') or 'unknown error'}"],
+            }
+        _pack_dir_to_zip(temp_dir, project_zip)
+        return {
+            "preprocessed": True,
+            "failed_urls": failed_urls,
+            "log_lines": [f"[CDN] ZIP 外链预处理完成，入口文件：{entry_name}"],
+        }
+    except Exception as exc:
+        return {
+            "preprocessed": False,
+            "failed_urls": [],
+            "log_lines": [f"[CDN] ZIP 外链预处理异常，已保留原始外链：{str(exc)}"],
+        }
+    finally:
+        if temp_dir.exists():
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def _preprocess_task_cdn_localization(
+    task_mode: str,
+    task_input_dir: Path,
+    enabled: bool,
+    selected_urls: list[str],
+) -> dict:
+    normalized_mode = str(task_mode or "").strip().lower()
+    allow_urls = _normalize_cdn_localize_urls(selected_urls)
+    selection_desc = f"选中 {len(allow_urls)} 条" if allow_urls else "全部"
+
+    if normalized_mode not in {"convert", "html"}:
+        return {"preprocessed": False, "failed_urls": [], "log_lines": []}
+    if not enabled:
+        return {
+            "preprocessed": False,
+            "failed_urls": [],
+            "log_lines": ["[CDN] 已关闭外链本地化，保留原始外链引用。"],
+        }
+
+    log_lines = [f"[CDN] 开始外链本地化预处理（模式: {normalized_mode}，范围: {selection_desc}）。"]
+    inner = _preprocess_html_task_input(task_input_dir, allow_urls) if normalized_mode == "html" else _preprocess_convert_task_input(task_input_dir, allow_urls)
+    failed_urls = _normalize_cdn_localize_urls(inner.get("failed_urls", []))
+    log_lines.extend(inner.get("log_lines", []))
+    if failed_urls:
+        log_lines.append("[CDN] 以下外链本地化失败，已保留原链接：")
+        for url in failed_urls:
+            log_lines.append(f"[CDN] {url}")
+    return {
+        "preprocessed": bool(inner.get("preprocessed")),
+        "failed_urls": failed_urls,
+        "log_lines": log_lines,
+    }
 
 FRONTEND_LOGGED = False
 FRONTEND_LOG_PATH = Path(os.getenv("APPDATA", ".")) / "ConvertAPK" / "frontend-resolve.log"
@@ -1082,6 +1358,18 @@ async def create_task(task_data: BuildTaskCreate):
     if not cdn_localize_enabled:
         cdn_localize_urls = []
 
+    cdn_localize_preprocessed = False
+    cdn_localize_log_lines: list[str] = []
+    if mode in {"convert", "html"}:
+        preprocess_result = _preprocess_task_cdn_localization(
+            task_mode=mode,
+            task_input_dir=task_input_dir,
+            enabled=cdn_localize_enabled,
+            selected_urls=cdn_localize_urls,
+        )
+        cdn_localize_preprocessed = bool(preprocess_result.get("preprocessed"))
+        cdn_localize_log_lines = [str(item) for item in preprocess_result.get("log_lines", []) if str(item).strip()]
+
     if quick_generate:
         version_name, version_code = _alloc_quick_generate_versions()
         effective_config = AppConfig(
@@ -1169,7 +1457,11 @@ async def create_task(task_data: BuildTaskCreate):
         reuse_keystore_from=reuse_from,
         cdn_localize_enabled=cdn_localize_enabled,
         cdn_localize_urls=cdn_localize_urls,
+        cdn_localize_preprocessed=cdn_localize_preprocessed,
     )
+
+    for line in cdn_localize_log_lines:
+        _append_task_log(task, line)
 
     tasks_db[task_id] = task
     try:
@@ -1517,6 +1809,9 @@ async def update_task(task_id: str, update_data: UpdateTaskRequest):
                 dst_html = task_input_dir / "index.html"
                 if dst_html.exists():
                     dst_html.unlink()
+                dst_assets_dir = task_input_dir / "html_assets"
+                if dst_assets_dir.exists():
+                    shutil.rmtree(dst_assets_dir, ignore_errors=True)
                 shutil.move(str(src_html), str(dst_html))
                 task.html_filename = "index.html"
     
@@ -1568,6 +1863,7 @@ async def update_task(task_id: str, update_data: UpdateTaskRequest):
         except Exception as e:
             raise HTTPException(status_code=400, detail=str(e))
 
+    cdn_localize_log_lines: list[str] = []
     if task.mode in {"convert", "html"}:
         if update_data.cdn_localize_enabled is not None:
             task.cdn_localize_enabled = bool(update_data.cdn_localize_enabled)
@@ -1577,15 +1873,26 @@ async def update_task(task_id: str, update_data: UpdateTaskRequest):
                 task.cdn_localize_enabled = True
         if not task.cdn_localize_enabled:
             task.cdn_localize_urls = []
+        preprocess_result = _preprocess_task_cdn_localization(
+            task_mode=task.mode,
+            task_input_dir=task_input_dir,
+            enabled=bool(task.cdn_localize_enabled),
+            selected_urls=task.cdn_localize_urls,
+        )
+        task.cdn_localize_preprocessed = bool(preprocess_result.get("preprocessed"))
+        cdn_localize_log_lines = [str(item) for item in preprocess_result.get("log_lines", []) if str(item).strip()]
     else:
         task.cdn_localize_enabled = False
         task.cdn_localize_urls = []
+        task.cdn_localize_preprocessed = False
     
     # 重置任务状态
     task.status = BuildStatus.PENDING
     task.progress = 0
     task.message = f"版本更新至 {update_data.version_name}，等待构建"
     task.logs = []
+    for line in cdn_localize_log_lines:
+        _append_task_log(task, line)
     task.download_url = None
     task.output_filename = None
     task.updated_at = datetime.now()

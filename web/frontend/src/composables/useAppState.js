@@ -365,6 +365,7 @@ export const useAppState = () => {
   const htmlEditorDirty = ref(false)
   const htmlEditorMarkers = ref([])
   const htmlSavedContent = ref('')
+  const htmlSavedUploadContent = ref('')
   const showHtmlEditorModal = ref(false)
   const showHtmlPreviewModal = ref(false)
   const htmlPreviewContent = ref('')
@@ -1077,17 +1078,26 @@ export const useAppState = () => {
     const shouldOpenPreview = options.openPreview !== false
     const shouldOpenCdnModal = options.openCdnModal !== false
     const previewContent = typeof options.previewContent === 'string' ? options.previewContent : ''
+    const savedFromEditor = options.savedFromEditor === true
+    const silentSuccess = options.silentSuccess === true
     try {
       resetCdnLocalizationState(false)
       htmlUploadProgress.value = 0
       const result = await api.uploadHtml(file, (progress) => (htmlUploadProgress.value = progress))
       uploadedHtmlFile.value = result
+      if (savedFromEditor) {
+        htmlSavedUploadContent.value = previewContent || htmlSavedContent.value || ''
+      } else {
+        htmlSavedUploadContent.value = ''
+      }
       currentStep.value = 2
       const scanResult = await scanUploadedExternalLinks(
         { mode: 'html', html_filename: result.filename },
         { openModal: shouldOpenCdnModal }
       )
-      showToast(t('toast.uploadSuccess'), 'success')
+      if (!silentSuccess) {
+        showToast(t('toast.uploadSuccess'), 'success')
+      }
       if (shouldOpenPreview) {
         const shouldSkipPreview = shouldOpenCdnModal && (scanResult?.items?.length || 0) > 0
         if (!shouldSkipPreview) {
@@ -1097,6 +1107,9 @@ export const useAppState = () => {
       }
       return result
     } catch (error) {
+      if (savedFromEditor) {
+        htmlSavedUploadContent.value = ''
+      }
       showToast(t('toast.uploadFailed') + ': ' + (error.response?.data?.detail || error.message), 'error')
       return null
     }
@@ -1508,6 +1521,15 @@ export const useAppState = () => {
     }
     htmlSavedContent.value = htmlEditorContent.value
     htmlEditorDirty.value = false
+    const file = new File([htmlSavedContent.value], 'index.html', { type: 'text/html' })
+    const uploadResult = await uploadHtml(file, {
+      openPreview: false,
+      openCdnModal: true,
+      previewContent: htmlSavedContent.value,
+      savedFromEditor: true,
+      silentSuccess: true
+    })
+    if (!uploadResult) return
     if (currentStep.value < 2) currentStep.value = 2
     showToast(t('html.editorSaved'), 'success')
   }
@@ -1752,6 +1774,7 @@ export const useAppState = () => {
     showHtmlPreviewModal.value = false
     htmlPreviewContent.value = ''
     htmlSavedContent.value = ''
+    htmlSavedUploadContent.value = ''
     setHtmlEditorContent(defaultHtmlTemplate, false)
 
     if (mode.value === 'convert') {
@@ -1771,6 +1794,7 @@ export const useAppState = () => {
         showToast(t('html.htmlRequired'), 'error')
         return null
       }
+      htmlSavedUploadContent.value = ''
       return uploadedHtmlFile.value.filename
     }
 
@@ -1788,8 +1812,23 @@ export const useAppState = () => {
       return null
     }
 
+    if (
+      uploadedHtmlFile.value?.filename &&
+      !uploadedHtmlFile.value?.reused &&
+      htmlSavedUploadContent.value &&
+      htmlSavedUploadContent.value === htmlSavedContent.value
+    ) {
+      return uploadedHtmlFile.value.filename
+    }
+
     const file = new File([htmlSavedContent.value], 'index.html', { type: 'text/html' })
-    const result = await uploadHtml(file, { openPreview: false, openCdnModal: false, previewContent: htmlSavedContent.value })
+    const result = await uploadHtml(file, {
+      openPreview: false,
+      openCdnModal: false,
+      previewContent: htmlSavedContent.value,
+      savedFromEditor: true,
+      silentSuccess: true
+    })
     if (!result) return null
     uploadedHtmlFile.value = result
     return result.filename
@@ -1949,6 +1988,7 @@ export const useAppState = () => {
     showHtmlPreviewModal.value = false
     htmlPreviewContent.value = ''
     htmlSavedContent.value = ''
+    htmlSavedUploadContent.value = ''
     setHtmlEditorContent(defaultHtmlTemplate, false)
     if (htmlInput.value) htmlInput.value.value = ''
     if (appIcon.value && !appIcon.value.startsWith('/api/')) URL.revokeObjectURL(appIcon.value)

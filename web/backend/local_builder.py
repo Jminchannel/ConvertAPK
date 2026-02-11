@@ -536,6 +536,10 @@ def _resolve_templates_root() -> Path:
 def _offlineize_html_assets(entry_html: Path, env: Dict[str, str], on_log=None) -> None:
     if not entry_html.exists():
         return
+    preprocessed = str(env.get("CDN_LOCALIZE_PREPROCESSED", "false")).strip().lower() == "true"
+    if preprocessed:
+        _log(on_log, "[HTML] CDN localize preprocessed, skip build-time offlineize")
+        return
     enabled = str(env.get("CDN_LOCALIZE_ENABLED", "true")).strip().lower() == "true"
     if not enabled:
         _log(on_log, "[HTML] CDN localize disabled, skip offlineize")

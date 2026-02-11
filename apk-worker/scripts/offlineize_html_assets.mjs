@@ -34,6 +34,7 @@ const rootDir = path.dirname(entryFile);
 const offlineRoot = path.join(rootDir, "assets", "remote");
 const remoteToLocal = new Map();
 const sourceBaseByFile = new Map();
+const failedCanonicalUrls = new Set();
 
 let downloadCount = 0;
 let replaceCount = 0;
@@ -91,6 +92,17 @@ function toRemoteUrl(raw, baseUrl = "") {
   } catch {
     return null;
   }
+}
+
+function localFileCandidate(ownerFile, rawUrl) {
+  const value = String(rawUrl || "").trim();
+  if (!value) return "";
+  if (value.startsWith("//")) return "";
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(value)) return "";
+  const withoutHash = value.split("#")[0] || value;
+  const withoutQuery = withoutHash.split("?")[0] || withoutHash;
+  if (!withoutQuery) return "";
+  return path.resolve(path.dirname(ownerFile), withoutQuery);
 }
 
 function canonicalRemoteUrl(raw) {
@@ -260,28 +272,37 @@ async function downloadRemoteAsset(remoteUrl) {
 }
 
 async function localizeUrl(rawUrl, ownerFile, baseUrl = "") {
+  const localCandidate = localFileCandidate(ownerFile, rawUrl);
+  if (localCandidate && fs.existsSync(localCandidate)) {
+    return rawUrl;
+  }
+
   const remote = toRemoteUrl(rawUrl, baseUrl);
   if (!remote) return rawUrl;
+  let canonical = "";
+  try {
+    canonical = canonicalRemoteUrl(remote);
+  } catch {
+    return rawUrl;
+  }
+  if (failedCanonicalUrls.has(canonical)) {
+    return rawUrl;
+  }
   if (allowCanonicalUrls.size > 0) {
-    let canonical = "";
-    try {
-      canonical = canonicalRemoteUrl(remote);
-    } catch {
-      return rawUrl;
-    }
     if (!allowCanonicalUrls.has(canonical)) {
       return rawUrl;
     }
   }
 
   try {
-    const localPath = await downloadRemoteAsset(remote);
+    const localPath = await downloadRemoteAsset(canonical);
     const localized = toRelativeAssetPath(ownerFile, localPath);
     if (localized !== rawUrl) {
       replaceCount += 1;
     }
     return localized;
   } catch (error) {
+    failedCanonicalUrls.add(canonical);
     failCount += 1;
     console.warn(`[offlineize] failed: ${remote} (${error.message || error})`);
     return rawUrl;

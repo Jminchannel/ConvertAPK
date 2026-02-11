@@ -308,6 +308,7 @@ class APKBuilder:
         reuse_keystore_from: Optional[str] = None,
         cdn_localize_enabled: bool = True,
         cdn_localize_urls: Optional[list[str]] = None,
+        cdn_localize_preprocessed: bool = False,
     ) -> dict:
         """
         准备构建环境
@@ -424,6 +425,7 @@ class APKBuilder:
             "WEB_FILL_MODE": web_fill_mode_normalized,
             "CDN_LOCALIZE_ENABLED": "true" if cdn_localize_enabled else "false",
             "CDN_LOCALIZE_URLS_JSON": json.dumps(cdn_urls_normalized, ensure_ascii=False),
+            "CDN_LOCALIZE_PREPROCESSED": "true" if cdn_localize_preprocessed else "false",
             # Comma-separated permissions (prefer full names, e.g. android.permission.CAMERA)
             "PERMISSIONS": ",".join([str(p).strip() for p in (permissions or []) if str(p).strip()]),
             "TASK_ID": task_id,
@@ -1032,7 +1034,11 @@ class BuildTaskRunner:
     def _run_build(self, task_id: str):
         """执行构建（在后台线程中运行）"""
         task = self.tasks_db[task_id]
-        task.logs = []  # 初始化日志列表
+        # 保留创建/更新阶段日志，避免覆盖外链预处理结果
+        if not isinstance(getattr(task, "logs", None), list):
+            task.logs = []
+        elif len(task.logs) > 500:
+            task.logs = task.logs[-500:]
         if bool(getattr(task, "quick_generate", False)):
             sharedKeystorePath = TASKS_DIR.parent / "quick-generate" / "release.keystore"
             taskKeystoreDir = TASKS_DIR / task_id / "keystore"
@@ -1168,6 +1174,7 @@ class BuildTaskRunner:
                 reuse_keystore_from=task.reuse_keystore_from,
                 cdn_localize_enabled=getattr(task, "cdn_localize_enabled", True),
                 cdn_localize_urls=getattr(task, "cdn_localize_urls", None),
+                cdn_localize_preprocessed=getattr(task, "cdn_localize_preprocessed", False),
             )
             
             # 运行Docker构建

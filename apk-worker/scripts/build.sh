@@ -60,6 +60,12 @@ check_error() {
 runOfflineizeAssets() {
     local entryHtml="$1"
     local stepLabel="${2:-Step 1.5}"
+    local preprocessedRaw
+    preprocessedRaw="$(printf '%s' "${CDN_LOCALIZE_PREPROCESSED:-false}" | tr '[:upper:]' '[:lower:]')"
+    if [ "$preprocessedRaw" = "true" ]; then
+        log_info "CDN localize preprocessed, skip build-time offlineize"
+        return 0
+    fi
     local enabledRaw
     enabledRaw="$(printf '%s' "${CDN_LOCALIZE_ENABLED:-true}" | tr '[:upper:]' '[:lower:]')"
     if [ "$enabledRaw" != "true" ]; then

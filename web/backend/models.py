@@ -184,6 +184,7 @@ class BuildTask(BaseModel):
     logs: List[str] = []
     cdn_localize_enabled: bool = False
     cdn_localize_urls: List[str] = []
+    cdn_localize_preprocessed: bool = False
     reuse_keystore_from: Optional[str] = None  # 复用某个任务的签名密钥
 
 
@@ -227,6 +228,7 @@ class BuildTaskResponse(BaseModel):
     reuse_keystore_from: Optional[str] = None
     cdn_localize_enabled: bool = False
     cdn_localize_urls: List[str] = []
+    cdn_localize_preprocessed: bool = False
 
 class UpdateTaskRequest(BaseModel):
     """更新任务请求"""
