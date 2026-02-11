@@ -1378,11 +1378,16 @@ async def create_task(task_data: BuildTaskCreate):
         shutil.move(str(src_html), str(dst_html))
 
     cdn_localize_urls = _normalize_cdn_localize_urls(task_data.cdn_localize_urls)
+    cdn_localize_select_all = False
     if mode in {"convert", "html"}:
         cdn_localize_enabled = True if task_data.cdn_localize_enabled is None else bool(task_data.cdn_localize_enabled)
+        cdn_localize_select_all = bool(getattr(task_data, "cdn_localize_select_all", False))
     else:
         cdn_localize_enabled = False
     if not cdn_localize_enabled:
+        cdn_localize_urls = []
+        cdn_localize_select_all = False
+    elif cdn_localize_select_all:
         cdn_localize_urls = []
 
     cdn_localize_preprocessed = False
@@ -1484,6 +1489,7 @@ async def create_task(task_data: BuildTaskCreate):
         reuse_keystore_from=reuse_from,
         cdn_localize_enabled=cdn_localize_enabled,
         cdn_localize_urls=cdn_localize_urls,
+        cdn_localize_select_all=cdn_localize_select_all,
         cdn_localize_preprocessed=cdn_localize_preprocessed,
     )
 
@@ -1894,11 +1900,18 @@ async def update_task(task_id: str, update_data: UpdateTaskRequest):
     if task.mode in {"convert", "html"}:
         if update_data.cdn_localize_enabled is not None:
             task.cdn_localize_enabled = bool(update_data.cdn_localize_enabled)
+        if update_data.cdn_localize_select_all is not None:
+            task.cdn_localize_select_all = bool(update_data.cdn_localize_select_all)
         if update_data.cdn_localize_urls is not None:
-            task.cdn_localize_urls = _normalize_cdn_localize_urls(update_data.cdn_localize_urls)
-            if update_data.cdn_localize_enabled is None and task.cdn_localize_urls:
+            normalized_urls = _normalize_cdn_localize_urls(update_data.cdn_localize_urls)
+            if not bool(getattr(task, "cdn_localize_select_all", False)):
+                task.cdn_localize_urls = normalized_urls
+            if update_data.cdn_localize_enabled is None and normalized_urls:
                 task.cdn_localize_enabled = True
         if not task.cdn_localize_enabled:
+            task.cdn_localize_urls = []
+            task.cdn_localize_select_all = False
+        elif bool(getattr(task, "cdn_localize_select_all", False)):
             task.cdn_localize_urls = []
         preprocess_result = _preprocess_task_cdn_localization(
             task_mode=task.mode,
@@ -1911,6 +1924,7 @@ async def update_task(task_id: str, update_data: UpdateTaskRequest):
     else:
         task.cdn_localize_enabled = False
         task.cdn_localize_urls = []
+        task.cdn_localize_select_all = False
         task.cdn_localize_preprocessed = False
     
     # 重置任务状态

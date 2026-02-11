@@ -1713,8 +1713,11 @@ export const useAppState = () => {
     const taskCdnUrls = Array.isArray(task.cdn_localize_urls)
       ? task.cdn_localize_urls.map((item) => String(item || '').trim()).filter(Boolean)
       : []
+    const taskCdnSelectAll = Boolean(task.cdn_localize_select_all)
     cdnLocalizeEnabled.value = isCdnCapableMode ? Boolean(task.cdn_localize_enabled) : false
-    cdnSelectedUrls.value = isCdnCapableMode && cdnLocalizeEnabled.value ? taskCdnUrls : []
+    cdnSelectedUrls.value = isCdnCapableMode && cdnLocalizeEnabled.value
+      ? (taskCdnSelectAll ? [] : taskCdnUrls)
+      : []
     cdnLinkItems.value = isCdnCapableMode
       ? taskCdnUrls.map((url) => ({ url, type: 'other', occurrences: 0, file_count: 0, files: [] }))
       : []
@@ -1836,7 +1839,7 @@ export const useAppState = () => {
 
   const buildCdnLocalizePayload = () => {
     if (mode.value !== 'convert' && mode.value !== 'html') {
-      return { cdn_localize_enabled: false, cdn_localize_urls: [] }
+      return { cdn_localize_enabled: false, cdn_localize_select_all: false, cdn_localize_urls: [] }
     }
     const normalizedUrls = Array.from(
       new Set(
@@ -1846,9 +1849,16 @@ export const useAppState = () => {
       )
     )
     const enabled = Boolean(cdnLocalizeEnabled.value)
+    const selectAll = Boolean(
+      enabled &&
+      hasCdnExternalLinks.value &&
+      normalizedUrls.length > 0 &&
+      normalizedUrls.length === cdnLinkItems.value.length
+    )
     return {
       cdn_localize_enabled: enabled,
-      cdn_localize_urls: enabled ? normalizedUrls : []
+      cdn_localize_select_all: selectAll,
+      cdn_localize_urls: enabled ? (selectAll ? [] : normalizedUrls) : []
     }
   }
 

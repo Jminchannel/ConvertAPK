@@ -184,6 +184,7 @@ class BuildTask(BaseModel):
     logs: List[str] = []
     cdn_localize_enabled: bool = False
     cdn_localize_urls: List[str] = []
+    cdn_localize_select_all: bool = False
     cdn_localize_preprocessed: bool = False
     reuse_keystore_from: Optional[str] = None  # 复用某个任务的签名密钥
 
@@ -200,6 +201,7 @@ class BuildTaskCreate(BaseModel):
     keystore_filename: Optional[str] = None
     cdn_localize_enabled: Optional[bool] = None
     cdn_localize_urls: List[str] = []
+    cdn_localize_select_all: bool = False
     config: AppConfig
     reuse_keystore_from: Optional[str] = None  # 复用某个任务的签名密钥
 
@@ -228,6 +230,7 @@ class BuildTaskResponse(BaseModel):
     reuse_keystore_from: Optional[str] = None
     cdn_localize_enabled: bool = False
     cdn_localize_urls: List[str] = []
+    cdn_localize_select_all: bool = False
     cdn_localize_preprocessed: bool = False
 
 class UpdateTaskRequest(BaseModel):
@@ -251,3 +254,4 @@ class UpdateTaskRequest(BaseModel):
     permissions: Optional[List[str]] = None
     cdn_localize_enabled: Optional[bool] = None
     cdn_localize_urls: Optional[List[str]] = None
+    cdn_localize_select_all: Optional[bool] = None
