@@ -183,7 +183,14 @@ function buildLocalPath(remoteUrl, mime = "") {
   });
 
   let fileName = parts.pop() || "index";
-  let ext = path.extname(fileName).toLowerCase();
+  const originalExt = path.extname(fileName).toLowerCase();
+  let ext = originalExt;
+  let baseName = fileName.slice(0, fileName.length - originalExt.length);
+  if (/^\.\d+$/.test(originalExt)) {
+    // 类似 react@19.2.1 这种 URL，extname 会误识别成 .1，需要按无扩展处理
+    ext = "";
+    baseName = fileName;
+  }
   const mimeExt = extFromMime(mime);
   const bucket = bucketFromExtOrMime(ext || mimeExt, mime);
 
@@ -191,7 +198,7 @@ function buildLocalPath(remoteUrl, mime = "") {
     ext = mimeExt || defaultExtForBucket(bucket);
   }
 
-  const base = sanitizeSegment(fileName.slice(0, fileName.length - path.extname(fileName).length)) || "asset";
+  const base = sanitizeSegment(baseName) || "asset";
   const hash = crypto.createHash("md5").update(remoteUrl).digest("hex").slice(0, 8);
   const finalName = `${base}_${hash}${ext}`;
 
@@ -235,6 +242,34 @@ async function fetchWithRetry(url, retries = 2) {
   throw lastError || new Error("fetch failed");
 }
 
+async function finalizeDownloadedFile(tempPath, localPath) {
+  const maxRetries = 4;
+  let lastError = null;
+  for (let attempt = 0; attempt < maxRetries; attempt += 1) {
+    try {
+      await fsp.rm(localPath, { force: true }).catch(() => {});
+      await fsp.rename(tempPath, localPath);
+      return;
+    } catch (error) {
+      lastError = error;
+      const code = String(error?.code || "");
+      if (code === "EPERM" || code === "EACCES" || code === "EBUSY" || code === "EXDEV" || code === "EEXIST") {
+        try {
+          await fsp.copyFile(tempPath, localPath);
+          await fsp.rm(tempPath, { force: true }).catch(() => {});
+          return;
+        } catch {
+          // 继续重试
+        }
+      }
+      if (attempt < maxRetries - 1) {
+        await new Promise((resolve) => setTimeout(resolve, 120 * (attempt + 1)));
+      }
+    }
+  }
+  throw lastError || new Error("finalize downloaded file failed");
+}
+
 async function downloadRemoteAsset(remoteUrl) {
   const canonical = canonicalRemoteUrl(remoteUrl);
   if (remoteToLocal.has(canonical)) {
@@ -258,7 +293,7 @@ async function downloadRemoteAsset(remoteUrl) {
       const buf = Buffer.from(await response.arrayBuffer());
       await fsp.writeFile(tempPath, buf);
     }
-    await fsp.rename(tempPath, localPath);
+    await finalizeDownloadedFile(tempPath, localPath);
   } catch (error) {
     await fsp.rm(tempPath, { force: true }).catch(() => {});
     throw error;
@@ -289,7 +324,8 @@ async function localizeUrl(rawUrl, ownerFile, baseUrl = "") {
     return rawUrl;
   }
   if (allowCanonicalUrls.size > 0) {
-    if (!allowCanonicalUrls.has(canonical)) {
+    const hasRemoteBase = /^https?:\/\//i.test(String(baseUrl || ""));
+    if (!allowCanonicalUrls.has(canonical) && !hasRemoteBase) {
       return rawUrl;
     }
   }
@@ -346,6 +382,76 @@ async function processCssText(cssText, ownerFile, baseUrl = "") {
   return text;
 }
 
+async function processJsText(jsText, ownerFile, baseUrl = "") {
+  let text = jsText;
+
+  // import "https://...";
+  text = await replaceAsync(
+    text,
+    /(\bimport\s*)(["'])([^"']+)\2/g,
+    async (m) => {
+      const localized = await localizeUrl(m[3], ownerFile, baseUrl);
+      return `${m[1]}${m[2]}${localized}${m[2]}`;
+    }
+  );
+
+  // import ... from "https://..."; / export ... from "https://...";
+  text = await replaceAsync(
+    text,
+    /(\b(?:import|export)\s+[\s\S]*?\bfrom\s*)(["'])([^"']+)\2/g,
+    async (m) => {
+      const localized = await localizeUrl(m[3], ownerFile, baseUrl);
+      return `${m[1]}${m[2]}${localized}${m[2]}`;
+    }
+  );
+
+  // import("https://...");
+  text = await replaceAsync(
+    text,
+    /(\bimport\s*\(\s*)(["'])([^"']+)\2(\s*\))/g,
+    async (m) => {
+      const localized = await localizeUrl(m[3], ownerFile, baseUrl);
+      return `${m[1]}${m[2]}${localized}${m[2]}${m[4]}`;
+    }
+  );
+
+  return text;
+}
+
+async function processImportMapText(importMapText, ownerFile, baseUrl = "") {
+  let data = null;
+  try {
+    data = JSON.parse(importMapText);
+  } catch {
+    return importMapText;
+  }
+  if (!data || typeof data !== "object") {
+    return importMapText;
+  }
+
+  if (data.imports && typeof data.imports === "object") {
+    for (const key of Object.keys(data.imports)) {
+      const value = data.imports[key];
+      if (typeof value !== "string") continue;
+      data.imports[key] = await localizeUrl(value, ownerFile, baseUrl);
+    }
+  }
+
+  if (data.scopes && typeof data.scopes === "object") {
+    for (const scopeKey of Object.keys(data.scopes)) {
+      const scopeValue = data.scopes[scopeKey];
+      if (!scopeValue || typeof scopeValue !== "object") continue;
+      for (const key of Object.keys(scopeValue)) {
+        const value = scopeValue[key];
+        if (typeof value !== "string") continue;
+        scopeValue[key] = await localizeUrl(value, ownerFile, baseUrl);
+      }
+    }
+  }
+
+  return JSON.stringify(data, null, 2);
+}
+
 async function processHtmlFile(htmlFile) {
   const originText = await fsp.readFile(htmlFile, "utf8");
   let text = originText;
@@ -396,8 +502,41 @@ async function processHtmlFile(htmlFile) {
     }
   );
 
+  text = await replaceAsync(
+    text,
+    /(<script\b[^>]*>)([\s\S]*?)(<\/script>)/gi,
+    async (m) => {
+      const openTag = m[1] || "";
+      if (/\bsrc\s*=/.test(openTag)) {
+        return m[0];
+      }
+      const typeMatch = openTag.match(/\btype\s*=\s*["']([^"']+)["']/i);
+      const typeValue = String(typeMatch?.[1] || "").trim().toLowerCase();
+      if (typeValue === "application/json" || typeValue === "application/ld+json") {
+        return m[0];
+      }
+      if (typeValue === "importmap" || typeValue === "importmap-shim") {
+        const rewrittenImportMap = await processImportMapText(m[2], htmlFile, "");
+        return `${openTag}${rewrittenImportMap}${m[3]}`;
+      }
+      const rewrittenJs = await processJsText(m[2], htmlFile, "");
+      return `${openTag}${rewrittenJs}${m[3]}`;
+    }
+  );
+
   if (text !== originText) {
     await fsp.writeFile(htmlFile, text, "utf8");
+    return true;
+  }
+  return false;
+}
+
+async function processJsFile(jsFile) {
+  const source = await fsp.readFile(jsFile, "utf8");
+  const baseUrl = sourceBaseByFile.get(path.resolve(jsFile)) || "";
+  const rewritten = await processJsText(source, jsFile, baseUrl);
+  if (rewritten !== source) {
+    await fsp.writeFile(jsFile, rewritten, "utf8");
     return true;
   }
   return false;
@@ -453,6 +592,18 @@ async function main() {
     let changed = false;
     for (const cssFile of cssFiles) {
       const result = await processCssFile(cssFile);
+      changed = changed || result;
+    }
+    if (!changed) {
+      break;
+    }
+  }
+
+  for (let round = 0; round < 5; round += 1) {
+    const jsFiles = await collectFiles(rootDir, new Set([".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx"]));
+    let changed = false;
+    for (const jsFile of jsFiles) {
+      const result = await processJsFile(jsFile);
       changed = changed || result;
     }
     if (!changed) {
