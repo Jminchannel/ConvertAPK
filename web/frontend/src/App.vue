@@ -102,9 +102,8 @@
         >
 
         <div
-          v-if="activeAnnouncement"
-          v-show="!isMobileShell || mobileTab === 'build'"
-          class="card no-drag mobile-build-only"
+          v-if="activeAnnouncement && !isMobileShell"
+          class="card no-drag"
           style="margin-bottom: 16px;"
         >
           <div class="card-header">
@@ -970,6 +969,17 @@
             :class="isMobileShell ? mobilePageAnimClass : ''"
             v-show="mobileTab === 'profile'"
           >
+            <div v-if="activeAnnouncement" class="mobile-profile-announcement">
+              <div class="mobile-profile-announcement-top">
+                <span class="mobile-profile-announcement-icon">&#x1F4D9;</span>
+                <div class="mobile-profile-announcement-title">{{ t('announcement.title') }}</div>
+                <button class="btn btn-ghost btn-sm no-drag" @click.stop="dismissAnnouncement">
+                  {{ t('announcement.dismiss') }}
+                </button>
+              </div>
+              <div class="mobile-profile-announcement-body">{{ activeAnnouncement.title }} - {{ activeAnnouncement.body }}</div>
+            </div>
+
             <div class="mobile-profile-actions">
               <button class="mobile-action-item" @click="openSettings">
                 <span class="mobile-action-icon">&#x1F4AC;</span>
@@ -2023,6 +2033,46 @@ export default defineComponent({
 
   .mobile-shell-active .card:hover {
     transform: none;
+  }
+
+  .mobile-profile-announcement {
+    border: 1px solid var(--border-color);
+    border-radius: 14px;
+    padding: 12px;
+    margin-bottom: 14px;
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  .mobile-profile-announcement-top {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .mobile-profile-announcement-icon {
+    width: 24px;
+    height: 24px;
+    border-radius: 8px;
+    display: grid;
+    place-items: center;
+    background: rgba(99, 102, 241, 0.18);
+    color: #c7d2fe;
+    font-size: 13px;
+    flex-shrink: 0;
+  }
+
+  .mobile-profile-announcement-title {
+    flex: 1;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-main);
+  }
+
+  .mobile-profile-announcement-body {
+    margin-top: 8px;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--text-sub);
   }
 
   .mobile-profile-actions {
