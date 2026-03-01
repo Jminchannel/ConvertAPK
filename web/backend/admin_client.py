@@ -9,6 +9,11 @@ from typing import Any, Dict, List, Optional
 _QUEUE_FILENAME = "upload-queue.json"
 _ADMIN_STATUS_CACHE: dict = {"ok": True, "reason": "", "checked_at": 0.0}
 _ADMIN_STATUS_TTL = 15.0
+_FEATURE_FLAGS_CACHE: dict = {
+    "data": {"web_link_to_apk_enabled": False},
+    "checked_at": 0.0,
+}
+_FEATURE_FLAGS_TTL = 30.0
 
 
 def _get_config() -> tuple[str, str]:
@@ -185,6 +190,23 @@ def check_update(version: str) -> Dict[str, Any]:
     if download_url and download_url.startswith("/"):
         data["download_url"] = f"{base_url}{download_url}"
     return data
+
+
+def fetch_feature_flags(force: bool = False) -> Dict[str, Any]:
+    now = time.monotonic()
+    cached = _FEATURE_FLAGS_CACHE
+    if not force and now - float(cached.get("checked_at", 0.0)) < _FEATURE_FLAGS_TTL:
+        data = cached.get("data")
+        if isinstance(data, dict):
+            return dict(data)
+
+    data = _request_json("GET", "/api/client/features")
+    result = {"web_link_to_apk_enabled": False}
+    if isinstance(data, dict):
+        result["web_link_to_apk_enabled"] = bool(data.get("web_link_to_apk_enabled"))
+    cached["data"] = result
+    cached["checked_at"] = now
+    return dict(result)
 
 
 def _encode_multipart(fields: Dict[str, str], files: List[Dict[str, Any]]) -> tuple[bytes, str]:

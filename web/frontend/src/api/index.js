@@ -281,6 +281,11 @@ export const getAdminAnnouncements = async () => {
   return response.data
 }
 
+export const getAdminFeatures = async () => {
+  const response = await api.get('/adminhub/features')
+  return response.data
+}
+
 // 更新检查
 export const checkUpdate = async (version) => {
   const response = await api.get('/adminhub/update-check', { params: { version } })

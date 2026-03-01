@@ -1400,7 +1400,7 @@ html.light-theme .html-editor-toolbar {
 }
 
 /* Modals */
-.cropper-overlay, .logs-overlay, .settings-overlay, .donation-overlay {
+.cropper-overlay, .logs-overlay, .settings-overlay, .donation-overlay, .compliance-overlay {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.7);
@@ -1411,7 +1411,11 @@ html.light-theme .html-editor-toolbar {
   backdrop-filter: blur(8px);
 }
 
-.cropper-dialog, .logs-dialog, .settings-dialog, .donation-dialog {
+.compliance-overlay {
+  z-index: 2200;
+}
+
+.cropper-dialog, .logs-dialog, .settings-dialog, .donation-dialog, .compliance-dialog {
   background: var(--bg-surface);
   border-radius: var(--radius-lg);
   border: 1px solid var(--border-color);
@@ -1431,12 +1435,14 @@ html.light-theme .html-editor-toolbar {
 .logs-dialog { max-width: 860px; max-height: 80vh; }
 .settings-dialog { max-width: 520px; max-height: 80vh; }
 .donation-dialog { max-width: 540px; max-height: 80vh; }
+.compliance-dialog { max-width: 860px; max-height: 86vh; }
 
 .dialog-header,
 .cropper-dialog-header,
 .logs-dialog-header,
 .settings-dialog-header,
-.donation-dialog-header {
+.donation-dialog-header,
+.compliance-dialog-header {
   padding: 16px 24px;
   border-bottom: 1px solid var(--border-color);
   display: flex;
@@ -1447,7 +1453,8 @@ html.light-theme .html-editor-toolbar {
 .cropper-dialog-header h3,
 .logs-dialog-header h3,
 .settings-dialog-header h3,
-.donation-dialog-header h3 {
+.donation-dialog-header h3,
+.compliance-dialog-header h3 {
   font-size: 16px;
   font-weight: 600;
   margin: 0;
@@ -1458,7 +1465,8 @@ html.light-theme .html-editor-toolbar {
 .cropper-dialog-body,
 .logs-dialog-body,
 .settings-dialog-body,
-.donation-dialog-body {
+.donation-dialog-body,
+.compliance-dialog-body {
   padding: 24px;
   overflow-y: auto;
   max-height: 60vh;
@@ -1468,7 +1476,8 @@ html.light-theme .html-editor-toolbar {
 .cropper-dialog-footer,
 .logs-dialog-footer,
 .settings-dialog-footer,
-.donation-dialog-footer {
+.donation-dialog-footer,
+.compliance-dialog-footer {
   padding: 16px 24px;
   border-top: 1px solid var(--border-color);
   display: flex;
@@ -1513,6 +1522,61 @@ html.light-theme .html-editor-toolbar {
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-color);
 }
+
+.compliance-effective {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--text-sub);
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  background: var(--bg-card);
+}
+
+.compliance-intro {
+  margin: 14px 0 4px;
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--text-main);
+}
+
+.compliance-section + .compliance-section {
+  margin-top: 12px;
+}
+
+.compliance-section-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-main);
+  margin-bottom: 6px;
+}
+
+.compliance-list {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 6px;
+}
+
+.compliance-list li {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-sub);
+}
+
+.compliance-law {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-sub);
+}
+
 @media (max-width: 640px) {
   .donation-qr-grid { grid-template-columns: 1fr; }
 }
@@ -1549,7 +1613,7 @@ html.light-theme .html-editor-toolbar {
   .task-item { flex-direction: column; align-items: flex-start; }
   .task-actions { width: 100%; flex-wrap: wrap; }
   .stats { grid-template-columns: 1fr; }
-  .cropper-dialog, .logs-dialog, .settings-dialog, .donation-dialog {
+  .cropper-dialog, .logs-dialog, .settings-dialog, .donation-dialog, .compliance-dialog {
     width: 94%;
     max-width: 94%;
     max-height: 90vh;
@@ -1563,7 +1627,8 @@ html.light-theme .html-editor-toolbar {
   .cropper-dialog-header,
   .logs-dialog-header,
   .settings-dialog-header,
-  .donation-dialog-header {
+  .donation-dialog-header,
+  .compliance-dialog-header {
     padding: 12px 16px;
   }
   .cdn-localize-dialog-header {
@@ -1573,7 +1638,8 @@ html.light-theme .html-editor-toolbar {
   .cropper-dialog-body,
   .logs-dialog-body,
   .settings-dialog-body,
-  .donation-dialog-body {
+  .donation-dialog-body,
+  .compliance-dialog-body {
     padding: 16px;
     max-height: 70vh;
   }
@@ -1585,7 +1651,8 @@ html.light-theme .html-editor-toolbar {
   .cropper-dialog-footer,
   .logs-dialog-footer,
   .settings-dialog-footer,
-  .donation-dialog-footer {
+  .donation-dialog-footer,
+  .compliance-dialog-footer {
     padding: 12px 16px;
   }
   .cdn-localize-dialog-footer {

@@ -44,6 +44,7 @@ from admin_client import (
     report_task_start,
     fetch_announcements,
     check_update,
+    fetch_feature_flags,
     submit_feedback,
     upload_task_assets,
     flush_task_assets_queue,
@@ -59,6 +60,22 @@ app = FastAPI(
 
 BUILDER_MODE = os.getenv("APK_BUILDER_MODE", "local").strip().lower()
 LOCAL_MODE = BUILDER_MODE == "local"
+
+
+def _load_client_feature_flags() -> dict:
+    flags = {"web_link_to_apk_enabled": False}
+    try:
+        data = fetch_feature_flags()
+    except Exception:
+        data = None
+    if isinstance(data, dict):
+        flags["web_link_to_apk_enabled"] = bool(data.get("web_link_to_apk_enabled"))
+    return flags
+
+
+def _is_web_link_mode_enabled() -> bool:
+    flags = _load_client_feature_flags()
+    return bool(flags.get("web_link_to_apk_enabled"))
 
 
 def _normalize_client_id(value: str | None) -> str:
@@ -1306,6 +1323,8 @@ async def create_task(task_data: BuildTaskCreate):
         raise HTTPException(status_code=400, detail="mode must be convert, web, or html")
     web_url = None
     if mode == "web":
+        if not _is_web_link_mode_enabled():
+            raise HTTPException(status_code=403, detail="web mode is disabled by admin")
         web_url = str(task_data.web_url or "").strip()
         if not web_url:
             raise HTTPException(status_code=400, detail="web_url is required for web mode")
@@ -2103,6 +2122,8 @@ def _probe_url(url: str, timeout: float = 5.0) -> tuple[bool, int | None, str]:
 
 @app.post("/api/url-probe")
 async def url_probe(payload: dict = Body(...)):
+    if not _is_web_link_mode_enabled():
+        raise HTTPException(status_code=403, detail="web mode is disabled by admin")
     url = str(payload.get("url") or "").strip()
     if not url:
         raise HTTPException(status_code=400, detail="url required")
@@ -2115,6 +2136,11 @@ async def url_probe(payload: dict = Body(...)):
 @app.get("/api/adminhub/announcements")
 async def adminhub_announcements():
     return fetch_announcements() or []
+
+
+@app.get("/api/adminhub/features")
+async def adminhub_features():
+    return _load_client_feature_flags()
 
 
 @app.get("/api/adminhub/update-check")

@@ -127,7 +127,7 @@
             <span class="mode-icon">📦</span>
             {{ t('mode.apk') }}
           </button>
-          <button class="mode-tab" :class="{ active: mode === 'web' }" @click="handleModeChange('web')">
+          <button v-if="isWebModeEnabled" class="mode-tab" :class="{ active: mode === 'web' }" @click="handleModeChange('web')">
             <span class="mode-icon">🌐</span>
             {{ t('mode.web') }}
           </button>
@@ -1035,6 +1035,42 @@
         <span class="mobile-tab-label">{{ mobileSettingsLabel }}</span>
       </button>
     </nav>
+
+    <!-- 合规告知弹窗 -->
+    <Teleport to="body">
+      <div v-if="showComplianceNotice" class="compliance-overlay">
+        <div class="compliance-dialog" role="dialog" aria-modal="true" aria-labelledby="compliance-title">
+          <div class="compliance-dialog-header">
+            <h3 id="compliance-title">{{ complianceNotice.title }}</h3>
+          </div>
+          <div class="compliance-dialog-body">
+            <div class="compliance-effective">
+              {{ complianceNotice.effectiveDateLabel }}: {{ complianceNotice.effectiveDate }}
+            </div>
+            <p class="compliance-intro">{{ complianceNotice.intro }}</p>
+            <div
+              v-for="(section, sectionIndex) in complianceNotice.sections"
+              :key="section.title"
+              class="compliance-section"
+            >
+              <div class="compliance-section-title">{{ sectionIndex + 1 }}. {{ section.title }}</div>
+              <ul class="compliance-list">
+                <li v-for="line in section.lines" :key="line">{{ line }}</li>
+              </ul>
+            </div>
+            <div class="compliance-law">{{ complianceNotice.legalReferences }}</div>
+          </div>
+          <div class="compliance-dialog-footer">
+            <button class="btn btn-secondary btn-sm" @click="rejectComplianceNotice">
+              {{ complianceNotice.rejectButton }}
+            </button>
+            <button class="btn btn-primary btn-sm" @click="acceptComplianceNotice">
+              {{ complianceNotice.acceptButton }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
 
     <!-- Cropper dialog -->
     <Teleport to="body">
