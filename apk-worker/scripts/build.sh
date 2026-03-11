@@ -3131,25 +3131,9 @@ else
 fi
 
 # ============================================
-# 步骤 11: 打包 Android 源码
+# 步骤 11: 跳过 Android 源码打包
 # ============================================
-log_info "Step 11: 打包 Android 源码..."
-ANDROID_SOURCE_ZIP="$OUTPUT_DIR/${APP_NAME}-v${VERSION_NAME}-android-source.zip"
-if [ -d "$ANDROID_BUILD_DIR" ]; then
-    rm -f "$ANDROID_SOURCE_ZIP" 2>/dev/null || true
-    (
-        cd "$ANDROID_BUILD_DIR" && \
-        zip -qr "$ANDROID_SOURCE_ZIP" . \
-            -x "app/build/*" "build/*" ".gradle/*" ".git/*" "node_modules/*" ".idea/*"
-    )
-    if [ $? -eq 0 ] && [ -f "$ANDROID_SOURCE_ZIP" ]; then
-        log_success "Android 源码包已生成: $ANDROID_SOURCE_ZIP"
-    else
-        log_warning "Android 源码包生成失败（不影响 APK/AAB 产物）"
-    fi
-else
-    log_warning "Android 构建目录不存在，跳过源码打包"
-fi
+log_info "Step 11: 跳过 Android 源码打包，构建完成后会自动清理中间产物"
 
 # ============================================
 # 清理临时文件

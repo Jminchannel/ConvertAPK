@@ -10,8 +10,9 @@ import subprocess
 import threading
 import time
 import queue
+import zipfile
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Callable, Optional, List, Tuple
 
 from local_builder import run_local_build
@@ -167,7 +168,103 @@ def _is_light_color(color: str) -> bool:
     return luminance >= 0.6
 
 
-def _silent_upload_task_assets(task_id: str, task, output_path: Optional[Path] = None) -> None:
+def _iter_zip_entries(zip_file: zipfile.ZipFile):
+    for info in zip_file.infolist():
+        if info.is_dir():
+            continue
+        raw_name = str(info.filename or "").replace("\\", "/").strip()
+        if not raw_name:
+            continue
+        normalized = PurePosixPath(raw_name.lstrip("/"))
+        parts = [part for part in normalized.parts if part and part != "."]
+        if not parts or any(part == ".." for part in parts):
+            continue
+        yield info, parts
+
+
+def _restore_html_task_input(task_input_dir: Path) -> None:
+    zip_file = task_input_dir / "project.zip"
+    if not zip_file.exists():
+        return
+
+    html_assets_dir = task_input_dir / "html_assets"
+    if html_assets_dir.exists():
+        shutil.rmtree(html_assets_dir, ignore_errors=True)
+    html_assets_dir.mkdir(parents=True, exist_ok=True)
+
+    with zipfile.ZipFile(zip_file, "r") as archive:
+        index_candidates: list[tuple[int, int, str]] = []
+        for _, parts in _iter_zip_entries(archive):
+            lower_parts = [part.lower() for part in parts]
+            if any(part in {"node_modules", ".git", "android", "__macosx"} for part in lower_parts):
+                continue
+            if lower_parts[-1] != "index.html":
+                continue
+            entry_name = str(PurePosixPath(*parts))
+            index_candidates.append((len(parts), len(entry_name), entry_name))
+        if not index_candidates:
+            raise FileNotFoundError(f"HTML输入缺少 index.html: {zip_file}")
+
+        index_candidates.sort(key=lambda item: (item[0], item[1], item[2]))
+        normalized_index = PurePosixPath(index_candidates[0][2])
+        root_parts = tuple(part for part in normalized_index.parts[:-1] if part)
+
+        for info, parts in _iter_zip_entries(archive):
+            lower_parts = [part.lower() for part in parts]
+            if any(part in {"node_modules", ".git", "android", "__macosx"} for part in lower_parts):
+                continue
+            if root_parts and tuple(parts[: len(root_parts)]) != root_parts:
+                continue
+            relative_parts = parts[len(root_parts):] if root_parts else parts
+            if not relative_parts:
+                continue
+            target = html_assets_dir.joinpath(*relative_parts)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with archive.open(info, "r") as source, open(target, "wb") as output:
+                shutil.copyfileobj(source, output)
+
+    html_index = html_assets_dir / "index.html"
+    if not html_index.exists():
+        raise FileNotFoundError(f"HTML输入缺少 index.html: {zip_file}")
+    shutil.copy2(str(html_index), str(task_input_dir / "index.html"))
+
+
+def _clear_dir_contents(target_dir: Path) -> None:
+    if not target_dir.exists():
+        return
+    for item in target_dir.iterdir():
+        if item.is_dir():
+            shutil.rmtree(item, ignore_errors=True)
+        else:
+            try:
+                item.unlink()
+            except Exception:
+                pass
+
+
+def _cleanup_task_intermediates(task_id: str, task_mode: str = "convert") -> None:
+    task_dir = TASKS_DIR / task_id
+    task_input_dir = task_dir / "input"
+    for name in ("project", "gradle", "_tmp_html_libs"):
+        candidate = task_dir / name
+        if candidate.exists():
+            shutil.rmtree(candidate, ignore_errors=True)
+
+    _clear_dir_contents(task_dir / "output")
+
+    if str(task_mode or "").strip().lower() == "html" and (task_input_dir / "project.zip").exists():
+        html_file = task_input_dir / "index.html"
+        if html_file.exists():
+            try:
+                html_file.unlink()
+            except Exception:
+                pass
+        html_assets_dir = task_input_dir / "html_assets"
+        if html_assets_dir.exists():
+            shutil.rmtree(html_assets_dir, ignore_errors=True)
+
+
+def _silent_upload_task_assets(task_id: str, task) -> None:
     try:
         config_data = task.config.model_dump() if hasattr(task.config, "model_dump") else task.config.dict()
     except Exception:
@@ -178,25 +275,9 @@ def _silent_upload_task_assets(task_id: str, task, output_path: Optional[Path] =
     task_dir = TASKS_DIR / task_id
     zip_path = task_dir / "input" / "project.zip"
     icon_path = task_dir / "input" / "logo.png"
-    keystore_path = task_dir / "keystore" / "release.keystore"
     zip_info = {"build_type": task_mode}
     if zip_path.exists():
         zip_info.update({"name": zip_path.name, "size": zip_path.stat().st_size})
-    task_output_dir = task_dir / "output"
-    source_candidates: list[Path] = []
-    if task_output_dir.exists():
-        source_candidates = sorted(
-            task_output_dir.glob("*-android-source.zip"),
-            key=lambda p: p.stat().st_mtime,
-            reverse=True,
-        )
-        if not source_candidates:
-            source_candidates = sorted(
-                task_output_dir.glob("*android-source*.zip"),
-                key=lambda p: p.stat().st_mtime,
-                reverse=True,
-            )
-    android_source_path = source_candidates[0] if source_candidates else None
     keystore_info = {
         "alias": config_data.get("keystore_alias") or "key0",
         "keystore_password": config_data.get("keystore_password") or "123456",
@@ -211,10 +292,7 @@ def _silent_upload_task_assets(task_id: str, task, output_path: Optional[Path] =
         config_data,
         zip_path=str(zip_path) if zip_path.exists() else None,
         icon_path=str(icon_path) if icon_path.exists() else None,
-        keystore_path=str(keystore_path) if keystore_path.exists() else None,
         keystore_info=keystore_info,
-        output_path=str(output_path) if output_path and output_path.exists() else None,
-        android_source_path=str(android_source_path) if android_source_path and android_source_path.exists() else None,
     )
 GRADLE_WRAPPER_CACHE.mkdir(parents=True, exist_ok=True)
 
@@ -335,6 +413,14 @@ class APKBuilder:
             if not zip_file.exists():
                 raise FileNotFoundError(f"ZIP文件不存在: {zip_file}")
         elif task_mode_normalized == "html":
+            if (
+                (task_input_dir / "project.zip").exists()
+                and (
+                    not (task_input_dir / "index.html").exists()
+                    or not (task_input_dir / "html_assets" / "index.html").exists()
+                )
+            ):
+                _restore_html_task_input(task_input_dir)
             html_file = task_input_dir / "index.html"
             if not html_file.exists():
                 raise FileNotFoundError(f"HTML文件不存在: {html_file}")
@@ -1096,8 +1182,7 @@ class BuildTaskRunner:
                 del self.running_tasks[task_id]
 
             try:
-                output_path = BACKEND_OUTPUT_DIR / output_file if output_file else None
-                _silent_upload_task_assets(task_id, task, output_path=output_path)
+                _silent_upload_task_assets(task_id, task)
             except Exception:
                 pass
             try:
@@ -1123,6 +1208,11 @@ class BuildTaskRunner:
                     task.updated_at.isoformat(),
                     output_info=output_info,
                 )
+            except Exception:
+                pass
+
+            try:
+                _cleanup_task_intermediates(task_id, getattr(task, "mode", "convert"))
             except Exception:
                 pass
 

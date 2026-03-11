@@ -203,6 +203,23 @@ def _resolve_upload_file(filename: str) -> Path:
     return candidate
 
 
+def _replace_file_from_upload(src_path: Path, dst_path: Path) -> None:
+    dst_path.parent.mkdir(parents=True, exist_ok=True)
+    if dst_path.exists():
+        dst_path.unlink()
+    shutil.move(str(src_path), str(dst_path))
+
+
+def _clone_or_copy_file(src_path: Path, dst_path: Path) -> None:
+    dst_path.parent.mkdir(parents=True, exist_ok=True)
+    if dst_path.exists():
+        dst_path.unlink()
+    try:
+        os.link(str(src_path), str(dst_path))
+    except Exception:
+        shutil.copy2(str(src_path), str(dst_path))
+
+
 def _normalize_external_url(raw_url: str) -> str | None:
     value = str(raw_url or "").strip()
     if not value:
@@ -1356,20 +1373,15 @@ async def create_task(task_data: BuildTaskCreate):
                 status_code=400,
                 detail="ZIP中未检测到package.json，且未找到index.html，无法识别为Node.js或HTML项目",
             )
+        dst_zip = task_input_dir / "project.zip"
+        _replace_file_from_upload(src_zip, dst_zip)
         if detected_mode == "html":
             dst_assets_dir = task_input_dir / "html_assets"
-            _extract_html_assets_from_zip(src_zip, detected_index_entry or "index.html", dst_assets_dir)
+            _extract_html_assets_from_zip(dst_zip, detected_index_entry or "index.html", dst_assets_dir)
             dst_html = task_input_dir / "index.html"
             shutil.copy2(str(dst_assets_dir / "index.html"), str(dst_html))
             mode = "html"
             html_filename = "index.html"
-            try:
-                src_zip.unlink()
-            except Exception:
-                pass
-        else:
-            dst_zip = task_input_dir / "project.zip"
-            shutil.move(str(src_zip), str(dst_zip))
     elif mode == "html":
         src_html = BACKEND_UPLOAD_DIR / html_filename
         if not src_html.exists():
@@ -1435,7 +1447,7 @@ async def create_task(task_data: BuildTaskCreate):
         src_icon = BACKEND_UPLOAD_DIR / task_data.icon_filename
         if src_icon.exists():
             dst_icon = task_input_dir / "logo.png"
-            shutil.copy2(str(src_icon), str(dst_icon))  # 用copy因为可能被复用
+            _replace_file_from_upload(src_icon, dst_icon)
             icon_in_task = "logo.png"
     
 
@@ -1460,7 +1472,7 @@ async def create_task(task_data: BuildTaskCreate):
             src_icon = TASKS_DIR / reuse_from / "input" / "logo.png"
             if src_icon.exists():
                 dst_icon = task_input_dir / "logo.png"
-                shutil.copy2(str(src_icon), str(dst_icon))
+                _clone_or_copy_file(src_icon, dst_icon)
                 icon_in_task = "logo.png"
     
     # 复用之前任务的签名密钥
@@ -1830,9 +1842,20 @@ async def update_task(task_id: str, update_data: UpdateTaskRequest):
         src_zip = BACKEND_UPLOAD_DIR / update_data.filename
         if src_zip.exists():
             dst_zip = task_input_dir / "project.zip"
-            if dst_zip.exists():
-                dst_zip.unlink()
-            shutil.move(str(src_zip), str(dst_zip))
+            _replace_file_from_upload(src_zip, dst_zip)
+            if task.mode == "html":
+                index_entry = _pick_zip_index_entry(dst_zip)
+                if not index_entry:
+                    raise HTTPException(status_code=400, detail="ZIP涓湭鎵惧埌 index.html")
+                dst_html = task_input_dir / "index.html"
+                if dst_html.exists():
+                    dst_html.unlink()
+                dst_assets_dir = task_input_dir / "html_assets"
+                if dst_assets_dir.exists():
+                    shutil.rmtree(dst_assets_dir, ignore_errors=True)
+                _extract_html_assets_from_zip(dst_zip, index_entry, dst_assets_dir)
+                shutil.copy2(str(dst_assets_dir / "index.html"), str(dst_html))
+                task.html_filename = "index.html"
 
     # HTML 模式：替换 HTML 资源
     if task.mode == "html":
@@ -1853,9 +1876,7 @@ async def update_task(task_id: str, update_data: UpdateTaskRequest):
         src_icon = BACKEND_UPLOAD_DIR / update_data.icon_filename
         if src_icon.exists():
             dst_icon = task_input_dir / "logo.png"
-            if dst_icon.exists():
-                dst_icon.unlink()
-            shutil.copy2(str(src_icon), str(dst_icon))
+            _replace_file_from_upload(src_icon, dst_icon)
             task.icon_filename = "logo.png"
     
     # 更新版本信息

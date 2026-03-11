@@ -1860,13 +1860,6 @@ def run_local_build(
         ], env=process_env, on_log=on_log)
         output_file = signed_apk
 
-    _pack_android_source(
-        android_project_root=android_project_root,
-        task_output_dir=task_output_dir,
-        app_name=env.get("APP_NAME", "app"),
-        version_name=env.get("VERSION_NAME", "1.0.0"),
-        on_log=on_log,
-    )
 
     progress(100, "Step 10: 构建完成")
     _log(on_log, "Step 10: 构建完成")

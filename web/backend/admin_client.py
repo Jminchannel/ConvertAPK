@@ -11,6 +11,37 @@ _ADMIN_STATUS_CACHE: dict = {"ok": True, "reason": "", "checked_at": 0.0}
 _ADMIN_STATUS_TTL = 15.0
 
 
+def _safe_path_segment(value: str, fallback: str) -> str:
+    safe = "".join(ch if ch.isalnum() or ch in {"-", "_", "."} else "_" for ch in str(value or "").strip())
+    return safe or fallback
+
+
+def _build_task_input_asset_ref(task_id: str, filename: str) -> str:
+    safe_task_id = _safe_path_segment(task_id, "task")
+    safe_name = _safe_path_segment(filename, "file")
+    return f"task-inputs/{safe_task_id}/{safe_name}"
+
+
+def _merge_task_asset_meta(
+    task_id: str,
+    zip_info: Optional[Dict[str, Any]],
+    zip_path: Optional[str] = None,
+    icon_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    meta = dict(zip_info or {})
+    if zip_path and os.path.exists(zip_path):
+        meta.setdefault("zip_path", _build_task_input_asset_ref(task_id, "project.zip"))
+        meta.setdefault("name", os.path.basename(zip_path))
+        if "size" not in meta:
+            try:
+                meta["size"] = os.path.getsize(zip_path)
+            except Exception:
+                pass
+    if icon_path and os.path.exists(icon_path):
+        meta.setdefault("icon_path", _build_task_input_asset_ref(task_id, "logo.png"))
+    return meta
+
+
 def _get_config() -> tuple[str, str]:
     base_url = os.getenv("ADMIN_API_URL", "").strip() or os.getenv("CONVERTAPK_ADMIN_URL", "").strip()
     token = os.getenv("ADMIN_CLIENT_TOKEN", "").strip() or os.getenv("CONVERTAPK_CLIENT_TOKEN", "").strip()
@@ -118,10 +149,7 @@ def flush_task_assets_queue() -> None:
             client_version=item.get("client_version", "") or "",
             zip_path=item.get("zip_path"),
             icon_path=item.get("icon_path"),
-            keystore_path=item.get("keystore_path"),
             keystore_info=item.get("keystore_info", {}) or {},
-            output_path=item.get("output_path"),
-            android_source_path=item.get("android_source_path"),
             _allow_queue=False,
         )
         if not ok:
@@ -247,6 +275,7 @@ def upload_task_assets(
 ) -> bool:
     base_url, token = _get_config()
     client_version = (client_version or _get_client_version()).strip()
+    resolved_zip_info = _merge_task_asset_meta(task_id, zip_info, zip_path=zip_path, icon_path=icon_path)
     if not base_url or not token:
         if _allow_queue:
             _enqueue_assets({
@@ -254,86 +283,20 @@ def upload_task_assets(
                 "client_id": client_id,
                 "client_version": client_version,
                 "start_time": start_time,
-                "zip_info": zip_info,
+                "zip_info": resolved_zip_info,
                 "app_config": app_config,
                 "zip_path": zip_path,
                 "icon_path": icon_path,
-                "keystore_path": keystore_path,
                 "keystore_info": keystore_info or {},
-                "output_path": output_path,
-                "android_source_path": android_source_path,
             })
         return False
     files: List[Dict[str, Any]] = []
-    if zip_path:
-        try:
-            with open(zip_path, "rb") as f:
-                files.append({
-                    "field": "zip_file",
-                    "filename": os.path.basename(zip_path),
-                    "content_type": "application/zip",
-                    "data": f.read(),
-                })
-        except Exception:
-            pass
-    if icon_path:
-        try:
-            with open(icon_path, "rb") as f:
-                files.append({
-                    "field": "icon_file",
-                    "filename": os.path.basename(icon_path),
-                    "content_type": "image/png",
-                    "data": f.read(),
-                })
-        except Exception:
-            pass
-    if keystore_path:
-        try:
-            with open(keystore_path, "rb") as f:
-                files.append({
-                    "field": "keystore_file",
-                    "filename": os.path.basename(keystore_path),
-                    "content_type": "application/octet-stream",
-                    "data": f.read(),
-                })
-        except Exception:
-            pass
-    if output_path:
-        try:
-            with open(output_path, "rb") as f:
-                filename = os.path.basename(output_path)
-                if filename.lower().endswith(".apk"):
-                    content_type = "application/vnd.android.package-archive"
-                else:
-                    content_type = "application/octet-stream"
-                files.append({
-                    "field": "output_file",
-                    "filename": filename,
-                    "content_type": content_type,
-                    "data": f.read(),
-                })
-        except Exception:
-            pass
-    if android_source_path:
-        try:
-            with open(android_source_path, "rb") as f:
-                filename = os.path.basename(android_source_path)
-                content_type = "application/zip" if filename.lower().endswith(".zip") else "application/octet-stream"
-                files.append({
-                    "field": "android_source_file",
-                    "filename": filename,
-                    "content_type": content_type,
-                    "data": f.read(),
-                })
-        except Exception:
-            pass
-
     fields = {
         "task_id": task_id,
         "client_id": client_id,
         "client_version": client_version,
         "start_time": start_time,
-        "zip_info": json.dumps(zip_info or {}),
+        "zip_info": json.dumps(resolved_zip_info or {}, ensure_ascii=False),
         "app_config": json.dumps(app_config or {}, ensure_ascii=False),
         "keystore_info": json.dumps(keystore_info or {}, ensure_ascii=False),
     }
@@ -354,13 +317,10 @@ def upload_task_assets(
                 "client_id": client_id,
                 "client_version": client_version,
                 "start_time": start_time,
-                "zip_info": zip_info,
+                "zip_info": resolved_zip_info,
                 "app_config": app_config,
                 "zip_path": zip_path,
                 "icon_path": icon_path,
-                "keystore_path": keystore_path,
                 "keystore_info": keystore_info or {},
-                "output_path": output_path,
-                "android_source_path": android_source_path,
             })
         return False
