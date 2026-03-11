@@ -101,6 +101,10 @@ export const useAppState = () => {
 
   // Modes & feature state
   const mode = ref('convert') // convert | web | html
+  const featureFlags = ref({
+    web_link_to_apk_enabled: false
+  })
+  const isWebModeEnabled = computed(() => Boolean(featureFlags.value.web_link_to_apk_enabled))
   const mainRef = ref(null)
   const mobilePageHeadRef = ref(null)
   const convertUploadSection = ref(null)
@@ -328,6 +332,10 @@ export const useAppState = () => {
   })
 
   const handleModeChange = (value) => {
+    if (value === 'web' && !isWebModeEnabled.value) {
+      showToast('Web（链接）转 APK 模式已关闭', 'error')
+      return
+    }
     mode.value = value
     if (isMobileShell.value) {
       const previousTab = mobileTab.value
@@ -415,7 +423,140 @@ export const useAppState = () => {
   const showDonation = ref(false)
   const donationHideChecked = ref(false)
   const donationAutoDisabled = ref(localStorage.getItem('apk_builder_donation_hide') === '1')
+  const showComplianceNotice = ref(true)
   const previousVersionName = ref('')
+
+  const complianceNoticeByLang = {
+    en: {
+      title: 'User Compliance Notice and Disclaimer',
+      effectiveDateLabel: 'Effective date',
+      effectiveDate: '2026-03-01',
+      intro:
+        'This platform only provides web packaging and app build services. You must read and agree before using it.',
+      sections: [
+        {
+          title: 'Prohibited Uses',
+          lines: [
+            'Do not create or distribute illegal information.',
+            'Do not create or distribute obscene, pornographic, vulgar, violent, or terror-related content.',
+            'Do not engage in phishing, fraud, impersonation, or social-engineering scams.',
+            'Do not use this platform for gambling or betting promotion.',
+            'Do not infringe copyright, trademark, patent, privacy, portrait, or reputation rights.',
+            'Do not create, spread, or host malware, trojans, backdoors, ransomware, or attack scripts.'
+          ]
+        },
+        {
+          title: 'User Responsibility',
+          lines: [
+            'You are solely responsible for all uploaded, generated, and distributed content.',
+            'You must ensure you have lawful rights and authorization for all materials you use.'
+          ]
+        },
+        {
+          title: 'Platform Rights',
+          lines: [
+            'For suspected violations, the platform may block tasks, remove content, suspend service, and preserve evidence.',
+            'The platform may report and cooperate with regulators or law-enforcement agencies as required by law.'
+          ]
+        },
+        {
+          title: 'Compensation',
+          lines: [
+            'If your actions cause claims, penalties, or losses to the platform, you shall bear full liability and compensation.'
+          ]
+        }
+      ],
+      legalReferences:
+        'Applicable laws include the Cybersecurity Law of the PRC and the Anti-Telecom and Online Fraud Law of the PRC.',
+      acceptButton: 'Agree and Continue',
+      rejectButton: 'Decline and Exit'
+    },
+    'zh-CN': {
+      title: '用户合规使用与免责告知',
+      effectiveDateLabel: '生效日期',
+      effectiveDate: '2026-03-01',
+      intro: '本平台仅提供网页打包与应用构建技术服务。您须阅读并同意本告知后方可继续使用。',
+      sections: [
+        {
+          title: '禁止用途',
+          lines: [
+            '禁止制作、发布、传播违法信息。',
+            '禁止制作、发布、传播低俗、色情、暴力、恐怖相关内容。',
+            '禁止实施诈骗、钓鱼、仿冒或社会工程攻击行为。',
+            '禁止用于赌博、博彩或相关引流推广。',
+            '禁止侵犯著作权、商标权、专利权、隐私权、肖像权、名誉权等合法权益。',
+            '禁止制作、传播、托管恶意软件、木马、后门、勒索程序、攻击脚本等。'
+          ]
+        },
+        {
+          title: '用户责任',
+          lines: [
+            '您对上传、生成、分发、传播的全部内容承担完整法律责任。',
+            '您应保证对所使用素材享有合法权利或已获得有效授权。'
+          ]
+        },
+        {
+          title: '平台处置权',
+          lines: [
+            '对疑似违规行为，平台有权拦截任务、下架内容、限制服务并保全证据。',
+            '平台可依法向监管与司法机关报告并配合调查。'
+          ]
+        },
+        {
+          title: '赔偿责任',
+          lines: ['如因您的行为导致平台遭受索赔、处罚或损失，您应承担全部责任并赔偿。']
+        }
+      ],
+      legalReferences: '相关法律包括《中华人民共和国网络安全法》《中华人民共和国反电信网络诈骗法》等。',
+      acceptButton: '同意并继续',
+      rejectButton: '拒绝并退出'
+    },
+    'zh-TW': {
+      title: '使用者合規與免責告知',
+      effectiveDateLabel: '生效日期',
+      effectiveDate: '2026-03-01',
+      intro: '本平台僅提供網頁封裝與應用建置技術服務。您須閱讀並同意本告知後方可繼續使用。',
+      sections: [
+        {
+          title: '禁止用途',
+          lines: [
+            '禁止製作、發布、傳播違法資訊。',
+            '禁止製作、發布、傳播低俗、色情、暴力、恐怖相關內容。',
+            '禁止從事詐騙、釣魚、仿冒或社交工程攻擊行為。',
+            '禁止用於賭博、博彩或相關導流推廣。',
+            '禁止侵犯著作權、商標權、專利權、隱私權、肖像權、名譽權等合法權益。',
+            '禁止製作、傳播、託管惡意軟體、木馬、後門、勒索程式、攻擊腳本等。'
+          ]
+        },
+        {
+          title: '使用者責任',
+          lines: [
+            '您對上傳、生成、散布、傳播的全部內容承擔完整法律責任。',
+            '您應確保對使用素材享有合法權利或已取得有效授權。'
+          ]
+        },
+        {
+          title: '平台處置權',
+          lines: [
+            '對疑似違規行為，平台有權攔截任務、下架內容、限制服務並保全證據。',
+            '平台可依法向監管與司法機關通報並配合調查。'
+          ]
+        },
+        {
+          title: '賠償責任',
+          lines: ['如因您的行為導致平台遭受索賠、處罰或損失，您應承擔全部責任並賠償。']
+        }
+      ],
+      legalReferences: '相關法律包括《中華人民共和國網路安全法》《中華人民共和國反電信網路詐騙法》等。',
+      acceptButton: '同意並繼續',
+      rejectButton: '拒絕並離開'
+    }
+  }
+  const complianceNotice = computed(() => {
+    if (currentLang.value === 'zh-CN') return complianceNoticeByLang['zh-CN']
+    if (currentLang.value === 'zh-TW') return complianceNoticeByLang['zh-TW']
+    return complianceNoticeByLang.en
+  })
 
   // Logs
   const showLogs = ref(false)
@@ -601,6 +742,9 @@ export const useAppState = () => {
   const isKeystoreUploaded = computed(() => Boolean(uploadedKeystore.value))
 
   const canCreateTask = computed(() => {
+    if (mode.value === 'web' && !isWebModeEnabled.value) {
+      return false
+    }
     const shouldCheckKeystore = !isKeystoreUploaded.value
     const hasIcon = quickGenerate.value && (mode.value === 'convert' || mode.value === 'web' || mode.value === 'html') && !updatingTaskId.value
       ? true
@@ -1712,8 +1856,14 @@ export const useAppState = () => {
     quickGenerate.value = false
     quickGenerateStash.value = null
 
-    mode.value = task.mode || 'convert'
-    webUrl.value = task.web_url || ''
+    const taskMode = task.mode || 'convert'
+    if (taskMode === 'web' && !isWebModeEnabled.value) {
+      mode.value = 'convert'
+      webUrl.value = ''
+    } else {
+      mode.value = taskMode
+      webUrl.value = task.web_url || ''
+    }
     enableAds.value = false
     adConfig.value = { appId: '', appKey: '', placementId: '' }
     const isCdnCapableMode = mode.value === 'convert' || mode.value === 'html'
@@ -1872,6 +2022,10 @@ export const useAppState = () => {
   // Create/Update task
   const createTask = async () => {
     if (!canCreateTask.value) return
+    if (mode.value === 'web' && !isWebModeEnabled.value) {
+      showToast('Web（链接）转 APK 模式已关闭', 'error')
+      return
+    }
     if (packageNameError.value) {
       showToast(packageNameError.value, 'error')
       return
@@ -2079,6 +2233,21 @@ export const useAppState = () => {
   }
 
   const closeSettings = () => (showSettings.value = false)
+  const fetchAdminFeatures = async () => {
+    try {
+      const result = await api.getAdminFeatures()
+      featureFlags.value = {
+        web_link_to_apk_enabled: Boolean(result?.web_link_to_apk_enabled)
+      }
+    } catch {
+      featureFlags.value = {
+        web_link_to_apk_enabled: false
+      }
+    }
+    if (!isWebModeEnabled.value && mode.value === 'web') {
+      mode.value = 'convert'
+    }
+  }
   const fetchAnnouncements = async () => {
     try {
       const result = await api.getAdminAnnouncements()
@@ -2163,6 +2332,16 @@ export const useAppState = () => {
     }
     showDonation.value = false
   }
+  const acceptComplianceNotice = () => {
+    showComplianceNotice.value = false
+  }
+  const rejectComplianceNotice = () => {
+    if (window.windowControls?.close) {
+      window.windowControls.close()
+      return
+    }
+    window.location.replace('about:blank')
+  }
   const taskStatusCache = ref(new Map())
   const taskStatusReady = ref(false)
   const shouldAutoShowDonation = () => Math.random() < 0.1
@@ -2204,8 +2383,10 @@ export const useAppState = () => {
   onMounted(async () => {
     updateMobileShell()
     applyTheme(currentTheme.value)
+    showComplianceNotice.value = true
     document.addEventListener('click', handleClickOutside)
     window.addEventListener('resize', updateMobileShell)
+    await fetchAdminFeatures()
     await refreshTasks()
     await fetchAnnouncements()
     await loadSystemInfo()
@@ -2265,6 +2446,7 @@ export const useAppState = () => {
     closeDownloadMenu,
     handleClickOutside,
     mode,
+    isWebModeEnabled,
     mainRef,
     mobilePageHeadRef,
     convertUploadSection,
@@ -2360,6 +2542,8 @@ export const useAppState = () => {
     showDonation,
     donationHideChecked,
     donationAutoDisabled,
+    showComplianceNotice,
+    complianceNotice,
     previousVersionName,
     showLogs,
     taskLogs,
@@ -2497,6 +2681,8 @@ export const useAppState = () => {
     refreshAll,
     openDonation,
     closeDonation,
+    acceptComplianceNotice,
+    rejectComplianceNotice,
     taskStatusCache,
     taskStatusReady,
     shouldAutoShowDonation,
