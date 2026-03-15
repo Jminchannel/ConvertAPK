@@ -199,6 +199,14 @@ body {
   gap: 8px;
 }
 
+.github-star-btn {
+  white-space: nowrap;
+}
+
+.github-star-btn .action-icon {
+  color: #fbbf24;
+}
+
 /* Cards */
 .card {
   background: var(--bg-card);

@@ -19,6 +19,18 @@
           </div>
         </div>
 
+        <a
+          v-if="isMobileShell"
+          class="mobile-header-star-btn no-drag"
+          href="https://github.com/Jminchannel/ConvertAPK-Desktop"
+          target="_blank"
+          rel="noopener noreferrer"
+          :title="t('github.starTitle')"
+          :aria-label="t('github.starTitle')"
+        >
+          <span>&#x2605;</span>
+        </a>
+
         <button
           v-if="isMobileShell"
           class="mobile-header-theme-btn no-drag"
@@ -62,6 +74,19 @@
               </button>
             </div>
           </div>
+
+          <a
+            v-if="!isMobileShell"
+            class="btn btn-secondary btn-sm no-drag github-star-btn"
+            href="https://github.com/Jminchannel/ConvertAPK-Desktop"
+            target="_blank"
+            rel="noopener noreferrer"
+            :title="t('github.starTitle')"
+            :aria-label="t('github.starTitle')"
+          >
+            <span class="action-icon">&#x2605;</span>
+            <span class="action-label">{{ t('github.star') }}</span>
+          </a>
 
           <button class="btn btn-primary btn-sm no-drag mobile-hide" @click="openDonation(false)">
             <span class="action-icon">&#x1F496;</span>
@@ -1907,6 +1932,10 @@ export default defineComponent({
   display: none;
 }
 
+.mobile-header-star-btn {
+  display: none;
+}
+
 .mobile-swipe-stage {
   width: 100%;
 }
@@ -1943,9 +1972,9 @@ export default defineComponent({
     position: relative;
   }
 
+  .mobile-shell-active .mobile-header-star-btn,
   .mobile-shell-active .mobile-header-theme-btn {
     position: absolute;
-    right: 16px;
     top: 50%;
     transform: translateY(-50%);
     width: 34px;
@@ -1961,6 +1990,7 @@ export default defineComponent({
     justify-content: center;
     font-size: 16px;
     line-height: 1;
+    text-decoration: none;
     cursor: pointer;
     z-index: 2;
     outline: none;
@@ -1969,16 +1999,29 @@ export default defineComponent({
     transition: opacity 0.2s ease, transform 0.15s ease;
   }
 
+  .mobile-shell-active .mobile-header-star-btn {
+    right: 56px;
+    font-size: 15px;
+  }
+
+  .mobile-shell-active .mobile-header-theme-btn {
+    right: 16px;
+  }
+
+  .mobile-shell-active .mobile-header-star-btn:hover,
   .mobile-shell-active .mobile-header-theme-btn:hover {
     opacity: 0.85;
   }
 
+  .mobile-shell-active .mobile-header-star-btn:focus,
+  .mobile-shell-active .mobile-header-star-btn:focus-visible,
   .mobile-shell-active .mobile-header-theme-btn:focus,
   .mobile-shell-active .mobile-header-theme-btn:focus-visible {
     outline: none;
     box-shadow: none;
   }
 
+  .mobile-shell-active .mobile-header-star-btn:active,
   .mobile-shell-active .mobile-header-theme-btn:active {
     transform: translateY(-50%) scale(0.96);
     box-shadow: none;

@@ -14,6 +14,10 @@ export const messages = {
     mobileNav: {
       settings: 'Settings'
     },
+    github: {
+      star: 'GitHub Star',
+      starTitle: 'Open the GitHub project and leave a star'
+    },
     // Mode
     mode: {
       title: 'Conversion Mode',
@@ -425,6 +429,10 @@ export const messages = {
     mobileNav: {
       settings: '设置'
     },
+    github: {
+      star: 'GitHub Star',
+      starTitle: '打开 GitHub 项目并点亮 Star'
+    },
     // Mode
     mode: {
       title: '转换模式',
@@ -831,6 +839,10 @@ export const messages = {
     },
     mobileNav: {
       settings: '設定'
+    },
+    github: {
+      star: 'GitHub Star',
+      starTitle: '打開 GitHub 專案並點亮 Star'
     },
     // Mode
     mode: {
