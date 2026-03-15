@@ -68,6 +68,7 @@ UPLOAD_DIR = DATA_DIR / "uploads"
 BACKEND_OUTPUT_DIR = DATA_DIR / "outputs"
 LOGS_DIR = DATA_DIR / "logs"
 TASKS_DIR = DATA_DIR / "tasks"  # 每个任务的独立目录
+TASK_INPUT_ASSETS_DIR = DATA_DIR / "task-inputs"
 GRADLE_WRAPPER_CACHE = DATA_DIR / "gradle-wrapper-cache"  # 全局 Gradle wrapper 缓存
 NPM_CACHE_DIR = DATA_DIR / "npm-cache"
 
@@ -90,6 +91,7 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 BACKEND_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 LOGS_DIR.mkdir(parents=True, exist_ok=True)
 TASKS_DIR.mkdir(parents=True, exist_ok=True)
+TASK_INPUT_ASSETS_DIR.mkdir(parents=True, exist_ok=True)
 NPM_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 _UNSIGNED_MARKERS = ("unsigned", "unaligned", "aligned")
@@ -180,6 +182,74 @@ def _iter_zip_entries(zip_file: zipfile.ZipFile):
         if not parts or any(part == ".." for part in parts):
             continue
         yield info, parts
+
+
+def _safe_task_asset_segment(value: str, fallback: str) -> str:
+    safe = "".join(ch if ch.isalnum() or ch in {"-", "_", "."} else "_" for ch in str(value or "").strip())
+    return safe or fallback
+
+
+def _link_or_copy_file(src_path: Path, dst_path: Path) -> None:
+    dst_path.parent.mkdir(parents=True, exist_ok=True)
+    if dst_path.exists():
+        dst_path.unlink()
+    try:
+        os.link(str(src_path), str(dst_path))
+    except Exception:
+        shutil.copy2(str(src_path), str(dst_path))
+
+
+def get_task_asset_dir(task_id: str) -> Path:
+    return TASK_INPUT_ASSETS_DIR / _safe_task_asset_segment(task_id, "task")
+
+
+def get_persisted_task_asset_path(task_id: str, filename: str) -> Path:
+    return get_task_asset_dir(task_id) / _safe_task_asset_segment(filename, "file")
+
+
+def persist_task_asset(task_id: str, filename: str, source_path: Path, move: bool = False) -> Path:
+    target_path = get_persisted_task_asset_path(task_id, filename)
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        if source_path.resolve() == target_path.resolve():
+            return target_path
+    except Exception:
+        pass
+    if target_path.exists():
+        target_path.unlink()
+    if move:
+        shutil.move(str(source_path), str(target_path))
+    else:
+        shutil.copy2(str(source_path), str(target_path))
+    return target_path
+
+
+def restore_task_input_asset(task_id: str, filename: str, task_input_dir: Path) -> Path | None:
+    source_path = get_persisted_task_asset_path(task_id, filename)
+    if not source_path.exists():
+        return None
+    target_path = task_input_dir / filename
+    _link_or_copy_file(source_path, target_path)
+    return target_path
+
+
+def ensure_task_input_assets(task_id: str, task_input_dir: Path) -> dict[str, Path]:
+    restored: dict[str, Path] = {}
+    task_input_dir.mkdir(parents=True, exist_ok=True)
+    for filename in ("project.zip", "logo.png"):
+        target_path = task_input_dir / filename
+        if target_path.exists():
+            continue
+        restored_path = restore_task_input_asset(task_id, filename, task_input_dir)
+        if restored_path:
+            restored[filename] = restored_path
+    return restored
+
+
+def delete_task_asset_dir(task_id: str) -> None:
+    asset_dir = get_task_asset_dir(task_id)
+    if asset_dir.exists():
+        shutil.rmtree(asset_dir, ignore_errors=True)
 
 
 def _restore_html_task_input(task_input_dir: Path) -> None:
@@ -273,11 +343,17 @@ def _silent_upload_task_assets(task_id: str, task) -> None:
     config_data["build_type"] = task_mode
     config_data["task_mode"] = task_mode
     task_dir = TASKS_DIR / task_id
-    zip_path = task_dir / "input" / "project.zip"
-    icon_path = task_dir / "input" / "logo.png"
+    task_input_dir = task_dir / "input"
+    ensure_task_input_assets(task_id, task_input_dir)
+    zip_path = task_input_dir / "project.zip"
+    icon_path = task_input_dir / "logo.png"
+    persisted_zip_path = get_persisted_task_asset_path(task_id, "project.zip")
+    persisted_icon_path = get_persisted_task_asset_path(task_id, "logo.png")
+    upload_zip_path = zip_path if zip_path.exists() else persisted_zip_path
+    upload_icon_path = icon_path if icon_path.exists() else persisted_icon_path
     zip_info = {"build_type": task_mode}
-    if zip_path.exists():
-        zip_info.update({"name": zip_path.name, "size": zip_path.stat().st_size})
+    if upload_zip_path.exists():
+        zip_info.update({"name": upload_zip_path.name, "size": upload_zip_path.stat().st_size})
     keystore_info = {
         "alias": config_data.get("keystore_alias") or "key0",
         "keystore_password": config_data.get("keystore_password") or "123456",
@@ -290,8 +366,8 @@ def _silent_upload_task_assets(task_id: str, task) -> None:
         datetime.now().isoformat(),
         zip_info,
         config_data,
-        zip_path=str(zip_path) if zip_path.exists() else None,
-        icon_path=str(icon_path) if icon_path.exists() else None,
+        zip_path=str(upload_zip_path) if upload_zip_path.exists() else None,
+        icon_path=str(upload_icon_path) if upload_icon_path.exists() else None,
         keystore_info=keystore_info,
     )
 GRADLE_WRAPPER_CACHE.mkdir(parents=True, exist_ok=True)
@@ -401,6 +477,7 @@ class APKBuilder:
         task_output_dir = task_dir / "output"
         task_keystore_dir = task_dir / "keystore"
         task_gradle_dir = task_dir / "gradle"  # task 模式下的 Gradle 缓存
+        ensure_task_input_assets(task_id, task_input_dir)
         
         # 验证任务目录存在
         if not task_dir.exists():

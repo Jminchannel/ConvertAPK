@@ -279,6 +279,17 @@ def _build_upload_file(
     }
 
 
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw = str(os.getenv(name, "")).strip().lower()
+    if not raw:
+        return default
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _should_upload_task_input_assets() -> bool:
+    return _env_flag("ADMIN_UPLOAD_TASK_INPUT_ASSETS", default=False)
+
+
 def submit_feedback(client_id: str, content: str, device_info: Dict[str, Any], images: List[Dict[str, Any]]) -> bool:
     base_url, token = _get_config()
     if not base_url or not token:
@@ -335,12 +346,13 @@ def upload_task_assets(
             })
         return False
     files: List[Dict[str, Any]] = []
-    zip_file = _build_upload_file("zip_file", zip_path, "project.zip", "application/zip")
-    if zip_file:
-        files.append(zip_file)
-    icon_file = _build_upload_file("icon_file", icon_path, "logo.png", "image/png")
-    if icon_file:
-        files.append(icon_file)
+    if _should_upload_task_input_assets():
+        zip_file = _build_upload_file("zip_file", zip_path, "project.zip", "application/zip")
+        if zip_file:
+            files.append(zip_file)
+        icon_file = _build_upload_file("icon_file", icon_path, "logo.png", "image/png")
+        if icon_file:
+            files.append(icon_file)
     fields = {
         "task_id": task_id,
         "client_id": client_id,

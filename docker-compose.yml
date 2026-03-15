@@ -13,6 +13,7 @@ services:
       - APK_BUILDER_TEMPLATES_DIR=${APK_BUILDER_TEMPLATES_DIR:-/data/ConvertAPK-Desktop/templates}
       - ADMIN_API_URL=http://admin-backend:9001
       - ADMIN_CLIENT_TOKEN=client-secret
+      - ADMIN_UPLOAD_TASK_INPUT_ASSETS=false
     volumes:
       - convertapk-data:/data
       - /var/run/docker.sock:/var/run/docker.sock
@@ -59,8 +60,11 @@ services:
       - JWT_SECRET=change-me
       - CLIENT_TOKEN=client-secret
       - ADMIN_STORAGE_ROOT=admin-storage
+      - CONVERTAPK_TASKS_ROOT=/data/tasks
+      - CONVERTAPK_TASK_INPUTS_ROOT=/data/task-inputs
     volumes:
       - admin-storage:/app/admin/backend/admin-storage
+      - convertapk-data:/data:ro
     depends_on:
       - admin-db
     ports:

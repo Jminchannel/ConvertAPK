@@ -35,7 +35,12 @@ from builder import (
     get_task_runner,
     APK_WORKER_DIR,
     BACKEND_OUTPUT_DIR,
+    delete_task_asset_dir,
+    ensure_task_input_assets,
+    get_persisted_task_asset_path,
     LOGS_DIR,
+    persist_task_asset,
+    restore_task_input_asset,
     TASKS_DIR,
     UPLOAD_DIR as BACKEND_UPLOAD_DIR,
 )
@@ -235,6 +240,26 @@ def _clone_or_copy_file(src_path: Path, dst_path: Path) -> None:
         os.link(str(src_path), str(dst_path))
     except Exception:
         shutil.copy2(str(src_path), str(dst_path))
+
+
+def _resolve_task_asset_path(task_id: str, filename: str) -> Path:
+    input_path = TASKS_DIR / task_id / "input" / filename
+    if input_path.exists():
+        return input_path
+    return get_persisted_task_asset_path(task_id, filename)
+
+
+def _store_task_asset(task_id: str, task_input_dir: Path, filename: str, source_path: Path, move: bool = False) -> Path:
+    persist_task_asset(task_id, filename, source_path, move=move)
+    restored_path = restore_task_input_asset(task_id, filename, task_input_dir)
+    return restored_path or (task_input_dir / filename)
+
+
+def _sync_task_asset_snapshot(task_id: str, task_input_dir: Path, filename: str) -> Path | None:
+    asset_path = task_input_dir / filename
+    if not asset_path.exists():
+        return None
+    return persist_task_asset(task_id, filename, asset_path, move=False)
 
 
 def _normalize_external_url(raw_url: str) -> str | None:
@@ -1128,7 +1153,13 @@ def load_tasks_db() -> None:
             continue
         task_dir = TASKS_DIR / task.id
         if not task_dir.exists():
-            continue
+            persisted_zip = get_persisted_task_asset_path(task.id, "project.zip")
+            persisted_icon = get_persisted_task_asset_path(task.id, "logo.png")
+            if not persisted_zip.exists() and not persisted_icon.exists():
+                continue
+            (task_dir / "output").mkdir(parents=True, exist_ok=True)
+            (task_dir / "keystore").mkdir(parents=True, exist_ok=True)
+            ensure_task_input_assets(task.id, task_dir / "input")
         tasks_db[task.id] = task
 
 # 上传/输出目录（支持通过环境变量 APK_BUILDER_DATA_DIR 迁移到数据卷）
@@ -1392,8 +1423,7 @@ async def create_task(task_data: BuildTaskCreate):
                 status_code=400,
                 detail="ZIP中未检测到package.json，且未找到index.html，无法识别为Node.js或HTML项目",
             )
-        dst_zip = task_input_dir / "project.zip"
-        _replace_file_from_upload(src_zip, dst_zip)
+        dst_zip = _store_task_asset(task_id, task_input_dir, "project.zip", src_zip, move=True)
         if detected_mode == "html":
             dst_assets_dir = task_input_dir / "html_assets"
             _extract_html_assets_from_zip(dst_zip, detected_index_entry or "index.html", dst_assets_dir)
@@ -1430,6 +1460,7 @@ async def create_task(task_data: BuildTaskCreate):
             enabled=cdn_localize_enabled,
             selected_urls=cdn_localize_urls,
         )
+        _sync_task_asset_snapshot(task_id, task_input_dir, "project.zip")
         cdn_localize_preprocessed = bool(preprocess_result.get("preprocessed"))
         cdn_localize_log_lines = [str(item) for item in preprocess_result.get("log_lines", []) if str(item).strip()]
 
@@ -1461,12 +1492,12 @@ async def create_task(task_data: BuildTaskCreate):
             shutil.copy2(str(icon_path), str(dst_icon))
         else:
             _write_quick_generate_placeholder_icon(dst_icon)
+        _sync_task_asset_snapshot(task_id, task_input_dir, "logo.png")
         icon_in_task = "logo.png"
     elif task_data.icon_filename:
         src_icon = BACKEND_UPLOAD_DIR / task_data.icon_filename
         if src_icon.exists():
-            dst_icon = task_input_dir / "logo.png"
-            _replace_file_from_upload(src_icon, dst_icon)
+            _store_task_asset(task_id, task_input_dir, "logo.png", src_icon, move=True)
             icon_in_task = "logo.png"
     
 
@@ -1488,10 +1519,9 @@ async def create_task(task_data: BuildTaskCreate):
     if not icon_in_task and reuse_from:
         reuse_task = tasks_db.get(reuse_from)
         if reuse_task and reuse_task.icon_filename:
-            src_icon = TASKS_DIR / reuse_from / "input" / "logo.png"
+            src_icon = _resolve_task_asset_path(reuse_from, "logo.png")
             if src_icon.exists():
-                dst_icon = task_input_dir / "logo.png"
-                _clone_or_copy_file(src_icon, dst_icon)
+                _store_task_asset(task_id, task_input_dir, "logo.png", src_icon, move=False)
                 icon_in_task = "logo.png"
     
     # 复用之前任务的签名密钥
@@ -1540,8 +1570,8 @@ async def create_task(task_data: BuildTaskCreate):
     config_data["task_mode"] = task.mode
     if task.mode == "web" and task.web_url:
         config_data["web_url"] = task.web_url
-    zip_path = task_input_dir / "project.zip"
-    icon_path = task_input_dir / "logo.png"
+    zip_path = _resolve_task_asset_path(task_id, "project.zip")
+    icon_path = _resolve_task_asset_path(task_id, "logo.png")
     zip_info = {"build_type": task.mode}
     if zip_path.exists():
         zip_info.update({"name": zip_path.name, "size": zip_path.stat().st_size})
@@ -1604,6 +1634,10 @@ async def delete_task(task_id: str, client_id: str = None):
         except Exception:
             pass
         try:
+            delete_task_asset_dir(task_id)
+        except Exception:
+            pass
+        try:
             log_file = LOGS_DIR / f"{task_id}.log"
             if log_file.exists():
                 log_file.unlink()
@@ -1655,8 +1689,10 @@ async def start_task(task_id: str, client_id: str = None):
     config_data["task_mode"] = task.mode
     if task.mode == "web" and task.web_url:
         config_data["web_url"] = task.web_url
-    zip_path = TASKS_DIR / task_id / "input" / "project.zip"
-    icon_path = TASKS_DIR / task_id / "input" / "logo.png"
+    task_input_dir = TASKS_DIR / task_id / "input"
+    ensure_task_input_assets(task_id, task_input_dir)
+    zip_path = _resolve_task_asset_path(task_id, "project.zip")
+    icon_path = _resolve_task_asset_path(task_id, "logo.png")
     zip_info = {"build_type": task.mode}
     if zip_path.exists():
         zip_info.update({"name": zip_path.name, "size": zip_path.stat().st_size})
@@ -1719,7 +1755,7 @@ async def get_icon(task_id: str, client_id: str = None):
     task = tasks_db[task_id]
     _assert_task_owner(task, client_id)
     # 先从任务目录查找
-    task_icon = TASKS_DIR / task_id / "input" / "logo.png"
+    task_icon = _resolve_task_asset_path(task_id, "logo.png")
     if task_icon.exists():
         return FileResponse(
             path=str(task_icon),
@@ -1851,6 +1887,8 @@ async def update_task(task_id: str, update_data: UpdateTaskRequest):
     task_dir = TASKS_DIR / task_id
     task_input_dir = task_dir / "input"
     task_output_dir = task_dir / "output"
+    task_input_dir.mkdir(parents=True, exist_ok=True)
+    task_output_dir.mkdir(parents=True, exist_ok=True)
     
     # 清理output目录
     if task_output_dir.exists():
@@ -1862,8 +1900,7 @@ async def update_task(task_id: str, update_data: UpdateTaskRequest):
     if update_data.filename:
         src_zip = BACKEND_UPLOAD_DIR / update_data.filename
         if src_zip.exists():
-            dst_zip = task_input_dir / "project.zip"
-            _replace_file_from_upload(src_zip, dst_zip)
+            dst_zip = _store_task_asset(task_id, task_input_dir, "project.zip", src_zip, move=True)
             if task.mode == "html":
                 index_entry = _pick_zip_index_entry(dst_zip)
                 if not index_entry:
@@ -1877,6 +1914,7 @@ async def update_task(task_id: str, update_data: UpdateTaskRequest):
                 _extract_html_assets_from_zip(dst_zip, index_entry, dst_assets_dir)
                 shutil.copy2(str(dst_assets_dir / "index.html"), str(dst_html))
                 task.html_filename = "index.html"
+            _sync_task_asset_snapshot(task_id, task_input_dir, "project.zip")
 
     # HTML 模式：替换 HTML 资源
     if task.mode == "html":
@@ -1896,8 +1934,7 @@ async def update_task(task_id: str, update_data: UpdateTaskRequest):
     if update_data.icon_filename:
         src_icon = BACKEND_UPLOAD_DIR / update_data.icon_filename
         if src_icon.exists():
-            dst_icon = task_input_dir / "logo.png"
-            _replace_file_from_upload(src_icon, dst_icon)
+            _store_task_asset(task_id, task_input_dir, "logo.png", src_icon, move=True)
             task.icon_filename = "logo.png"
     
     # 更新版本信息
