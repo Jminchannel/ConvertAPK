@@ -237,6 +237,35 @@ ensure_gradle_wrapper_dist() {
     return 0
 }
 
+patch_gradle_wrapper_version() {
+    # 统一锁定到支持 JDK 21 的 Gradle 版本，避免旧模板回退到 8.0.2 导致构建失败。
+    local target_url="${CONVERTAPK_GRADLE_DISTRIBUTION_URL:-https://services.gradle.org/distributions/gradle-8.14.3-all.zip}"
+    local safe_url="$target_url"
+    local patched="false"
+
+    safe_url="${safe_url//\\/\\\\}"
+    safe_url="${safe_url//:/\\:}"
+    safe_url="${safe_url//\//\\/}"
+
+    for wrapper_props in "android/gradle/wrapper/gradle-wrapper.properties" "gradle/wrapper/gradle-wrapper.properties"; do
+        if [ ! -f "$wrapper_props" ]; then
+            continue
+        fi
+        if grep -q '^distributionUrl=' "$wrapper_props"; then
+            sed -i -E "s#^distributionUrl=.*#distributionUrl=$safe_url#g" "$wrapper_props"
+        else
+            printf '\ndistributionUrl=%s\n' "$safe_url" >> "$wrapper_props"
+        fi
+        sed -i '/^distributionSha256Sum=/d' "$wrapper_props"
+        patched="true"
+        log_info "已锁定 Gradle wrapper：$wrapper_props -> $target_url"
+    done
+
+    if [ "$patched" != "true" ]; then
+        log_warning "未找到 gradle-wrapper.properties，跳过 Gradle 版本锁定"
+    fi
+}
+
 # ============================================
 # 调试：打印所有环境变量
 # ============================================
@@ -1216,6 +1245,7 @@ installCapacitorPackage "@capacitor/cli" "-D"
 installCapacitorPackage "@capacitor/filesystem" ""
 installCapacitorPackage "@capacitor/browser" ""
 installCapacitorPackage "@capacitor/share" ""
+installCapacitorPackage "@capacitor/android" ""
 
 cat > capacitor.config.ts << EOF
 import type { CapacitorConfig } from '@capacitor/cli';
@@ -2900,6 +2930,7 @@ fi
 chmod +x gradlew
 
 # 如果已缓存 Gradle wrapper 分发包就复用，否则尝试从镜像预取
+patch_gradle_wrapper_version
 ensure_gradle_wrapper_dist
 
 # 配置国内 Maven 镜像（降低 Maven Central 卡住的概率）
