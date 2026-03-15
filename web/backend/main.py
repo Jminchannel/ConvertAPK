@@ -65,6 +65,19 @@ app = FastAPI(
 
 BUILDER_MODE = os.getenv("APK_BUILDER_MODE", "local").strip().lower()
 LOCAL_MODE = BUILDER_MODE == "local"
+GITHUB_REPO_OWNER = (os.getenv("GITHUB_REPO_OWNER", "Jminchannel") or "Jminchannel").strip() or "Jminchannel"
+GITHUB_REPO_NAME = (os.getenv("GITHUB_REPO_NAME", "ConvertAPK-Desktop") or "ConvertAPK-Desktop").strip() or "ConvertAPK-Desktop"
+GITHUB_REPO_URL = f"https://github.com/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}"
+GITHUB_REPO_API_URL = f"https://api.github.com/repos/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}"
+try:
+    GITHUB_REPO_STATS_TTL = max(int(os.getenv("GITHUB_REPO_STATS_TTL", "600") or "600"), 60)
+except ValueError:
+    GITHUB_REPO_STATS_TTL = 600
+_github_repo_stats_lock = threading.Lock()
+_github_repo_stats_cache = {
+    "stars": None,
+    "fetched_at": 0.0,
+}
 
 
 def _load_client_feature_flags() -> dict:
@@ -81,6 +94,60 @@ def _load_client_feature_flags() -> dict:
 def _is_web_link_mode_enabled() -> bool:
     flags = _load_client_feature_flags()
     return bool(flags.get("web_link_to_apk_enabled"))
+
+
+def _fetch_github_repo_stats() -> dict:
+    now = time.time()
+    with _github_repo_stats_lock:
+        cached_stars = _github_repo_stats_cache.get("stars")
+        cached_at = float(_github_repo_stats_cache.get("fetched_at") or 0.0)
+    if cached_stars is not None and (now - cached_at) < GITHUB_REPO_STATS_TTL:
+        return {
+            "repo_url": GITHUB_REPO_URL,
+            "stars": cached_stars,
+            "cached": True,
+            "fetched_at": cached_at,
+        }
+
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "ConvertAPK-Desktop",
+    }
+    githubApiToken = (os.getenv("GITHUB_API_TOKEN") or os.getenv("GITHUB_TOKEN") or "").strip()
+    if githubApiToken:
+        headers["Authorization"] = f"Bearer {githubApiToken}"
+
+    request = urllib.request.Request(GITHUB_REPO_API_URL, headers=headers, method="GET")
+    try:
+        with urllib.request.urlopen(request, timeout=8) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        stars = int(payload.get("stargazers_count") or 0)
+    except Exception:
+        if cached_stars is not None:
+            return {
+                "repo_url": GITHUB_REPO_URL,
+                "stars": cached_stars,
+                "cached": True,
+                "stale": True,
+                "fetched_at": cached_at,
+            }
+        return {
+            "repo_url": GITHUB_REPO_URL,
+            "stars": None,
+            "cached": False,
+            "stale": True,
+            "fetched_at": cached_at,
+        }
+
+    with _github_repo_stats_lock:
+        _github_repo_stats_cache["stars"] = stars
+        _github_repo_stats_cache["fetched_at"] = now
+    return {
+        "repo_url": GITHUB_REPO_URL,
+        "stars": stars,
+        "cached": False,
+        "fetched_at": now,
+    }
 
 
 def _normalize_client_id(value: str | None) -> str:
@@ -2204,6 +2271,11 @@ async def get_app_version():
 @app.get("/api/system/info")
 async def system_info():
     return get_system_info()
+
+
+@app.get("/api/github/repo-stats")
+async def get_github_repo_stats():
+    return _fetch_github_repo_stats()
 
 
 def _probe_url(url: str, timeout: float = 5.0) -> tuple[bool, int | None, str]:

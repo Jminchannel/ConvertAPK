@@ -22,13 +22,14 @@
         <a
           v-if="isMobileShell"
           class="mobile-header-star-btn no-drag"
-          href="https://github.com/Jminchannel/ConvertAPK-Desktop"
+          :href="githubRepoUrl"
           target="_blank"
           rel="noopener noreferrer"
           :title="t('github.starTitle')"
           :aria-label="t('github.starTitle')"
         >
           <span>&#x2605;</span>
+          <span v-if="hasGithubStarCount" class="mobile-header-star-count">{{ githubStarCountText }}</span>
         </a>
 
         <button
@@ -78,7 +79,7 @@
           <a
             v-if="!isMobileShell"
             class="btn btn-secondary btn-sm no-drag github-star-btn"
-            href="https://github.com/Jminchannel/ConvertAPK-Desktop"
+            :href="githubRepoUrl"
             target="_blank"
             rel="noopener noreferrer"
             :title="t('github.starTitle')"
@@ -86,6 +87,7 @@
           >
             <span class="action-icon">&#x2605;</span>
             <span class="action-label">{{ t('github.star') }}</span>
+            <span v-if="hasGithubStarCount" class="github-star-count">{{ githubStarCountText }}</span>
           </a>
 
           <button class="btn btn-primary btn-sm no-drag mobile-hide" @click="openDonation(false)">
@@ -1936,6 +1938,10 @@ export default defineComponent({
   display: none;
 }
 
+.mobile-header-star-count {
+  display: none;
+}
+
 .mobile-swipe-stage {
   width: 100%;
 }
@@ -1977,9 +1983,7 @@ export default defineComponent({
     position: absolute;
     top: 50%;
     transform: translateY(-50%);
-    width: 34px;
     height: 34px;
-    padding: 0;
     border: none;
     background: transparent;
     -webkit-appearance: none;
@@ -2001,11 +2005,23 @@ export default defineComponent({
 
   .mobile-shell-active .mobile-header-star-btn {
     right: 56px;
-    font-size: 15px;
+    min-width: 34px;
+    padding: 0 8px;
+    gap: 4px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .mobile-shell-active .mobile-header-star-count {
+    display: inline;
+    font-size: 11px;
+    letter-spacing: -0.01em;
   }
 
   .mobile-shell-active .mobile-header-theme-btn {
     right: 16px;
+    width: 34px;
+    padding: 0;
   }
 
   .mobile-shell-active .mobile-header-star-btn:hover,

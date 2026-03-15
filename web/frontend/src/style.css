@@ -207,6 +207,20 @@ body {
   color: #fbbf24;
 }
 
+.github-star-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(251, 191, 36, 0.14);
+  color: #fbbf24;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+}
+
 /* Cards */
 .card {
   background: var(--bg-card);

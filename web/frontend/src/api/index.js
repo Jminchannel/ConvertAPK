@@ -318,3 +318,8 @@ export const submitFeedback = async (payload) => {
   })
   return response.data
 }
+
+export const getGithubRepoStats = async () => {
+  const response = await api.get('/github/repo-stats')
+  return response.data
+}

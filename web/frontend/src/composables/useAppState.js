@@ -55,6 +55,8 @@ export const useAppState = () => {
   const currentLang = ref(getSavedLanguage())
   const showLangMenu = ref(false)
   const openDownloadMenu = ref(null)
+  const githubRepoUrl = ref('https://github.com/Jminchannel/ConvertAPK-Desktop')
+  const githubStarCount = ref(null)
   const languages = [
     { code: 'en', label: 'English' },
     { code: 'zh-CN', label: '简体中文' },
@@ -63,6 +65,15 @@ export const useAppState = () => {
   const currentLangLabel = computed(() => {
     const lang = languages.find((l) => l.code === currentLang.value)
     return lang ? lang.label : 'Language'
+  })
+  const hasGithubStarCount = computed(() => Number.isFinite(githubStarCount.value) && githubStarCount.value >= 0)
+  const githubStarCountText = computed(() => {
+    const count = Number(githubStarCount.value)
+    if (!Number.isFinite(count) || count < 0) return ''
+    if (count < 1000) return String(count)
+    if (count < 10000) return `${(count / 1000).toFixed(1).replace(/\\.0$/, '')}k`
+    if (count < 1000000) return `${Math.round(count / 1000)}k`
+    return `${(count / 1000000).toFixed(1).replace(/\\.0$/, '')}M`
   })
 
   const i18n = ref(createI18n(currentLang.value))
@@ -411,6 +422,7 @@ export const useAppState = () => {
   const tasks = ref([])
   const queueStatus = ref({ queue_size: 0, running_count: 0, max_concurrent: 1 })
   let pollInterval = null
+  let githubStatsInterval = null
 
   // Settings
   const showSettings = ref(false)
@@ -2316,6 +2328,26 @@ export const useAppState = () => {
     }
   }
 
+  const refreshGithubRepoStats = async () => {
+    try {
+      const result = await api.getGithubRepoStats()
+      if (typeof result?.repo_url === 'string' && /^https?:\/\//.test(result.repo_url)) {
+        githubRepoUrl.value = result.repo_url
+      }
+      const stars = Number(result?.stars)
+      if (Number.isFinite(stars) && stars >= 0) {
+        githubStarCount.value = stars
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  const handleDocumentVisibilityChange = () => {
+    if (document.hidden) return
+    refreshGithubRepoStats()
+  }
+
   const triggerFeedbackFileSelect = () => {
     feedbackFileInput.value?.click?.()
   }
@@ -2357,6 +2389,7 @@ export const useAppState = () => {
     await refreshTasks()
     await fetchAnnouncements()
     await loadSystemInfo()
+    refreshGithubRepoStats()
   }
 
   const openDonation = (fromAuto) => {
@@ -2424,11 +2457,16 @@ export const useAppState = () => {
     applyTheme(currentTheme.value)
     showComplianceNotice.value = true
     document.addEventListener('click', handleClickOutside)
+    document.addEventListener('visibilitychange', handleDocumentVisibilityChange)
     window.addEventListener('resize', updateMobileShell)
     await fetchAdminFeatures()
     await refreshTasks()
     await fetchAnnouncements()
     await loadSystemInfo()
+    refreshGithubRepoStats()
+    githubStatsInterval = setInterval(() => {
+      refreshGithubRepoStats()
+    }, 10 * 60 * 1000)
     if (window.windowControls?.isMaximized) {
       try {
         isMaximized.value = await window.windowControls.isMaximized()
@@ -2441,7 +2479,12 @@ export const useAppState = () => {
   onUnmounted(() => {
     stopPolling()
     document.removeEventListener('click', handleClickOutside)
+    document.removeEventListener('visibilitychange', handleDocumentVisibilityChange)
     window.removeEventListener('resize', updateMobileShell)
+    if (githubStatsInterval) {
+      clearInterval(githubStatsInterval)
+      githubStatsInterval = null
+    }
     if (mobileSwipeAnimTimer) {
       clearTimeout(mobileSwipeAnimTimer)
       mobileSwipeAnimTimer = null
@@ -2474,6 +2517,10 @@ export const useAppState = () => {
     currentLang,
     showLangMenu,
     openDownloadMenu,
+    githubRepoUrl,
+    githubStarCount,
+    hasGithubStarCount,
+    githubStarCountText,
     languages,
     currentLangLabel,
     i18n,
