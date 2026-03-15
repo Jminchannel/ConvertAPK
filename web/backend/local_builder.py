@@ -401,7 +401,8 @@ def _ensure_assets_cache(env: Dict[str, str], on_log=None) -> Optional[Tuple[Pat
     if assets_bin:
         return assets_bin, cache_root
     npm_cmd = _resolve_node_tool(env, "npm")
-    _run_cmd([npm_cmd, "install", "-D", "@capacitor/assets", "--legacy-peer-deps"], cwd=cache_root, env=env, on_log=on_log)
+    assets_package = os.getenv("CONVERTAPK_CAPACITOR_ASSETS_PACKAGE", "@capacitor/assets@3.0.5").strip() or "@capacitor/assets@3.0.5"
+    _run_cmd([npm_cmd, "install", "-D", assets_package, "--legacy-peer-deps"], cwd=cache_root, env=env, on_log=on_log)
     assets_bin = _resolve_assets_bin(cache_root)
     if assets_bin:
         return assets_bin, cache_root

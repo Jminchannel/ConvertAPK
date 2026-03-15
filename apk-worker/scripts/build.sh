@@ -1194,6 +1194,7 @@ log_info "Step 2: 初始化 Capacitor..."
 # 检查是否已安装Capacitor
 CAPACITOR_MAJOR="${CAPACITOR_MAJOR:-8}"
 CAPACITOR_VERSION_SPEC="^${CAPACITOR_MAJOR}"
+CAPACITOR_ASSETS_PACKAGE_SPEC="${CAPACITOR_ASSETS_PACKAGE_SPEC:-@capacitor/assets@3.0.5}"
 
 installCapacitorPackage() {
     local packageName="$1"
@@ -1294,7 +1295,8 @@ log_info "Step 4: 设置应用图标..."
 
 # 安装 @capacitor/assets
 log_info "安装 @capacitor/assets..."
-npm install -D "@capacitor/assets@${CAPACITOR_VERSION_SPEC}" --legacy-peer-deps
+log_info "使用 @capacitor/assets 包规格: ${CAPACITOR_ASSETS_PACKAGE_SPEC}"
+npm install -D "${CAPACITOR_ASSETS_PACKAGE_SPEC}" --legacy-peer-deps
 check_error "安装 @capacitor/assets 失败"
 
 # 创建 assets 目录
