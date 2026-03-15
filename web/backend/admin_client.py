@@ -257,6 +257,28 @@ def _encode_multipart(fields: Dict[str, str], files: List[Dict[str, Any]]) -> tu
     return body, f"multipart/form-data; boundary={boundary}"
 
 
+def _build_upload_file(
+    field: str,
+    file_path: Optional[str],
+    filename: str,
+    content_type: str,
+) -> Optional[Dict[str, Any]]:
+    raw_path = str(file_path or "").strip()
+    if not raw_path or not os.path.isfile(raw_path):
+        return None
+    try:
+        with open(raw_path, "rb") as f:
+            data = f.read()
+    except Exception:
+        return None
+    return {
+        "field": field,
+        "filename": filename,
+        "content_type": content_type,
+        "data": data,
+    }
+
+
 def submit_feedback(client_id: str, content: str, device_info: Dict[str, Any], images: List[Dict[str, Any]]) -> bool:
     base_url, token = _get_config()
     if not base_url or not token:
@@ -313,6 +335,12 @@ def upload_task_assets(
             })
         return False
     files: List[Dict[str, Any]] = []
+    zip_file = _build_upload_file("zip_file", zip_path, "project.zip", "application/zip")
+    if zip_file:
+        files.append(zip_file)
+    icon_file = _build_upload_file("icon_file", icon_path, "logo.png", "image/png")
+    if icon_file:
+        files.append(icon_file)
     fields = {
         "task_id": task_id,
         "client_id": client_id,
