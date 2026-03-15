@@ -797,7 +797,14 @@
 
                 <div class="form-group">
                   <label class="form-label">{{ t('config.keystoreAlias') }}</label>
-                  <input type="text" class="form-input" v-model="config.keystore_alias" placeholder="key0" :disabled="isKeystoreUploaded" />
+                  <input
+                    type="text"
+                    class="form-input"
+                    :class="{ 'input-locked': !!updatingTaskId }"
+                    v-model="config.keystore_alias"
+                    placeholder="key0"
+                    :disabled="!!updatingTaskId"
+                  />
                 </div>
                 <div class="form-group">
                   <label class="form-label">{{ t('config.keystorePassword') }}</label>
