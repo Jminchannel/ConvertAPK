@@ -46,6 +46,25 @@ def _has_dep(pkg: Dict, name: str) -> bool:
     return name in pkg.get("dependencies", {}) or name in pkg.get("devDependencies", {})
 
 
+def _get_dep_version(pkg: Dict, name: str) -> Optional[str]:
+    for group in ("dependencies", "devDependencies"):
+        group_deps = pkg.get(group, {})
+        if name in group_deps:
+            return str(group_deps[name])
+    return None
+
+
+def _dep_matches_major(dep_version: Optional[str], force_major: Optional[int]) -> bool:
+    if dep_version is None:
+        return False
+    if force_major is None:
+        return True
+    major_match = re.search(r"(\d+)", dep_version)
+    if not major_match:
+        return False
+    return int(major_match.group(1)) == force_major
+
+
 def _resolve_node_tool(env: Dict[str, str], tool: str) -> str:
     node_home = env.get("NODE_HOME", "").strip()
     if node_home:
@@ -56,14 +75,23 @@ def _resolve_node_tool(env: Dict[str, str], tool: str) -> str:
     return tool
 
 
-def _ensure_dep(pkg: Dict, env: Dict[str, str], name: str, dev: bool, on_log=None) -> None:
-    if _has_dep(pkg, name):
+def _ensure_dep(
+    pkg: Dict,
+    env: Dict[str, str],
+    name: str,
+    dev: bool,
+    on_log=None,
+    force_major: Optional[int] = None,
+) -> None:
+    current_version = _get_dep_version(pkg, name)
+    if _dep_matches_major(current_version, force_major):
         return
     npm_cmd = _resolve_node_tool(env, "npm")
     install_cmd = [npm_cmd, "install"]
     if dev:
         install_cmd.append("-D")
-    install_cmd.append(name)
+    package_name = f"{name}@^{force_major}" if force_major is not None else name
+    install_cmd.append(package_name)
     install_cmd.append("--legacy-peer-deps")
     _run_cmd(install_cmd, cwd=pkg["_root"], env=env, on_log=on_log)
 
@@ -1668,8 +1696,8 @@ def run_local_build(
         progress(35, "Step 2: 准备 Capacitor...")
         _log(on_log, "Step 2: 准备 Capacitor...")
         _offlineize_html_assets(web_dir / "index.html", process_env, on_log=on_log)
-        _ensure_dep(pkg, process_env, "@capacitor/core", dev=False, on_log=on_log)
-        _ensure_dep(pkg, process_env, "@capacitor/cli", dev=True, on_log=on_log)
+        _ensure_dep(pkg, process_env, "@capacitor/core", dev=False, on_log=on_log, force_major=8)
+        _ensure_dep(pkg, process_env, "@capacitor/cli", dev=True, on_log=on_log, force_major=8)
 
         config_text = (
             "import type { CapacitorConfig } from '@capacitor/cli';\n\n"
@@ -1685,7 +1713,7 @@ def run_local_build(
 
         progress(45, "Step 3: 生成 Android 工程...")
         _log(on_log, "Step 3: 生成 Android 工程...")
-        _ensure_dep(pkg, process_env, "@capacitor/android", dev=False, on_log=on_log)
+        _ensure_dep(pkg, process_env, "@capacitor/android", dev=False, on_log=on_log, force_major=8)
         if not (project_root / "android").exists():
             _run_cmd([npx_cmd, "cap", "add", "android"], cwd=project_root, env=process_env, on_log=on_log)
 

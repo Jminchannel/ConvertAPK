@@ -1163,6 +1163,21 @@ NODE
 log_info "Step 2: 初始化 Capacitor..."
 
 # 检查是否已安装Capacitor
+CAPACITOR_MAJOR="${CAPACITOR_MAJOR:-8}"
+CAPACITOR_VERSION_SPEC="^${CAPACITOR_MAJOR}"
+
+installCapacitorPackage() {
+    local packageName="$1"
+    local saveFlag="$2"
+    local packageSpec="${packageName}@${CAPACITOR_VERSION_SPEC}"
+    if [ -n "$saveFlag" ]; then
+        npm install "$saveFlag" "$packageSpec" --legacy-peer-deps
+    else
+        npm install "$packageSpec" --legacy-peer-deps
+    fi
+    check_error "install ${packageSpec} failed"
+}
+
 if ! grep -q "@capacitor/core" package.json; then
     log_info "安装 @capacitor/core..."
     npm install @capacitor/core --legacy-peer-deps
@@ -1195,6 +1210,13 @@ fi
 
 # 创建 capacitor.config.ts
 log_info "创建 Capacitor 配置..."
+log_info "Force install Capacitor major ${CAPACITOR_MAJOR} ..."
+installCapacitorPackage "@capacitor/core" ""
+installCapacitorPackage "@capacitor/cli" "-D"
+installCapacitorPackage "@capacitor/filesystem" ""
+installCapacitorPackage "@capacitor/browser" ""
+installCapacitorPackage "@capacitor/share" ""
+
 cat > capacitor.config.ts << EOF
 import type { CapacitorConfig } from '@capacitor/cli';
 
@@ -1220,7 +1242,7 @@ log_info "Step 3: 添加 Android 平台..."
 # 检查是否已安装android平台
 if ! grep -q "@capacitor/android" package.json; then
     log_info "安装 @capacitor/android..."
-    npm install @capacitor/android --legacy-peer-deps
+    npm install "@capacitor/android@${CAPACITOR_VERSION_SPEC}" --legacy-peer-deps
     check_error "安装 @capacitor/android 失败"
 fi
 
@@ -1242,7 +1264,7 @@ log_info "Step 4: 设置应用图标..."
 
 # 安装 @capacitor/assets
 log_info "安装 @capacitor/assets..."
-npm install -D @capacitor/assets --legacy-peer-deps
+npm install -D "@capacitor/assets@${CAPACITOR_VERSION_SPEC}" --legacy-peer-deps
 check_error "安装 @capacitor/assets 失败"
 
 # 创建 assets 目录
