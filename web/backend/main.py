@@ -255,11 +255,35 @@ def _store_task_asset(task_id: str, task_input_dir: Path, filename: str, source_
     return restored_path or (task_input_dir / filename)
 
 
+def _persist_task_source_copy(task_id: str, filename: str, source_path: Path) -> Path:
+    return persist_task_asset(task_id, filename, source_path, move=False)
+
+
 def _sync_task_asset_snapshot(task_id: str, task_input_dir: Path, filename: str) -> Path | None:
     asset_path = task_input_dir / filename
     if not asset_path.exists():
         return None
     return persist_task_asset(task_id, filename, asset_path, move=False)
+
+
+def _detach_working_task_asset(task_id: str, task_input_dir: Path, filename: str) -> Path | None:
+    working_path = task_input_dir / filename
+    persisted_path = get_persisted_task_asset_path(task_id, filename)
+    if not working_path.exists() or not persisted_path.exists():
+        return working_path if working_path.exists() else None
+    try:
+        same_file = os.path.samefile(str(working_path), str(persisted_path))
+    except Exception:
+        same_file = False
+    if not same_file:
+        return working_path
+    temp_path = task_input_dir / f".detach_{filename}"
+    if temp_path.exists():
+        temp_path.unlink()
+    shutil.copy2(str(working_path), str(temp_path))
+    working_path.unlink()
+    temp_path.replace(working_path)
+    return working_path
 
 
 def _normalize_external_url(raw_url: str) -> str | None:
@@ -1435,6 +1459,7 @@ async def create_task(task_data: BuildTaskCreate):
         src_html = BACKEND_UPLOAD_DIR / html_filename
         if not src_html.exists():
             raise HTTPException(status_code=400, detail="HTML文件不存在，请重新上传")
+        _persist_task_source_copy(task_id, "index.html", src_html)
         dst_html = task_input_dir / "index.html"
         shutil.move(str(src_html), str(dst_html))
 
@@ -1454,13 +1479,16 @@ async def create_task(task_data: BuildTaskCreate):
     cdn_localize_preprocessed = False
     cdn_localize_log_lines: list[str] = []
     if mode in {"convert", "html"}:
+        if mode == "convert":
+            _detach_working_task_asset(task_id, task_input_dir, "project.zip")
+        elif mode == "html":
+            _detach_working_task_asset(task_id, task_input_dir, "index.html")
         preprocess_result = _preprocess_task_cdn_localization(
             task_mode=mode,
             task_input_dir=task_input_dir,
             enabled=cdn_localize_enabled,
             selected_urls=cdn_localize_urls,
         )
-        _sync_task_asset_snapshot(task_id, task_input_dir, "project.zip")
         cdn_localize_preprocessed = bool(preprocess_result.get("preprocessed"))
         cdn_localize_log_lines = [str(item) for item in preprocess_result.get("log_lines", []) if str(item).strip()]
 
@@ -1570,7 +1598,10 @@ async def create_task(task_data: BuildTaskCreate):
     config_data["task_mode"] = task.mode
     if task.mode == "web" and task.web_url:
         config_data["web_url"] = task.web_url
-    zip_path = _resolve_task_asset_path(task_id, "project.zip")
+    persisted_zip_path = get_persisted_task_asset_path(task_id, "project.zip")
+    persisted_html_path = get_persisted_task_asset_path(task_id, "index.html")
+    zip_path = persisted_zip_path if persisted_zip_path.exists() else _resolve_task_asset_path(task_id, "project.zip")
+    html_path = persisted_html_path if persisted_html_path.exists() else _resolve_task_asset_path(task_id, "index.html")
     icon_path = _resolve_task_asset_path(task_id, "logo.png")
     zip_info = {"build_type": task.mode}
     if zip_path.exists():
@@ -1582,6 +1613,7 @@ async def create_task(task_data: BuildTaskCreate):
         zip_info,
         config_data,
         zip_path=str(zip_path) if zip_path.exists() else None,
+        html_path=str(html_path) if html_path.exists() else None,
         icon_path=str(icon_path) if icon_path.exists() else None,
         keystore_path=None,
         keystore_info={},
@@ -1691,7 +1723,10 @@ async def start_task(task_id: str, client_id: str = None):
         config_data["web_url"] = task.web_url
     task_input_dir = TASKS_DIR / task_id / "input"
     ensure_task_input_assets(task_id, task_input_dir)
-    zip_path = _resolve_task_asset_path(task_id, "project.zip")
+    persisted_zip_path = get_persisted_task_asset_path(task_id, "project.zip")
+    persisted_html_path = get_persisted_task_asset_path(task_id, "index.html")
+    zip_path = persisted_zip_path if persisted_zip_path.exists() else _resolve_task_asset_path(task_id, "project.zip")
+    html_path = persisted_html_path if persisted_html_path.exists() else _resolve_task_asset_path(task_id, "index.html")
     icon_path = _resolve_task_asset_path(task_id, "logo.png")
     zip_info = {"build_type": task.mode}
     if zip_path.exists():
@@ -1704,6 +1739,7 @@ async def start_task(task_id: str, client_id: str = None):
         zip_info,
         config_data,
         zip_path=str(zip_path) if zip_path.exists() else None,
+        html_path=str(html_path) if html_path.exists() else None,
         icon_path=str(icon_path) if icon_path.exists() else None,
         keystore_path=None,
         keystore_info={},
@@ -1914,13 +1950,13 @@ async def update_task(task_id: str, update_data: UpdateTaskRequest):
                 _extract_html_assets_from_zip(dst_zip, index_entry, dst_assets_dir)
                 shutil.copy2(str(dst_assets_dir / "index.html"), str(dst_html))
                 task.html_filename = "index.html"
-            _sync_task_asset_snapshot(task_id, task_input_dir, "project.zip")
 
     # HTML 模式：替换 HTML 资源
     if task.mode == "html":
         if update_data.html_filename:
             src_html = BACKEND_UPLOAD_DIR / update_data.html_filename
             if src_html.exists():
+                _persist_task_source_copy(task_id, "index.html", src_html)
                 dst_html = task_input_dir / "index.html"
                 if dst_html.exists():
                     dst_html.unlink()
@@ -1992,6 +2028,10 @@ async def update_task(task_id: str, update_data: UpdateTaskRequest):
             task.cdn_localize_select_all = False
         elif bool(getattr(task, "cdn_localize_select_all", False)):
             task.cdn_localize_urls = []
+        if task.mode == "convert":
+            _detach_working_task_asset(task_id, task_input_dir, "project.zip")
+        elif task.mode == "html":
+            _detach_working_task_asset(task_id, task_input_dir, "index.html")
         preprocess_result = _preprocess_task_cdn_localization(
             task_mode=task.mode,
             task_input_dir=task_input_dir,

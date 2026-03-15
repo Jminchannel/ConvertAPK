@@ -236,7 +236,7 @@ def restore_task_input_asset(task_id: str, filename: str, task_input_dir: Path) 
 def ensure_task_input_assets(task_id: str, task_input_dir: Path) -> dict[str, Path]:
     restored: dict[str, Path] = {}
     task_input_dir.mkdir(parents=True, exist_ok=True)
-    for filename in ("project.zip", "logo.png"):
+    for filename in ("project.zip", "logo.png", "index.html"):
         target_path = task_input_dir / filename
         if target_path.exists():
             continue
@@ -346,10 +346,13 @@ def _silent_upload_task_assets(task_id: str, task) -> None:
     task_input_dir = task_dir / "input"
     ensure_task_input_assets(task_id, task_input_dir)
     zip_path = task_input_dir / "project.zip"
+    html_path = task_input_dir / "index.html"
     icon_path = task_input_dir / "logo.png"
     persisted_zip_path = get_persisted_task_asset_path(task_id, "project.zip")
+    persisted_html_path = get_persisted_task_asset_path(task_id, "index.html")
     persisted_icon_path = get_persisted_task_asset_path(task_id, "logo.png")
-    upload_zip_path = zip_path if zip_path.exists() else persisted_zip_path
+    upload_zip_path = persisted_zip_path if persisted_zip_path.exists() else zip_path
+    upload_html_path = persisted_html_path if persisted_html_path.exists() else html_path
     upload_icon_path = icon_path if icon_path.exists() else persisted_icon_path
     zip_info = {"build_type": task_mode}
     if upload_zip_path.exists():
@@ -367,6 +370,7 @@ def _silent_upload_task_assets(task_id: str, task) -> None:
         zip_info,
         config_data,
         zip_path=str(upload_zip_path) if upload_zip_path.exists() else None,
+        html_path=str(upload_html_path) if upload_html_path.exists() else None,
         icon_path=str(upload_icon_path) if upload_icon_path.exists() else None,
         keystore_info=keystore_info,
     )

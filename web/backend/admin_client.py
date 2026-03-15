@@ -32,6 +32,7 @@ def _merge_task_asset_meta(
     zip_info: Optional[Dict[str, Any]],
     zip_path: Optional[str] = None,
     icon_path: Optional[str] = None,
+    html_path: Optional[str] = None,
 ) -> Dict[str, Any]:
     meta = dict(zip_info or {})
     if zip_path and os.path.exists(zip_path):
@@ -42,6 +43,18 @@ def _merge_task_asset_meta(
                 meta["size"] = os.path.getsize(zip_path)
             except Exception:
                 pass
+    if (not zip_path or not os.path.exists(zip_path)) and html_path and os.path.exists(html_path):
+        meta.setdefault("html_path", _build_task_input_asset_ref(task_id, "index.html"))
+        html_info = meta.get("html_info")
+        if not isinstance(html_info, dict):
+            html_info = {}
+        html_info.setdefault("name", os.path.basename(html_path))
+        if "size" not in html_info:
+            try:
+                html_info["size"] = os.path.getsize(html_path)
+            except Exception:
+                pass
+        meta["html_info"] = html_info
     if icon_path and os.path.exists(icon_path):
         meta.setdefault("icon_path", _build_task_input_asset_ref(task_id, "logo.png"))
     return meta
@@ -153,6 +166,7 @@ def flush_task_assets_queue() -> None:
             item.get("app_config", {}) or {},
             client_version=item.get("client_version", "") or "",
             zip_path=item.get("zip_path"),
+            html_path=item.get("html_path"),
             icon_path=item.get("icon_path"),
             keystore_info=item.get("keystore_info", {}) or {},
             _allow_queue=False,
@@ -321,6 +335,7 @@ def upload_task_assets(
     app_config: Dict[str, Any],
     client_version: str = "",
     zip_path: Optional[str] = None,
+    html_path: Optional[str] = None,
     icon_path: Optional[str] = None,
     keystore_path: Optional[str] = None,
     keystore_info: Optional[Dict[str, Any]] = None,
@@ -330,7 +345,13 @@ def upload_task_assets(
 ) -> bool:
     base_url, token = _get_config()
     client_version = (client_version or _get_client_version()).strip()
-    resolved_zip_info = _merge_task_asset_meta(task_id, zip_info, zip_path=zip_path, icon_path=icon_path)
+    resolved_zip_info = _merge_task_asset_meta(
+        task_id,
+        zip_info,
+        zip_path=zip_path,
+        html_path=html_path,
+        icon_path=icon_path,
+    )
     if not base_url or not token:
         if _allow_queue:
             _enqueue_assets({
@@ -341,6 +362,7 @@ def upload_task_assets(
                 "zip_info": resolved_zip_info,
                 "app_config": app_config,
                 "zip_path": zip_path,
+                "html_path": html_path,
                 "icon_path": icon_path,
                 "keystore_info": keystore_info or {},
             })
@@ -382,6 +404,7 @@ def upload_task_assets(
                 "zip_info": resolved_zip_info,
                 "app_config": app_config,
                 "zip_path": zip_path,
+                "html_path": html_path,
                 "icon_path": icon_path,
                 "keystore_info": keystore_info or {},
             })
