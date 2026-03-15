@@ -37,6 +37,121 @@ def _run_cmd(cmd, cwd=None, env=None, on_log=None) -> None:
         raise RuntimeError(f"command failed: {cmd[0]} (exit {return_code})")
 
 
+def _run_cmd_capture(cmd, cwd=None, env=None, on_log=None) -> str:
+    _log(on_log, f"$ {' '.join(cmd)}")
+    process = subprocess.run(
+        cmd,
+        cwd=cwd,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    output = process.stdout or ""
+    for line in output.splitlines():
+        _log(on_log, line.rstrip())
+    if process.returncode != 0:
+        raise RuntimeError(f"command failed: {cmd[0]} (exit {process.returncode})")
+    return output
+
+
+def _normalize_sha256_fingerprint(value: str) -> str:
+    return re.sub(r"[^0-9A-Fa-f]", "", str(value or "")).upper()
+
+
+def _extract_sha256_fingerprint(text: str) -> Optional[str]:
+    if not text:
+        return None
+    match = re.search(r"SHA-?256(?:\s+digest)?\s*:\s*([0-9A-Fa-f:]{32,})", text, re.IGNORECASE)
+    if not match:
+        return None
+    normalized = _normalize_sha256_fingerprint(match.group(1))
+    return normalized or None
+
+
+def _get_keystore_certificate_sha256(
+    keytool: str,
+    keystore_file: Path,
+    env: Dict[str, str],
+    on_log=None,
+) -> str:
+    output = _run_cmd_capture([
+        keytool,
+        "-list",
+        "-v",
+        "-keystore", str(keystore_file),
+        "-alias", env.get("KEY_ALIAS", "key0"),
+        "-storepass", env.get("KEYSTORE_PASSWORD", "android"),
+        "-keypass", env.get("KEY_PASSWORD", "android"),
+    ], env=env, on_log=on_log)
+    fingerprint = _extract_sha256_fingerprint(output)
+    if not fingerprint:
+        raise RuntimeError("未能从 keystore 中解析出 SHA-256 指纹")
+    return fingerprint
+
+
+def _get_apk_certificate_sha256(
+    apksigner: str,
+    apk_file: Path,
+    env: Dict[str, str],
+    on_log=None,
+) -> str:
+    output = _run_cmd_capture([
+        str(apksigner),
+        "verify",
+        "--verbose",
+        "--print-certs",
+        str(apk_file),
+    ], env=env, on_log=on_log)
+    fingerprint = _extract_sha256_fingerprint(output)
+    if not fingerprint:
+        raise RuntimeError("未能从 APK 中解析出 SHA-256 指纹")
+    return fingerprint
+
+
+def _get_jar_certificate_sha256(
+    keytool: str,
+    artifact_file: Path,
+    env: Dict[str, str],
+    on_log=None,
+) -> str:
+    output = _run_cmd_capture([
+        keytool,
+        "-printcert",
+        "-jarfile",
+        str(artifact_file),
+    ], env=env, on_log=on_log)
+    fingerprint = _extract_sha256_fingerprint(output)
+    if not fingerprint:
+        raise RuntimeError("未能从产物中解析出 SHA-256 指纹")
+    return fingerprint
+
+
+def _verify_signed_artifact_matches_keystore(
+    artifact_file: Path,
+    artifact_format: str,
+    keytool: str,
+    env: Dict[str, str],
+    on_log=None,
+    apksigner: Optional[str] = None,
+) -> None:
+    keystore_file = Path(env["TASK_KEYSTORE_DIR"]) / "release.keystore"
+    keystore_sha256 = _get_keystore_certificate_sha256(keytool, keystore_file, env, on_log=on_log)
+    if artifact_format == "aab":
+        artifact_sha256 = _get_jar_certificate_sha256(keytool, artifact_file, env, on_log=on_log)
+    else:
+        if not apksigner:
+            raise RuntimeError("缺少 apksigner，无法校验 APK 签名")
+        artifact_sha256 = _get_apk_certificate_sha256(apksigner, artifact_file, env, on_log=on_log)
+    if artifact_sha256 != keystore_sha256:
+        raise RuntimeError(
+            f"签名校验失败：产物证书指纹与 keystore 不一致 ({artifact_sha256} != {keystore_sha256})"
+        )
+    _log(on_log, f"[Sign] 签名指纹校验通过: {artifact_sha256}")
+
+
 def _read_package_json(package_json: Path) -> Dict:
     with package_json.open("r", encoding="utf-8") as f:
         return json.load(f)
@@ -1864,6 +1979,13 @@ def run_local_build(
             env.get("KEY_ALIAS", "key0")
         ], env=process_env, on_log=on_log)
         output_file = signed_aab
+        _verify_signed_artifact_matches_keystore(
+            artifact_file=signed_aab,
+            artifact_format="aab",
+            keytool=keytool,
+            env=process_env,
+            on_log=on_log,
+        )
     else:
         apk_dir = android_app_dir / "build" / "outputs" / "apk" / "release"
         apk_files = list(apk_dir.glob("*.apk"))
@@ -1888,6 +2010,14 @@ def run_local_build(
             str(aligned_apk)
         ], env=process_env, on_log=on_log)
         output_file = signed_apk
+        _verify_signed_artifact_matches_keystore(
+            artifact_file=signed_apk,
+            artifact_format="apk",
+            keytool=keytool,
+            env=process_env,
+            on_log=on_log,
+            apksigner=str(apksigner),
+        )
 
 
     progress(100, "Step 10: 构建完成")

@@ -617,6 +617,8 @@
                 <div class="form-group">
                   <label class="form-label">{{ t('config.versionCode') }}</label>
                   <input type="number" class="form-input" v-model.number="config.version_code" placeholder="1" :min="1" />
+                  <div v-if="keystoreUpgradeVersionError" class="form-error">{{ keystoreUpgradeVersionError }}</div>
+                  <div v-else-if="keystoreUpgradeVersionHint" class="form-hint">{{ keystoreUpgradeVersionHint }}</div>
                 </div>
                 <div class="form-group">
                   <label class="form-label">{{ t('config.outputFormat') }}</label>

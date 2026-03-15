@@ -752,6 +752,46 @@ export const useAppState = () => {
   })
 
   const isKeystoreUploaded = computed(() => Boolean(uploadedKeystore.value))
+  const latestSamePackageTask = computed(() => {
+    const packageName = String(config.value.package_name || '').trim()
+    if (!packageName) return null
+    const candidates = tasks.value.filter((task) => {
+      if (!task || task.status !== 'success') return false
+      if (updatingTaskId.value && task.id === updatingTaskId.value) return false
+      return String(task.config?.package_name || '').trim() === packageName
+    })
+    if (!candidates.length) return null
+    return candidates.sort((left, right) => {
+      const leftVersion = Number(left.config?.version_code || 0)
+      const rightVersion = Number(right.config?.version_code || 0)
+      if (rightVersion !== leftVersion) return rightVersion - leftVersion
+      return new Date(right.updated_at || 0).getTime() - new Date(left.updated_at || 0).getTime()
+    })[0]
+  })
+  const keystoreUpgradeVersionError = computed(() => {
+    if (!isKeystoreUploaded.value || updatingTaskId.value) return ''
+    const latestTask = latestSamePackageTask.value
+    if (!latestTask) return ''
+    const latestVersionCode = Number(latestTask.config?.version_code || 0)
+    const currentVersionCode = Number(config.value.version_code || 0)
+    if (!Number.isFinite(latestVersionCode) || latestVersionCode < 1) return ''
+    if (Number.isFinite(currentVersionCode) && currentVersionCode > latestVersionCode) return ''
+    return t('config.keystoreUpgradeVersionRule', {
+      current: latestVersionCode,
+      next: latestVersionCode + 1
+    })
+  })
+  const keystoreUpgradeVersionHint = computed(() => {
+    if (!isKeystoreUploaded.value || updatingTaskId.value || keystoreUpgradeVersionError.value) return ''
+    const latestTask = latestSamePackageTask.value
+    if (!latestTask) return ''
+    const latestVersionCode = Number(latestTask.config?.version_code || 0)
+    if (!Number.isFinite(latestVersionCode) || latestVersionCode < 1) return ''
+    return t('config.keystoreUpgradeVersionHint', {
+      packageName: String(config.value.package_name || '').trim(),
+      next: latestVersionCode + 1
+    })
+  })
 
   const canCreateTask = computed(() => {
     if (mode.value === 'web' && !isWebModeEnabled.value) {
@@ -765,6 +805,7 @@ export const useAppState = () => {
       config.value.app_name &&
       config.value.package_name &&
       !packageNameError.value &&
+      !keystoreUpgradeVersionError.value &&
       (!shouldCheckKeystore || (!keystorePasswordError.value && !keyPasswordError.value)) &&
       hasIcon
 
@@ -2072,6 +2113,10 @@ export const useAppState = () => {
 
   // Create/Update task
   const createTask = async () => {
+    if (keystoreUpgradeVersionError.value) {
+      showToast(keystoreUpgradeVersionError.value, 'error')
+      return
+    }
     if (!canCreateTask.value) return
     if (mode.value === 'web' && !isWebModeEnabled.value) {
       showToast('Web（链接）转 APK 模式已关闭', 'error')
@@ -2591,6 +2636,9 @@ export const useAppState = () => {
     keystoreInput,
     uploadedKeystore,
     keystoreUploadError,
+    latestSamePackageTask,
+    keystoreUpgradeVersionError,
+    keystoreUpgradeVersionHint,
     uploadedFile,
     uploadedHtmlFile,
     uploadProgress,

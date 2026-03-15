@@ -1259,6 +1259,13 @@ export const messages = {
 }
 
 // 获取浏览器语言
+messages.en.config.keystoreUpgradeVersionRule = 'For same-package upgrades, versionCode must be greater than {current}. Recommended: at least {next}.'
+messages.en.config.keystoreUpgradeVersionHint = 'A signed build for {packageName} already exists. To upgrade-install, set versionCode to at least {next}.'
+messages['zh-CN'].config.keystoreUpgradeVersionRule = '同包名升级安装时，versionCode 必须大于 {current}，建议至少填写 {next}。'
+messages['zh-CN'].config.keystoreUpgradeVersionHint = '{packageName} 已有成功的签名构建，如需覆盖安装，请将 versionCode 设置为至少 {next}。'
+messages['zh-TW'].config.keystoreUpgradeVersionRule = '同套件名稱升級安裝時，versionCode 必須大於 {current}，建議至少填寫 {next}。'
+messages['zh-TW'].config.keystoreUpgradeVersionHint = '{packageName} 已有成功的簽名建構，如需覆蓋安裝，請將 versionCode 設為至少 {next}。'
+
 export function getBrowserLanguage() {
   const lang = navigator.language || navigator.userLanguage
   if (lang.startsWith('zh')) {

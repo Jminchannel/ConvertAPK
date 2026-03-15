@@ -57,6 +57,68 @@ check_error() {
     fi
 }
 
+normalizeSha256() {
+    printf '%s' "$1" | tr -d '\r' | sed -E 's/[^0-9A-Fa-f]//g' | tr '[:lower:]' '[:upper:]'
+}
+
+extractSha256FromText() {
+    printf '%s\n' "$1" | tr -d '\r' | sed -n -E 's/.*SHA-?256( digest)?[[:space:]]*:[[:space:]]*([0-9A-Fa-f:]+).*/\2/p' | head -n 1
+}
+
+getKeystoreSha256() {
+    local output=""
+    output="$(keytool -list -v -keystore "$KEYSTORE_FILE" -alias "$KEY_ALIAS" -storepass "$KEYSTORE_PASSWORD" -keypass "$KEY_PASSWORD" 2>&1 || true)"
+    local raw
+    raw="$(extractSha256FromText "$output")"
+    if [ -z "$raw" ]; then
+        log_error "无法从 keystore 中解析 SHA-256 指纹"
+        return 1
+    fi
+    normalizeSha256 "$raw"
+}
+
+getSignedApkSha256() {
+    local output=""
+    output="$(apksigner verify --verbose --print-certs "$SIGNED_APK" 2>&1 || true)"
+    local raw
+    raw="$(extractSha256FromText "$output")"
+    if [ -z "$raw" ]; then
+        log_error "无法从 APK 中解析 SHA-256 指纹"
+        return 1
+    fi
+    normalizeSha256 "$raw"
+}
+
+getSignedAabSha256() {
+    local output=""
+    output="$(keytool -printcert -jarfile "$SIGNED_AAB" 2>&1 || true)"
+    local raw
+    raw="$(extractSha256FromText "$output")"
+    if [ -z "$raw" ]; then
+        log_error "无法从 AAB 中解析 SHA-256 指纹"
+        return 1
+    fi
+    normalizeSha256 "$raw"
+}
+
+verifyOutputSignatureMatchesKeystore() {
+    local keystoreSha256=""
+    local artifactSha256=""
+    keystoreSha256="$(getKeystoreSha256)" || exit 1
+    if [ "$OUTPUT_FORMAT" = "aab" ]; then
+        artifactSha256="$(getSignedAabSha256)" || exit 1
+    else
+        artifactSha256="$(getSignedApkSha256)" || exit 1
+    fi
+    log_info "keystore SHA-256: $keystoreSha256"
+    log_info "artifact SHA-256: $artifactSha256"
+    if [ "$keystoreSha256" != "$artifactSha256" ]; then
+        log_error "签名校验失败：产物证书与当前 keystore 不一致"
+        exit 1
+    fi
+    log_success "签名指纹校验通过"
+}
+
 runOfflineizeAssets() {
     local entryHtml="$1"
     local stepLabel="${2:-Step 1.5}"
@@ -3140,6 +3202,7 @@ if [ "$OUTPUT_FORMAT" = "aab" ]; then
     # 验证签名
     log_info "验证 AAB 签名..."
     jarsigner -verify -verbose -certs "$SIGNED_AAB"
+    verifyOutputSignatureMatchesKeystore
     check_error "AAB 签名验证失败"
 
     log_success "AAB 签名完成"
@@ -3179,6 +3242,7 @@ else
     # 验证签名
     log_info "验证 APK 签名..."
     apksigner verify --verbose "$SIGNED_APK"
+    verifyOutputSignatureMatchesKeystore
     check_error "APK 签名验证失败"
 
     log_success "APK 签名完成"
