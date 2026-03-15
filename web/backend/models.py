@@ -233,6 +233,34 @@ class BuildTaskResponse(BaseModel):
     cdn_localize_select_all: bool = False
     cdn_localize_preprocessed: bool = False
 
+
+class BuildTaskListItemResponse(BaseModel):
+    """鏋勫缓浠诲姟鍒楄〃椤?"""
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    client_id: str = ""
+    quick_generate: bool = False
+    mode: str = "convert"
+    web_url: Optional[str] = None
+    filename: Optional[str] = None
+    html_filename: Optional[str] = None
+    icon_filename: Optional[str] = None
+    keystore_filename: Optional[str] = None
+    config: AppConfig
+    status: BuildStatus
+    created_at: datetime
+    updated_at: datetime
+    progress: int
+    message: str
+    download_url: Optional[str] = None
+    output_filename: Optional[str] = None
+    reuse_keystore_from: Optional[str] = None
+    cdn_localize_enabled: bool = False
+    cdn_localize_urls: List[str] = []
+    cdn_localize_select_all: bool = False
+    cdn_localize_preprocessed: bool = False
+
+
 class UpdateTaskRequest(BaseModel):
     """更新任务请求"""
     client_id: str  # 客户端ID（用于验证所有权）

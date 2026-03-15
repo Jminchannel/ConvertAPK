@@ -945,12 +945,13 @@
               </button>
               <button
                 v-for="page in taskPageNumbers"
-                :key="page"
+                :key="page.key"
                 class="btn btn-ghost btn-sm"
-                :class="{ active: page === currentTaskPage }"
-                @click="goToTaskPage(page)"
+                :class="{ active: page.type === 'page' && page.value === currentTaskPage }"
+                :disabled="page.type !== 'page'"
+                @click="page.type === 'page' && goToTaskPage(page.value)"
               >
-                {{ page }}
+                {{ page.value }}
               </button>
               <button
                 class="btn btn-ghost btn-sm"

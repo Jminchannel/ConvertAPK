@@ -837,9 +837,7 @@ export const useAppState = () => {
   }
 
   const getTaskTime = (task) => task.updated_at || task.created_at
-  const sortedTasks = computed(() => (
-    [...tasks.value].sort((a, b) => new Date(getTaskTime(b)) - new Date(getTaskTime(a)))
-  ))
+  const sortedTasks = computed(() => tasks.value)
   const taskPageSize = 10
   const currentTaskPage = ref(1)
   const totalTaskPages = computed(() => Math.max(1, Math.ceil(sortedTasks.value.length / taskPageSize)))
@@ -847,14 +845,51 @@ export const useAppState = () => {
     const start = (currentTaskPage.value - 1) * taskPageSize
     return sortedTasks.value.slice(start, start + taskPageSize)
   })
-  const taskPageNumbers = computed(() => Array.from({ length: totalTaskPages.value }, (_, i) => i + 1))
+  const taskPageNumbers = computed(() => {
+    const total = totalTaskPages.value
+    const current = currentTaskPage.value
+    if (total <= 7) {
+      return Array.from({ length: total }, (_, index) => ({
+        key: `page-${index + 1}`,
+        type: 'page',
+        value: index + 1
+      }))
+    }
+
+    const items = [
+      { key: 'page-1', type: 'page', value: 1 }
+    ]
+    let start = Math.max(2, current - 1)
+    let end = Math.min(total - 1, current + 1)
+
+    if (current <= 3) end = 4
+    if (current >= total - 2) start = total - 3
+
+    if (start > 2) {
+      items.push({ key: 'ellipsis-left', type: 'ellipsis', value: '...' })
+    }
+
+    for (let page = start; page <= end; page += 1) {
+      items.push({ key: `page-${page}`, type: 'page', value: page })
+    }
+
+    if (end < total - 1) {
+      items.push({ key: 'ellipsis-right', type: 'ellipsis', value: '...' })
+    }
+
+    items.push({ key: `page-${total}`, type: 'page', value: total })
+    return items
+  })
   const goToTaskPage = (page) => {
     const clamped = Math.max(1, Math.min(totalTaskPages.value, Number(page || 1)))
     currentTaskPage.value = clamped
   }
   const taskStats = computed(() => {
     const total = tasks.value.length
-    const success = tasks.value.filter((t) => t.status === 'success').length
+    let success = 0
+    for (const task of tasks.value) {
+      if (task.status === 'success') success += 1
+    }
     return { total, success }
   })
 
@@ -1785,11 +1820,15 @@ export const useAppState = () => {
   // Tasks
   const refreshTasks = async () => {
     try {
-      tasks.value = await api.getTasks()
-      try {
-        queueStatus.value = await api.getQueueStatus()
-      } catch {
-        // ignore
+      const [tasksResult, queueResult] = await Promise.allSettled([
+        api.getTasks(),
+        api.getQueueStatus()
+      ])
+      if (tasksResult.status === 'fulfilled') {
+        tasks.value = Array.isArray(tasksResult.value) ? tasksResult.value : []
+      }
+      if (queueResult.status === 'fulfilled') {
+        queueStatus.value = queueResult.value
       }
     } catch (e) {
       // ignore

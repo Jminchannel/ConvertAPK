@@ -27,7 +27,7 @@ import urllib.parse
 import zipfile
 
 from models import (
-    BuildTask, BuildTaskCreate, BuildTaskResponse, 
+    BuildTask, BuildTaskCreate, BuildTaskListItemResponse, BuildTaskResponse,
     BuildStatus, AppConfig, UpdateTaskRequest
 )
 from builder import (
@@ -1560,11 +1560,13 @@ async def create_task(task_data: BuildTaskCreate):
     return task
 
 
-@app.get("/api/tasks", response_model=List[BuildTaskResponse])
+@app.get("/api/tasks", response_model=List[BuildTaskListItemResponse], response_model_exclude_none=True)
 async def list_tasks(client_id: str = None):
     """获取任务列表，按client_id筛选"""
     client_id = _require_client_id(client_id)
-    return [task for task in tasks_db.values() if task.client_id == client_id]
+    task_list = [task for task in tasks_db.values() if task.client_id == client_id]
+    task_list.sort(key=lambda task: (task.updated_at, task.created_at, task.id), reverse=True)
+    return task_list
 
 
 @app.get("/api/tasks/{task_id}", response_model=BuildTaskResponse)
