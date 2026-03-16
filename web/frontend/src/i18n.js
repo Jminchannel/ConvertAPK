@@ -15,8 +15,8 @@ export const messages = {
       settings: 'Settings'
     },
     github: {
-      star: 'GitHub Stars',
-      starTitle: 'Open the GitHub project and leave a star'
+      star: 'Github Stars',
+      starTitle: 'Open the Github project and leave a star'
     },
     // Mode
     mode: {
@@ -437,8 +437,8 @@ export const messages = {
       settings: '设置'
     },
     github: {
-      star: 'GitHub小星星',
-      starTitle: '打开 GitHub 项目并点亮 Star'
+      star: 'Github Stars',
+      starTitle: '打开 Github 项目并点亮 Star'
     },
     // Mode
     mode: {
@@ -855,8 +855,8 @@ export const messages = {
       settings: '設定'
     },
     github: {
-      star: 'GitHub小星星',
-      starTitle: '打開 GitHub 專案並點亮 Star'
+      star: 'Github Stars',
+      starTitle: '打開 Github 專案並點亮 Star'
     },
     // Mode
     mode: {

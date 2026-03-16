@@ -28,7 +28,14 @@
           :title="t('github.starTitle')"
           :aria-label="t('github.starTitle')"
         >
-          <span>&#x2605;</span>
+          <span class="github-star-visual" aria-hidden="true">
+            <span class="github-star-core">&#x2605;</span>
+            <span class="github-star-orbit github-star-orbit-a"></span>
+            <span class="github-star-orbit github-star-orbit-b"></span>
+            <span class="github-star-spark github-star-spark-a"></span>
+            <span class="github-star-spark github-star-spark-b"></span>
+            <span class="github-star-spark github-star-spark-c"></span>
+          </span>
           <span v-if="hasGithubStarCount" class="mobile-header-star-count">{{ githubStarCountText }}</span>
         </a>
 
@@ -85,7 +92,14 @@
             :title="t('github.starTitle')"
             :aria-label="t('github.starTitle')"
           >
-            <span class="action-icon">&#x2605;</span>
+            <span class="github-star-visual" aria-hidden="true">
+              <span class="github-star-core">&#x2605;</span>
+              <span class="github-star-orbit github-star-orbit-a"></span>
+              <span class="github-star-orbit github-star-orbit-b"></span>
+              <span class="github-star-spark github-star-spark-a"></span>
+              <span class="github-star-spark github-star-spark-b"></span>
+              <span class="github-star-spark github-star-spark-c"></span>
+            </span>
             <span class="action-label">{{ t('github.star') }}</span>
             <span v-if="hasGithubStarCount" class="github-star-count">{{ githubStarCountText }}</span>
           </a>
