@@ -158,6 +158,10 @@
             <span class="mode-icon">🌐</span>
             {{ t('mode.web') }}
           </button>
+          <button v-if="isDesktopModeEnabled" class="mode-tab" :class="{ active: mode === 'desktop' }" @click="handleModeChange('desktop')">
+            <span class="mode-icon">&#x1F5A5;</span>
+            {{ t('mode.desktop') }}
+          </button>
           <button class="mode-tab" :class="{ active: mode === 'html' }" @click="handleModeChange('html')">
             <span class="mode-icon">📄</span>
             {{ t('mode.html') }}
@@ -181,7 +185,7 @@
           </div>
           <div class="step" :class="{ active: currentStep === 3, completed: currentStep > 3 }">
             <div class="step-number">{{ currentStep > 3 ? '✓' : '3' }}</div>
-            <div class="step-text">{{ t('steps.build') }}</div>
+            <div class="step-text">{{ mode === 'desktop' ? t('steps.buildDesktop') : t('steps.build') }}</div>
           </div>
         </div>
 
@@ -227,12 +231,12 @@
             </div>
 
             <!-- Upload (convert only) -->
-            <div class="card" v-if="mode === 'convert'" ref="convertUploadSection">
+            <div class="card" v-if="mode === 'convert' || mode === 'desktop'" ref="convertUploadSection">
               <div class="card-header">
                 <div class="card-icon">📦</div>
                 <div>
-                  <div class="card-title">{{ t('upload.title') }}</div>
-                  <div class="card-subtitle">{{ t('upload.subtitle') }}</div>
+                  <div class="card-title">{{ mode === 'desktop' ? t('upload.desktopTitle') : t('upload.title') }}</div>
+                  <div class="card-subtitle">{{ mode === 'desktop' ? t('upload.desktopSubtitle') : t('upload.subtitle') }}</div>
                 </div>
               </div>
 
@@ -253,8 +257,8 @@
 
                 <template v-if="!uploadedFile">
                   <div class="upload-icon">📁</div>
-                  <div class="upload-text">{{ t('upload.dragDrop') }}</div>
-                  <div class="upload-hint">{{ t('upload.hint') }}</div>
+                  <div class="upload-text">{{ mode === 'desktop' ? t('upload.desktopDragDrop') : t('upload.dragDrop') }}</div>
+                  <div class="upload-hint">{{ mode === 'desktop' ? t('upload.desktopHint') : t('upload.hint') }}</div>
                 </template>
                 <template v-else>
                   <div class="upload-icon">✅</div>
@@ -620,7 +624,7 @@
                   <div v-if="keystoreUpgradeVersionError" class="form-error">{{ keystoreUpgradeVersionError }}</div>
                   <div v-else-if="keystoreUpgradeVersionHint" class="form-hint">{{ keystoreUpgradeVersionHint }}</div>
                 </div>
-                <div class="form-group">
+                <div v-if="mode !== 'desktop'" class="form-group">
                   <label class="form-label">{{ t('config.outputFormat') }}</label>
                   <select class="form-input form-select" v-model="config.output_format">
                     <option value="apk">{{ t('config.apk') }}</option>
@@ -629,6 +633,7 @@
                 </div>
               </div>
 
+              <template v-if="mode !== 'desktop'">
               <div class="divider"></div>
 
               <!-- APK style -->
@@ -829,6 +834,7 @@
                   <div v-if="keyPasswordError" class="form-error">{{ keyPasswordError }}</div>
                 </div>
               </div>
+              </template>
 
               </template>
 
@@ -908,7 +914,7 @@
                   <span v-if="task.status === 'processing'" class="task-progress-badge">
                     {{ isQueuedTask(task) ? t('tasks.waiting') : `${task.progress}%` }}
                   </span>
-                  <div v-if="task.status === 'success'" class="download-dropdown" :class="{ open: openDownloadMenu === task.id }">
+                  <div v-if="task.status === 'success' && (task.output_filename || (task.mode !== 'desktop' && task.keystore_filename))" class="download-dropdown" :class="{ open: openDownloadMenu === task.id }">
                     <button
                       class="btn btn-primary btn-sm dropdown-trigger"
                       :title="t('tasks.downloadMenu')"
@@ -917,10 +923,10 @@
                       <span class="action-icon">&#x2B07;</span>
                     </button>
                     <div v-if="openDownloadMenu === task.id" class="dropdown-menu">
-                      <a class="dropdown-item" :href="getDownloadUrl(task.id)" @click.prevent="downloadTaskArtifact(task.id, 'apk')">
+                      <a v-if="task.output_filename" class="dropdown-item" :href="getDownloadUrl(task.id)" @click.prevent="downloadTaskArtifact(task.id, 'apk')">
                         {{ t('tasks.download') }}
                       </a>
-                      <a class="dropdown-item" :href="getKeystoreUrl(task.id)" @click.prevent="downloadTaskArtifact(task.id, 'signed')">
+                      <a v-if="task.mode !== 'desktop' && task.keystore_filename" class="dropdown-item" :href="getKeystoreUrl(task.id)" @click.prevent="downloadTaskArtifact(task.id, 'signed')">
                         {{ t('tasks.downloadSigned') }}
                       </a>
                     </div>

@@ -111,11 +111,13 @@ export const useAppState = () => {
   }
 
   // Modes & feature state
-  const mode = ref('convert') // convert | web | html
+  const mode = ref('convert') // convert | web | html | desktop
   const featureFlags = ref({
-    web_link_to_apk_enabled: false
+    web_link_to_apk_enabled: false,
+    zip_to_desktop_enabled: false
   })
   const isWebModeEnabled = computed(() => Boolean(featureFlags.value.web_link_to_apk_enabled))
+  const isDesktopModeEnabled = computed(() => Boolean(featureFlags.value.zip_to_desktop_enabled))
   const mainRef = ref(null)
   const mobilePageHeadRef = ref(null)
   const convertUploadSection = ref(null)
@@ -234,7 +236,7 @@ export const useAppState = () => {
       await scrollToMobileHeadAnchor()
       return
     }
-    const target = mode.value === 'convert'
+    const target = mode.value === 'convert' || mode.value === 'desktop'
       ? convertUploadSection.value
       : (mode.value === 'html' ? htmlUploadSection.value : webUrlSection.value)
     await scrollWithinMain(target)
@@ -347,6 +349,10 @@ export const useAppState = () => {
       showToast('Web（链接）转 APK 模式已关闭', 'error')
       return
     }
+    if (value === 'desktop' && !isDesktopModeEnabled.value) {
+      showToast(t('toast.desktopModeDisabled'), 'error')
+      return
+    }
     mode.value = value
     if (isMobileShell.value) {
       const previousTab = mobileTab.value
@@ -423,6 +429,18 @@ export const useAppState = () => {
   const queueStatus = ref({ queue_size: 0, running_count: 0, max_concurrent: 1 })
   let pollInterval = null
   let githubStatsInterval = null
+  let desktopOutputHeartbeatInterval = null
+  let desktopOutputRefreshTimer = null
+  let desktopOutputExitHandled = false
+  const desktopOutputTabRegistryKey = 'apk_builder_desktop_output_tabs'
+  const desktopOutputHeartbeatTtlMs = 90000
+  const desktopOutputHeartbeatIntervalMs = 15000
+  const desktopOutputTabId = (() => {
+    if (typeof window !== 'undefined' && window.crypto && typeof window.crypto.randomUUID === 'function') {
+      return window.crypto.randomUUID()
+    }
+    return `desktop_tab_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
+  })()
 
   // Settings
   const showSettings = ref(false)
@@ -797,6 +815,9 @@ export const useAppState = () => {
     if (mode.value === 'web' && !isWebModeEnabled.value) {
       return false
     }
+    if (mode.value === 'desktop' && !isDesktopModeEnabled.value) {
+      return false
+    }
     const shouldCheckKeystore = !isKeystoreUploaded.value
     const hasIcon = quickGenerate.value && (mode.value === 'convert' || mode.value === 'web' || mode.value === 'html') && !updatingTaskId.value
       ? true
@@ -809,7 +830,7 @@ export const useAppState = () => {
       (!shouldCheckKeystore || (!keystorePasswordError.value && !keyPasswordError.value)) &&
       hasIcon
 
-    if (mode.value === 'convert') {
+    if (mode.value === 'convert' || mode.value === 'desktop') {
       return common && uploadedFile.value
     }
     if (mode.value === 'html') {
@@ -1072,13 +1093,117 @@ export const useAppState = () => {
     document.body.removeChild(link)
   }
 
+  const getDesktopOutputRegistry = () => {
+    if (typeof localStorage === 'undefined') return {}
+    try {
+      const raw = localStorage.getItem(desktopOutputTabRegistryKey)
+      const parsed = raw ? JSON.parse(raw) : {}
+      return parsed && typeof parsed === 'object' ? parsed : {}
+    } catch (error) {
+      return {}
+    }
+  }
+
+  const saveDesktopOutputRegistry = (registry) => {
+    if (typeof localStorage === 'undefined') return
+    try {
+      localStorage.setItem(desktopOutputTabRegistryKey, JSON.stringify(registry || {}))
+    } catch (error) {
+      // 忽略本地存储异常
+    }
+  }
+
+  const pruneDesktopOutputRegistry = (registry) => {
+    const now = Date.now()
+    const nextRegistry = {}
+    Object.entries(registry || {}).forEach(([tabId, timestamp]) => {
+      const numericTimestamp = Number(timestamp)
+      if (Number.isFinite(numericTimestamp) && now - numericTimestamp <= desktopOutputHeartbeatTtlMs) {
+        nextRegistry[tabId] = numericTimestamp
+      }
+    })
+    return nextRegistry
+  }
+
+  const touchDesktopOutputTab = () => {
+    const registry = pruneDesktopOutputRegistry(getDesktopOutputRegistry())
+    registry[desktopOutputTabId] = Date.now()
+    saveDesktopOutputRegistry(registry)
+  }
+
+  const removeDesktopOutputTab = () => {
+    const registry = pruneDesktopOutputRegistry(getDesktopOutputRegistry())
+    delete registry[desktopOutputTabId]
+    saveDesktopOutputRegistry(registry)
+    return registry
+  }
+
+  const startDesktopOutputHeartbeat = () => {
+    desktopOutputExitHandled = false
+    touchDesktopOutputTab()
+    if (desktopOutputHeartbeatInterval) {
+      clearInterval(desktopOutputHeartbeatInterval)
+    }
+    desktopOutputHeartbeatInterval = setInterval(() => {
+      touchDesktopOutputTab()
+    }, desktopOutputHeartbeatIntervalMs)
+  }
+
+  const stopDesktopOutputHeartbeat = () => {
+    if (desktopOutputHeartbeatInterval) {
+      clearInterval(desktopOutputHeartbeatInterval)
+      desktopOutputHeartbeatInterval = null
+    }
+    removeDesktopOutputTab()
+  }
+
+  const releaseDesktopOutputsOnPageExit = () => {
+    if (desktopOutputExitHandled) return
+    desktopOutputExitHandled = true
+    const registry = removeDesktopOutputTab()
+    if (Object.keys(registry).length > 0) return
+    api.sendReleaseDesktopOutputsBeacon()
+  }
+
+  const scheduleDesktopTaskRefresh = () => {
+    if (desktopOutputRefreshTimer) {
+      clearTimeout(desktopOutputRefreshTimer)
+    }
+    desktopOutputRefreshTimer = setTimeout(async () => {
+      desktopOutputRefreshTimer = null
+      await refreshTasks()
+    }, 1500)
+  }
+
+  const consumeDesktopTaskLocally = (taskId, message) => {
+    const task = tasks.value.find((item) => item.id === taskId)
+    if (!task || String(task.mode || '') !== 'desktop') return
+    task.output_filename = null
+    task.download_url = null
+    if (message) {
+      task.message = message
+    }
+  }
+
   const downloadTaskArtifact = async (taskId, artifactType = 'apk') => {
+    const task = tasks.value.find((item) => item.id === taskId)
+    const isDesktopArtifact = artifactType !== 'signed' && String(task?.mode || '') === 'desktop'
     const url = artifactType === 'signed' ? getKeystoreUrl(taskId) : getDownloadUrl(taskId)
     closeDownloadMenu()
     if (!url) return
 
-    if (!shouldGateDownloadWithNativeAd()) {
+    const triggerDownload = () => {
+      if (isDesktopArtifact) {
+        consumeDesktopTaskLocally(taskId, 'EXE 下载已开始，安装包将从服务器移除')
+      }
       triggerTaskDownload(url)
+      if (isDesktopArtifact) {
+        scheduleDesktopTaskRefresh()
+      }
+    }
+
+    if (!shouldGateDownloadWithNativeAd()) {
+      triggerDownload()
       return
     }
 
@@ -1094,7 +1219,7 @@ export const useAppState = () => {
         showToast(result.message || '广告未完成，暂不可下载', 'error')
         return
       }
-      triggerTaskDownload(url)
+      triggerDownload()
     } finally {
       nativeAdRequesting.value = false
     }
@@ -1249,7 +1374,9 @@ export const useAppState = () => {
       const result = await api.uploadFile(file, (progress) => (uploadProgress.value = progress))
       uploadedFile.value = result
       currentStep.value = 2
-      await scanUploadedExternalLinks({ mode: 'convert', filename: result.filename }, { openModal: true })
+      if (mode.value === 'convert') {
+        await scanUploadedExternalLinks({ mode: 'convert', filename: result.filename }, { openModal: true })
+      }
       showToast(t('toast.uploadSuccess'), 'success')
     } catch (error) {
       showToast(t('toast.uploadFailed') + ': ' + (error.response?.data?.detail || error.message), 'error')
@@ -1952,6 +2079,9 @@ export const useAppState = () => {
     if (taskMode === 'web' && !isWebModeEnabled.value) {
       mode.value = 'convert'
       webUrl.value = ''
+    } else if (taskMode === 'desktop' && !isDesktopModeEnabled.value) {
+      mode.value = 'convert'
+      webUrl.value = ''
     } else {
       mode.value = taskMode
       webUrl.value = task.web_url || ''
@@ -2029,7 +2159,7 @@ export const useAppState = () => {
     htmlSavedUploadContent.value = ''
     setHtmlEditorContent(defaultHtmlTemplate, false)
 
-    if (mode.value === 'convert') {
+    if (mode.value === 'convert' || mode.value === 'desktop') {
       uploadedFile.value = { filename: 'project.zip', reused: true, original_name: '使用上一版本的项目文件', size: 0 }
       uploadProgress.value = 100
     } else if (mode.value === 'html') {
@@ -2122,6 +2252,10 @@ export const useAppState = () => {
       showToast('Web（链接）转 APK 模式已关闭', 'error')
       return
     }
+    if (mode.value === 'desktop' && !isDesktopModeEnabled.value) {
+      showToast(t('toast.desktopModeDisabled'), 'error')
+      return
+    }
     if (packageNameError.value) {
       showToast(packageNameError.value, 'error')
       return
@@ -2191,7 +2325,7 @@ export const useAppState = () => {
           mode: mode.value,
           web_url: mode.value === 'web' ? normalizedWebUrl : null,
           ad_config: mode.value === 'web' && enableAds.value ? adConfig.value : null,
-          filename: mode.value === 'convert' ? uploadedFile.value.filename : null,
+          filename: (mode.value === 'convert' || mode.value === 'desktop') ? uploadedFile.value.filename : null,
           html_filename: mode.value === 'html' ? htmlFilename : null,
           icon_filename: isQuickGenerate ? null : (uploadedIcon.value?.filename || null),
           keystore_filename: isQuickGenerate ? null : (uploadedKeystore.value?.filename || null),
@@ -2333,14 +2467,19 @@ export const useAppState = () => {
     try {
       const result = await api.getAdminFeatures()
       featureFlags.value = {
-        web_link_to_apk_enabled: Boolean(result?.web_link_to_apk_enabled)
+        web_link_to_apk_enabled: Boolean(result?.web_link_to_apk_enabled),
+        zip_to_desktop_enabled: Boolean(result?.zip_to_desktop_enabled)
       }
     } catch {
       featureFlags.value = {
-        web_link_to_apk_enabled: false
+        web_link_to_apk_enabled: false,
+        zip_to_desktop_enabled: false
       }
     }
     if (!isWebModeEnabled.value && mode.value === 'web') {
+      mode.value = 'convert'
+    }
+    if (!isDesktopModeEnabled.value && mode.value === 'desktop') {
       mode.value = 'convert'
     }
   }
@@ -2504,6 +2643,9 @@ export const useAppState = () => {
     document.addEventListener('click', handleClickOutside)
     document.addEventListener('visibilitychange', handleDocumentVisibilityChange)
     window.addEventListener('resize', updateMobileShell)
+    window.addEventListener('pagehide', releaseDesktopOutputsOnPageExit)
+    window.addEventListener('beforeunload', releaseDesktopOutputsOnPageExit)
+    startDesktopOutputHeartbeat()
     await fetchAdminFeatures()
     await refreshTasks()
     await fetchAnnouncements()
@@ -2526,9 +2668,16 @@ export const useAppState = () => {
     document.removeEventListener('click', handleClickOutside)
     document.removeEventListener('visibilitychange', handleDocumentVisibilityChange)
     window.removeEventListener('resize', updateMobileShell)
+    window.removeEventListener('pagehide', releaseDesktopOutputsOnPageExit)
+    window.removeEventListener('beforeunload', releaseDesktopOutputsOnPageExit)
+    stopDesktopOutputHeartbeat()
     if (githubStatsInterval) {
       clearInterval(githubStatsInterval)
       githubStatsInterval = null
+    }
+    if (desktopOutputRefreshTimer) {
+      clearTimeout(desktopOutputRefreshTimer)
+      desktopOutputRefreshTimer = null
     }
     if (mobileSwipeAnimTimer) {
       clearTimeout(mobileSwipeAnimTimer)
@@ -2578,6 +2727,7 @@ export const useAppState = () => {
     handleClickOutside,
     mode,
     isWebModeEnabled,
+    isDesktopModeEnabled,
     mainRef,
     mobilePageHeadRef,
     convertUploadSection,

@@ -6,7 +6,7 @@ import subprocess
 import zipfile
 import re
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Callable, Dict, Optional, Tuple
 
 import env_setup
@@ -676,6 +676,196 @@ def _resolve_templates_root() -> Path:
     if getattr(sys, "_MEIPASS", ""):
         return Path(sys._MEIPASS) / "templates"
     return Path(__file__).resolve().parents[2] / "templates"
+
+
+def _extract_zip_safely(archive_path: Path, dst_dir: Path) -> None:
+    with zipfile.ZipFile(archive_path, "r") as archive:
+        for info in archive.infolist():
+            if info.is_dir():
+                continue
+            raw_name = str(info.filename or "").replace("\\", "/").strip()
+            if not raw_name:
+                continue
+            normalized = PurePosixPath(raw_name.lstrip("/"))
+            parts = [part for part in normalized.parts if part and part != "."]
+            if not parts or any(part == ".." for part in parts):
+                continue
+            target_path = dst_dir.joinpath(*parts)
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            with archive.open(info, "r") as source, target_path.open("wb") as output:
+                shutil.copyfileobj(source, output)
+
+
+def _pick_index_html(root_dir: Path) -> Path:
+    candidates: list[tuple[int, int, Path]] = []
+    for file_path in root_dir.rglob("index.html"):
+        if not file_path.is_file():
+            continue
+        lower_parts = {part.lower() for part in file_path.parts}
+        if {"node_modules", ".git", "__macosx", "android"} & lower_parts:
+            continue
+        relative_path = file_path.relative_to(root_dir)
+        display_path = str(relative_path).replace("\\", "/")
+        candidates.append((len(relative_path.parts), len(display_path), file_path))
+    if not candidates:
+        raise RuntimeError("ZIP 中未找到 index.html")
+    candidates.sort(key=lambda item: (item[0], item[1], str(item[2])))
+    return candidates[0][2]
+
+
+def _find_web_build_dir(project_root: Path) -> Path:
+    for dirname in ("dist", "build", "out"):
+        candidate = project_root / dirname
+        if candidate.exists() and (candidate / "index.html").exists():
+            return candidate
+    raise RuntimeError("未找到 Web 构建产物目录（dist/build/out）")
+
+
+def _resolve_default_desktop_icon_ico() -> Optional[Path]:
+    candidate = Path(__file__).resolve().parents[2] / "desktop" / "build" / "icon.ico"
+    if candidate.exists():
+        return candidate
+    return None
+
+
+def _write_desktop_wrapper_project(
+    wrapper_root: Path,
+    app_name: str,
+    package_name: str,
+    version_name: str,
+    source_app_dir: Path,
+    logo_path: Optional[Path],
+    on_log=None,
+) -> None:
+    if wrapper_root.exists():
+        shutil.rmtree(wrapper_root, ignore_errors=True)
+    wrapper_root.mkdir(parents=True, exist_ok=True)
+
+    app_dir = wrapper_root / "app"
+    shutil.copytree(source_app_dir, app_dir)
+
+    build_dir = wrapper_root / "build"
+    build_dir.mkdir(parents=True, exist_ok=True)
+    if logo_path and logo_path.exists():
+        shutil.copy2(logo_path, build_dir / "icon.png")
+    default_ico = _resolve_default_desktop_icon_ico()
+    if default_ico and default_ico.exists():
+        shutil.copy2(default_ico, build_dir / "icon.ico")
+
+    safe_npm_name = re.sub(r"[^a-z0-9-]+", "-", str(package_name or "desktop-app").strip().lower()).strip("-")
+    if not safe_npm_name:
+        safe_npm_name = "desktop-app"
+    safe_artifact_name = re.sub(r"[^A-Za-z0-9._-]+", "-", str(app_name or "DesktopApp").strip()).strip("-")
+    if not safe_artifact_name:
+        safe_artifact_name = "DesktopApp"
+
+    build_config = {
+        "appId": str(package_name or "com.example.desktop"),
+        "productName": str(app_name or "DesktopApp"),
+        "directories": {"output": "dist"},
+        "files": [
+            "main.js",
+            "preload.js",
+            "app/**/*",
+            "build/**/*",
+        ],
+        "asar": True,
+        "artifactName": f"{safe_artifact_name}-desktop-v${{version}}.${{ext}}",
+        "win": {"target": ["portable"]},
+    }
+    if (build_dir / "icon.ico").exists():
+        build_config["icon"] = "build/icon.ico"
+        build_config["win"]["icon"] = "build/icon.ico"
+
+    package_json = {
+        "name": safe_npm_name,
+        "version": str(version_name or "1.0.0"),
+        "description": f"{app_name or 'DesktopApp'} desktop build",
+        "main": "main.js",
+        "private": True,
+        "scripts": {
+            "dist": "electron-builder --win portable --publish never",
+        },
+        "devDependencies": {
+            "electron": "^30.4.0",
+            "electron-builder": "^24.13.3",
+        },
+        "build": build_config,
+    }
+
+    window_title = json.dumps(str(app_name or "DesktopApp"), ensure_ascii=False)
+    main_js = """const { app, BrowserWindow, shell } = require("electron");
+const path = require("path");
+
+function createWindow() {
+  const iconPath = path.join(__dirname, "build", "icon.png");
+  const win = new BrowserWindow({
+    title: __WINDOW_TITLE__,
+    width: 1280,
+    height: 800,
+    minWidth: 960,
+    minHeight: 640,
+    frame: true,
+    resizable: true,
+    minimizable: true,
+    maximizable: true,
+    closable: true,
+    fullscreenable: true,
+    autoHideMenuBar: true,
+    backgroundColor: "#111827",
+    show: false,
+    icon: iconPath,
+    webPreferences: {
+      preload: path.join(__dirname, "preload.js"),
+      contextIsolation: true,
+      sandbox: false,
+    },
+  });
+
+  win.once("ready-to-show", () => win.show());
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    shell.openExternal(url);
+    return { action: "deny" };
+  });
+  win.webContents.on("will-navigate", (event, url) => {
+    if (!url.startsWith("file://")) {
+      event.preventDefault();
+      shell.openExternal(url);
+    }
+  });
+  win.loadFile(path.join(__dirname, "app", "index.html"));
+}
+
+app.whenReady().then(() => {
+  createWindow();
+  app.on("activate", () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createWindow();
+    }
+  });
+});
+
+app.on("window-all-closed", () => {
+  if (process.platform !== "darwin") {
+    app.quit();
+  }
+});
+"""
+    main_js = main_js.replace("__WINDOW_TITLE__", window_title)
+    preload_js = """const { contextBridge } = require("electron");
+
+contextBridge.exposeInMainWorld("desktopApp", {
+  platform: process.platform,
+});
+"""
+
+    (wrapper_root / "package.json").write_text(
+        json.dumps(package_json, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    (wrapper_root / "main.js").write_text(main_js, encoding="utf-8")
+    (wrapper_root / "preload.js").write_text(preload_js, encoding="utf-8")
+    _log(on_log, f"[Desktop] Electron wrapper prepared: {wrapper_root}")
 
 def _offlineize_html_assets(entry_html: Path, env: Dict[str, str], on_log=None) -> None:
     if not entry_html.exists():
@@ -1587,8 +1777,100 @@ def run_local_build(
     _log(on_log, "Step 0: 准备工作...")
 
     task_mode = (env.get("TASK_MODE") or "convert").strip().lower()
+    is_desktop_task = task_mode == "desktop"
     is_web_task = task_mode == "web"
     is_html_task = task_mode == "html"
+
+    if is_desktop_task:
+        progress(25, "Step 1: 解压 ZIP 项目...")
+        _log(on_log, "Step 1: 解压 ZIP 项目...")
+
+        zip_files = list(task_input_dir.glob("*.zip"))
+        if not zip_files:
+            raise RuntimeError(f"目录中未找到 ZIP 文件: {task_input_dir}")
+        zip_file = zip_files[0]
+
+        source_dir = task_dir / "desktop-source"
+        if source_dir.exists():
+            shutil.rmtree(source_dir, ignore_errors=True)
+        source_dir.mkdir(parents=True, exist_ok=True)
+        _extract_zip_safely(zip_file, source_dir)
+
+        progress(35, "Step 2: 准备前端产物...")
+        _log(on_log, "Step 2: 准备前端产物...")
+        package_json_candidates = [
+            candidate
+            for candidate in source_dir.rglob("package.json")
+            if candidate.is_file()
+            and not {"node_modules", ".git", "__macosx", "android"} & {part.lower() for part in candidate.parts}
+        ]
+        package_json_candidates.sort(
+            key=lambda item: (
+                len(item.relative_to(source_dir).parts),
+                len(str(item.relative_to(source_dir)).replace("\\", "/")),
+            )
+        )
+
+        if package_json_candidates:
+            package_json = package_json_candidates[0]
+            project_root = package_json.parent
+            package_info = _read_package_json(package_json)
+            package_info["_root"] = project_root
+            if not _should_skip_npm_install(project_root, on_log=on_log):
+                _run_cmd([npm_cmd, "install", "--legacy-peer-deps"], cwd=project_root, env=process_env, on_log=on_log)
+                _mark_npm_install(project_root)
+            if "build" in (package_info.get("scripts") or {}):
+                _run_cmd([npm_cmd, "run", "build"], cwd=project_root, env=process_env, on_log=on_log)
+            web_dir = _find_web_build_dir(project_root)
+        else:
+            index_file = _pick_index_html(source_dir)
+            web_dir = index_file.parent
+
+        progress(55, "Step 3: 生成 Electron 桌面壳...")
+        _log(on_log, "Step 3: 生成 Electron 桌面壳...")
+        wrapper_root = task_dir / "desktop-app"
+        logo_path = task_input_dir / "logo.png"
+        _write_desktop_wrapper_project(
+            wrapper_root=wrapper_root,
+            app_name=str(env.get("APP_NAME") or "DesktopApp"),
+            package_name=str(env.get("PACKAGE_NAME") or "com.example.desktop"),
+            version_name=str(env.get("VERSION_NAME") or "1.0.0"),
+            source_app_dir=web_dir,
+            logo_path=logo_path if logo_path.exists() else None,
+            on_log=on_log,
+        )
+
+        progress(70, "Step 4: 安装 Electron 依赖...")
+        _log(on_log, "Step 4: 安装 Electron 依赖...")
+        if not _should_skip_npm_install(wrapper_root, on_log=on_log):
+            _run_cmd([npm_cmd, "install", "--legacy-peer-deps"], cwd=wrapper_root, env=process_env, on_log=on_log)
+            _mark_npm_install(wrapper_root)
+
+        progress(85, "Step 5: 打包桌面应用...")
+        _log(on_log, "Step 5: 打包桌面应用...")
+        process_env["CSC_IDENTITY_AUTO_DISCOVERY"] = "false"
+        _run_cmd([npx_cmd, "electron-builder", "--win", "portable", "--publish", "never"], cwd=wrapper_root, env=process_env, on_log=on_log)
+
+        dist_dir = wrapper_root / "dist"
+        output_candidates = sorted(
+            [item for item in dist_dir.glob("*.exe") if item.is_file()],
+            key=lambda item: item.stat().st_mtime,
+            reverse=True,
+        )
+        if not output_candidates:
+            raise RuntimeError("Electron 打包完成，但未找到 .exe 产物")
+
+        output_file = output_candidates[0]
+        target_file = task_output_dir / output_file.name
+        if target_file.exists():
+            target_file.unlink()
+        shutil.copy2(output_file, target_file)
+        progress(100, "Electron 桌面应用构建成功")
+        _log(on_log, f"[Desktop] 产物已生成: {target_file}")
+        return {
+            "output_file": str(target_file),
+            "output_format": "exe",
+        }
 
     if is_web_task:
         progress(25, "Step 1: 准备 Web 模板...")

@@ -5,6 +5,7 @@ patch_typing_eval_type()
 from fastapi import FastAPI, UploadFile, File, HTTPException, Body, Request, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
+from starlette.background import BackgroundTask
 from typing import List
 from datetime import datetime
 from pathlib import Path, PurePosixPath
@@ -35,12 +36,14 @@ from builder import (
     get_task_runner,
     APK_WORKER_DIR,
     BACKEND_OUTPUT_DIR,
+    cleanup_task_generated_artifacts,
     delete_task_asset_dir,
     ensure_task_input_assets,
     get_persisted_task_asset_path,
     LOGS_DIR,
     persist_task_asset,
     restore_task_input_asset,
+    should_auto_clean_build_outputs,
     TASKS_DIR,
     UPLOAD_DIR as BACKEND_UPLOAD_DIR,
 )
@@ -81,19 +84,28 @@ _github_repo_stats_cache = {
 
 
 def _load_client_feature_flags() -> dict:
-    flags = {"web_link_to_apk_enabled": False}
+    flags = {
+        "web_link_to_apk_enabled": False,
+        "zip_to_desktop_enabled": False,
+    }
     try:
         data = fetch_feature_flags()
     except Exception:
         data = None
     if isinstance(data, dict):
         flags["web_link_to_apk_enabled"] = bool(data.get("web_link_to_apk_enabled"))
+        flags["zip_to_desktop_enabled"] = bool(data.get("zip_to_desktop_enabled"))
     return flags
 
 
 def _is_web_link_mode_enabled() -> bool:
     flags = _load_client_feature_flags()
     return bool(flags.get("web_link_to_apk_enabled"))
+
+
+def _is_desktop_mode_enabled() -> bool:
+    flags = _load_client_feature_flags()
+    return bool(flags.get("zip_to_desktop_enabled"))
 
 
 def _fetch_github_repo_stats() -> dict:
@@ -883,29 +895,41 @@ async def ensure_env_ready(request: Request, call_next):
                 "reason": reason,
             },
         )
-    if env_setup.is_required():
-        path = request.url.path
-        allow_paths = {
-            "/api/env/status",
-            "/api/env/prepare",
-            "/api/env/config",
-            "/api/app/version",
-            "/api/system/info",
-            "/api/url-probe",
-        }
-        if path.startswith("/api/adminhub"):
-            return await call_next(request)
-        if path.startswith("/api") and path not in allow_paths:
-            status = env_setup.get_status()
-            if not status["ready"]:
-                return JSONResponse(
-                    status_code=503,
-                    content={
-                        "detail": "Build environment is not ready",
-                        "status": status,
-                    },
-                )
     return await call_next(request)
+
+
+def _should_cleanup_desktop_output_on_download(task: BuildTask) -> bool:
+    return bool(
+        should_auto_clean_build_outputs()
+        and str(getattr(task, "mode", "") or "").strip().lower() == "desktop"
+    )
+
+
+def _consume_desktop_output(task: BuildTask, reason: str) -> str | None:
+    if not _should_cleanup_desktop_output_on_download(task):
+        return None
+    output_name = str(getattr(task, "output_filename", "") or "").strip()
+    if not output_name:
+        return None
+    task.output_filename = None
+    task.download_url = None
+    task.updated_at = datetime.now()
+    if reason == "download":
+        task.message = "EXE 已下载，安装包已从服务器移除"
+    else:
+        task.message = "已退出网站，桌面安装包已从服务器移除"
+    try:
+        persist_tasks_db(force=True)
+    except Exception:
+        pass
+    return output_name
+
+
+def _get_desktop_output_unavailable_detail(task: BuildTask) -> str:
+    message = str(getattr(task, "message", "") or "").strip()
+    if message and "移除" in message:
+        return message
+    return "桌面安装包已不可下载"
 
 # 内存存储（MVP版本）
 tasks_db = {}
@@ -1458,8 +1482,8 @@ async def create_task(task_data: BuildTaskCreate):
     client_id = _require_client_id(task_data.client_id)
 
     mode = (task_data.mode or "convert").strip().lower()
-    if mode not in {"convert", "web", "html"}:
-        raise HTTPException(status_code=400, detail="mode must be convert, web, or html")
+    if mode not in {"convert", "web", "html", "desktop"}:
+        raise HTTPException(status_code=400, detail="mode must be convert, web, html, or desktop")
     web_url = None
     if mode == "web":
         if not _is_web_link_mode_enabled():
@@ -1467,6 +1491,11 @@ async def create_task(task_data: BuildTaskCreate):
         web_url = str(task_data.web_url or "").strip()
         if not web_url:
             raise HTTPException(status_code=400, detail="web_url is required for web mode")
+    if mode == "desktop":
+        if not _is_desktop_mode_enabled():
+            raise HTTPException(status_code=403, detail="desktop mode is disabled by admin")
+        if not LOCAL_MODE:
+            raise HTTPException(status_code=503, detail="desktop mode requires local builder mode")
     html_filename = None
     if mode == "html":
         html_filename = str(task_data.html_filename or "").strip()
@@ -1474,6 +1503,8 @@ async def create_task(task_data: BuildTaskCreate):
             raise HTTPException(status_code=400, detail="html_filename is required for html mode")
 
     quick_generate = bool(task_data.quick_generate)
+    if mode == "desktop" and quick_generate:
+        raise HTTPException(status_code=400, detail="desktop mode does not support quick generate")
     quick_icon_path = None
     quickSharedKeystorePath = None
     if quick_generate:
@@ -1502,9 +1533,9 @@ async def create_task(task_data: BuildTaskCreate):
     effective_config = task_data.config
     
     # 移动ZIP文件到任务目录（仅 convert 模式）
-    if mode == "convert":
+    if mode in {"convert", "desktop"}:
         if not task_data.filename:
-            raise HTTPException(status_code=400, detail="filename is required for convert mode")
+            raise HTTPException(status_code=400, detail="filename is required for zip-based mode")
         src_zip = BACKEND_UPLOAD_DIR / task_data.filename
         if not src_zip.exists():
             raise HTTPException(status_code=400, detail="ZIP文件不存在，请重新上传")
@@ -1515,7 +1546,7 @@ async def create_task(task_data: BuildTaskCreate):
                 detail="ZIP中未检测到package.json，且未找到index.html，无法识别为Node.js或HTML项目",
             )
         dst_zip = _store_task_asset(task_id, task_input_dir, "project.zip", src_zip, move=True)
-        if detected_mode == "html":
+        if mode == "convert" and detected_mode == "html":
             dst_assets_dir = task_input_dir / "html_assets"
             _extract_html_assets_from_zip(dst_zip, detected_index_entry or "index.html", dst_assets_dir)
             dst_html = task_input_dir / "index.html"
@@ -1632,7 +1663,7 @@ async def create_task(task_data: BuildTaskCreate):
         quick_generate=quick_generate,
         mode=mode,
         web_url=web_url,
-        filename="project.zip" if mode == "convert" else None,
+        filename="project.zip" if mode in {"convert", "desktop"} else None,
         html_filename="index.html" if mode == "html" else None,
         icon_filename=icon_in_task,
         keystore_filename=keystore_in_task,
@@ -1727,6 +1758,15 @@ async def delete_task(task_id: str, client_id: str = None):
 
     def _cleanup_task_files(task_id: str) -> None:
         try:
+            cleanup_task_generated_artifacts(
+                task_id,
+                getattr(task, "mode", "convert"),
+                output_filename=getattr(task, "output_filename", None),
+                remove_backend_output=True,
+            )
+        except Exception:
+            pass
+        try:
             task_dir = TASKS_DIR / task_id
             if task_dir.exists():
                 shutil.rmtree(task_dir)
@@ -1770,7 +1810,11 @@ async def start_task(task_id: str, client_id: str = None):
 
     if env_setup.is_required():
         status = env_setup.get_status()
-        if not status["ready"]:
+        if task.mode == "desktop":
+            node_ready = bool(str(status.get("paths", {}).get("node", "")).strip())
+            if not node_ready:
+                raise HTTPException(status_code=503, detail="Node.js environment is not ready for desktop mode")
+        elif not status["ready"]:
             detail = status.get("error") or "Build environment is not ready"
             raise HTTPException(status_code=503, detail=detail)
     
@@ -1892,25 +1936,84 @@ async def download_file(task_id: str, client_id: str = None):
         raise HTTPException(status_code=400, detail="任务未完成或构建失败")
     
     if not task.output_filename:
+        if _should_cleanup_desktop_output_on_download(task):
+            raise HTTPException(status_code=410, detail=_get_desktop_output_unavailable_detail(task))
+        if should_auto_clean_build_outputs():
+            raise HTTPException(status_code=410, detail="构建产物已按服务器策略自动清理")
         raise HTTPException(status_code=404, detail="未找到构建输出文件")
     
-    file_path = BACKEND_OUTPUT_DIR / task.output_filename
+    output_filename = str(task.output_filename)
+    file_path = BACKEND_OUTPUT_DIR / output_filename
     
     if not file_path.exists():
+        if _should_cleanup_desktop_output_on_download(task):
+            consumed_output = _consume_desktop_output(task, "page_exit")
+            if consumed_output:
+                cleanup_task_generated_artifacts(
+                    task.id,
+                    getattr(task, "mode", "desktop"),
+                    output_filename=consumed_output,
+                    remove_backend_output=True,
+                )
+            raise HTTPException(status_code=410, detail=_get_desktop_output_unavailable_detail(task))
+        if should_auto_clean_build_outputs():
+            raise HTTPException(status_code=410, detail="构建产物已按服务器策略自动清理")
         raise HTTPException(status_code=404, detail="构建文件不存在")
 
     # 根据文件类型设置正确的 Content-Type
     suffix = file_path.suffix.lower()
     if suffix == ".apk":
         media_type = "application/vnd.android.package-archive"
+    elif suffix == ".exe":
+        media_type = "application/vnd.microsoft.portable-executable"
     else:
         media_type = "application/octet-stream"
 
+    background_task = None
+    if _should_cleanup_desktop_output_on_download(task):
+        consumed_output = _consume_desktop_output(task, "download")
+        if consumed_output:
+            output_filename = consumed_output
+            background_task = BackgroundTask(
+                cleanup_task_generated_artifacts,
+                task.id,
+                getattr(task, "mode", "desktop"),
+                output_filename=consumed_output,
+                remove_backend_output=True,
+            )
+
     return FileResponse(
         path=str(file_path),
-        filename=task.output_filename,
+        filename=output_filename,
         media_type=media_type,
+        background=background_task,
     )
+
+
+@app.post("/api/tasks/desktop-output/release")
+async def release_desktop_outputs(client_id: str = None):
+    client_id = _require_client_id(client_id)
+    if not should_auto_clean_build_outputs():
+        return {"enabled": False, "released": 0}
+
+    released = 0
+    for task in list(tasks_db.values()):
+        if str(getattr(task, "client_id", "") or "") != client_id:
+            continue
+        if getattr(task, "status", None) != BuildStatus.SUCCESS:
+            continue
+        output_name = _consume_desktop_output(task, "page_exit")
+        if not output_name:
+            continue
+        cleanup_task_generated_artifacts(
+            task.id,
+            getattr(task, "mode", "desktop"),
+            output_filename=output_name,
+            remove_backend_output=True,
+        )
+        released += 1
+
+    return {"enabled": True, "released": released}
 
 
 @app.get("/api/keystore/{task_id}")
@@ -1954,6 +2057,7 @@ async def retry_task(task_id: str, client_id: str = None):
         raise HTTPException(status_code=400, detail="只能重试失败或已完成的任务")
     
     # 重置任务状态
+    previous_output_filename = task.output_filename
     task.status = BuildStatus.PENDING
     task.progress = 0
     task.message = "任务已重置，等待重新构建"
@@ -1961,6 +2065,15 @@ async def retry_task(task_id: str, client_id: str = None):
     task.download_url = None
     task.output_filename = None
     task.updated_at = datetime.now()
+    try:
+        cleanup_task_generated_artifacts(
+            task_id,
+            getattr(task, "mode", "convert"),
+            output_filename=previous_output_filename,
+            remove_backend_output=True,
+        )
+    except Exception:
+        pass
     try:
         persist_tasks_db(force=True)
     except Exception:
@@ -1992,6 +2105,7 @@ async def update_task(task_id: str, update_data: UpdateTaskRequest):
     task_output_dir = task_dir / "output"
     task_input_dir.mkdir(parents=True, exist_ok=True)
     task_output_dir.mkdir(parents=True, exist_ok=True)
+    previous_output_filename = task.output_filename
     
     # 清理output目录
     if task_output_dir.exists():
@@ -2123,6 +2237,15 @@ async def update_task(task_id: str, update_data: UpdateTaskRequest):
     task.download_url = None
     task.output_filename = None
     task.updated_at = datetime.now()
+    try:
+        cleanup_task_generated_artifacts(
+            task_id,
+            getattr(task, "mode", "convert"),
+            output_filename=previous_output_filename,
+            remove_backend_output=True,
+        )
+    except Exception:
+        pass
     try:
         persist_tasks_db(force=True)
     except Exception:

@@ -201,6 +201,13 @@ body {
 
 .github-star-btn {
   white-space: nowrap;
+  box-shadow: none;
+}
+
+.github-star-btn:hover,
+.github-star-btn:focus-visible,
+.github-star-btn:active {
+  box-shadow: none;
 }
 
 .github-star-btn .action-icon {

@@ -10,7 +10,10 @@ _QUEUE_FILENAME = "upload-queue.json"
 _ADMIN_STATUS_CACHE: dict = {"ok": True, "reason": "", "checked_at": 0.0}
 _ADMIN_STATUS_TTL = 15.0
 _FEATURE_FLAGS_CACHE: dict = {
-    "data": {"web_link_to_apk_enabled": False},
+    "data": {
+        "web_link_to_apk_enabled": False,
+        "zip_to_desktop_enabled": False,
+    },
     "checked_at": 0.0,
 }
 _FEATURE_FLAGS_TTL = 30.0
@@ -243,9 +246,13 @@ def fetch_feature_flags(force: bool = False) -> Dict[str, Any]:
             return dict(data)
 
     data = _request_json("GET", "/api/client/features")
-    result = {"web_link_to_apk_enabled": False}
+    result = {
+        "web_link_to_apk_enabled": False,
+        "zip_to_desktop_enabled": False,
+    }
     if isinstance(data, dict):
         result["web_link_to_apk_enabled"] = bool(data.get("web_link_to_apk_enabled"))
+        result["zip_to_desktop_enabled"] = bool(data.get("zip_to_desktop_enabled"))
     cached["data"] = result
     cached["checked_at"] = now
     return dict(result)

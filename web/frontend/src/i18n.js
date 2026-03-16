@@ -15,7 +15,7 @@ export const messages = {
       settings: 'Settings'
     },
     github: {
-      star: 'GitHub Star',
+      star: 'GitHub Stars',
       starTitle: 'Open the GitHub project and leave a star'
     },
     // Mode
@@ -23,7 +23,8 @@ export const messages = {
       title: 'Conversion Mode',
       apk: 'Project to APK',
       web: 'Website to APK',
-      html: 'HTML to APK'
+      html: 'HTML to APK',
+      desktop: 'ZIP to Desktop'
     },
     // Guide
     guide: {
@@ -39,7 +40,8 @@ export const messages = {
     steps: {
       upload: 'Upload Project',
       configure: 'Configure App',
-      build: 'Build APK'
+      build: 'Build APK',
+      buildDesktop: 'Build Desktop App'
     },
     // Upload
     upload: {
@@ -47,6 +49,10 @@ export const messages = {
       subtitle: 'Upload ZIP exported from Google AI Studio',
       dragDrop: 'Drag & drop ZIP file here, or click to select',
       hint: 'Supports React, Vue and other frontend projects',
+      desktopTitle: 'Electron Project ZIP',
+      desktopSubtitle: 'Upload a ZIP project and package it as a Windows desktop app',
+      desktopDragDrop: 'Drag & drop ZIP file here, or click to select',
+      desktopHint: 'Supports frontend projects with package.json or static HTML assets',
       ready: 'File Ready',
       selectNew: 'Select New'
     },
@@ -293,6 +299,7 @@ export const messages = {
       uploadFailed: 'Upload failed',
       taskCreated: 'Build task created',
       taskStarted: 'Build task started',
+      desktopModeDisabled: 'Electron desktop mode is disabled',
       firstBuildHint: 'First build may take around 15 minutes. Later builds should be faster.',
       taskRetried: 'Task reset, please start again',
       taskDeleted: 'Task deleted',
@@ -430,7 +437,7 @@ export const messages = {
       settings: '设置'
     },
     github: {
-      star: 'GitHub Star',
+      star: 'GitHub小星星',
       starTitle: '打开 GitHub 项目并点亮 Star'
     },
     // Mode
@@ -438,7 +445,8 @@ export const messages = {
       title: '转换模式',
       apk: '项目转 APK',
       web: '网页转 APK',
-      html: 'HTML 转 APK'
+      html: 'HTML 转 APK',
+      desktop: 'ZIP 转桌面应用'
     },
     // Guide
     guide: {
@@ -454,7 +462,8 @@ export const messages = {
     steps: {
       upload: '上传项目',
       configure: '配置应用',
-      build: '构建APK'
+      build: '构建APK',
+      buildDesktop: '构建桌面应用'
     },
     // Upload
     upload: {
@@ -462,6 +471,10 @@ export const messages = {
       subtitle: '上传 Google AI Studio 导出的 ZIP 包',
       dragDrop: '拖放 ZIP 文件到此处，或点击选择',
       hint: '支持 React、Vue 等前端项目',
+      desktopTitle: 'Electron 项目 ZIP',
+      desktopSubtitle: '上传 ZIP 项目并打包为 Windows 桌面应用',
+      desktopDragDrop: '拖放 ZIP 文件到此处，或点击选择',
+      desktopHint: '支持包含 package.json 的前端项目或纯静态 HTML 资源',
       ready: '文件已就绪',
       selectNew: '选择新文件'
     },
@@ -707,6 +720,7 @@ export const messages = {
       uploadFailed: '上传失败',
       taskCreated: '构建任务已创建',
       taskStarted: '构建任务已启动',
+      desktopModeDisabled: 'Electron 桌面模式已关闭',
       firstBuildHint: '首次构建可能需要约 15 分钟，后续构建会更快。',
       taskRetried: '任务已重置，请重新开始',
       taskDeleted: '任务已删除',
@@ -841,7 +855,7 @@ export const messages = {
       settings: '設定'
     },
     github: {
-      star: 'GitHub Star',
+      star: 'GitHub小星星',
       starTitle: '打開 GitHub 專案並點亮 Star'
     },
     // Mode
@@ -849,7 +863,8 @@ export const messages = {
       title: '轉換模式',
       apk: '專案轉 APK',
       web: '網頁轉 APK',
-      html: 'HTML 轉 APK'
+      html: 'HTML 轉 APK',
+      desktop: 'ZIP 轉桌面應用'
     },
     // Guide
     guide: {
@@ -865,7 +880,8 @@ export const messages = {
     steps: {
       upload: '上傳專案',
       configure: '設定應用',
-      build: '建構APK'
+      build: '建構APK',
+      buildDesktop: '建構桌面應用'
     },
     // Upload
     upload: {
@@ -873,6 +889,10 @@ export const messages = {
       subtitle: '上傳 Google AI Studio 匯出的 ZIP 包',
       dragDrop: '拖放 ZIP 檔案到此處，或點擊選擇',
       hint: '支援 React、Vue 等前端專案',
+      desktopTitle: 'Electron 專案 ZIP',
+      desktopSubtitle: '上傳 ZIP 專案並打包為 Windows 桌面應用',
+      desktopDragDrop: '拖放 ZIP 檔案到此處，或點擊選擇',
+      desktopHint: '支援包含 package.json 的前端專案或純靜態 HTML 資源',
       ready: '檔案已就緒',
       selectNew: '選擇新檔案'
     },
@@ -1120,6 +1140,7 @@ export const messages = {
       uploadFailed: '上傳失敗',
       taskCreated: '建構任務已建立',
       taskStarted: '建構任務已啟動',
+      desktopModeDisabled: 'Electron 桌面模式已關閉',
       firstBuildHint: '首次建構可能需要約 15 分鐘，後續建構會更快。',
       taskRetried: '任務已重置，請重新開始',
       taskDeleted: '任務已刪除',

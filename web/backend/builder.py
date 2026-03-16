@@ -6,6 +6,7 @@ APK Builder 模块
 import os
 import json
 import shutil
+import stat
 import subprocess
 import threading
 import time
@@ -71,6 +72,7 @@ TASKS_DIR = DATA_DIR / "tasks"  # 每个任务的独立目录
 TASK_INPUT_ASSETS_DIR = DATA_DIR / "task-inputs"
 GRADLE_WRAPPER_CACHE = DATA_DIR / "gradle-wrapper-cache"  # 全局 Gradle wrapper 缓存
 NPM_CACHE_DIR = DATA_DIR / "npm-cache"
+AUTO_CLEAN_BUILD_OUTPUTS = os.getenv("APK_BUILDER_AUTO_CLEAN_OUTPUTS", "").strip().lower() in {"1", "true", "yes", "on"}
 
 # Gradle 缓存策略（解决“开始构建反应慢/要等几分钟”的问题）
 # - volume: 使用 Docker volume 持久化 /root/.gradle（推荐，跨任务复用且不需要拷贝大缓存）
@@ -249,7 +251,7 @@ def ensure_task_input_assets(task_id: str, task_input_dir: Path) -> dict[str, Pa
 def delete_task_asset_dir(task_id: str) -> None:
     asset_dir = get_task_asset_dir(task_id)
     if asset_dir.exists():
-        shutil.rmtree(asset_dir, ignore_errors=True)
+        _remove_tree(asset_dir)
 
 
 def _restore_html_task_input(task_input_dir: Path) -> None:
@@ -304,7 +306,7 @@ def _clear_dir_contents(target_dir: Path) -> None:
         return
     for item in target_dir.iterdir():
         if item.is_dir():
-            shutil.rmtree(item, ignore_errors=True)
+            _remove_tree(item)
         else:
             try:
                 item.unlink()
@@ -312,13 +314,37 @@ def _clear_dir_contents(target_dir: Path) -> None:
                 pass
 
 
+def _handle_remove_readonly(func, path, _exc_info) -> None:
+    try:
+        os.chmod(path, stat.S_IWRITE)
+    except Exception:
+        pass
+    try:
+        func(path)
+    except Exception:
+        pass
+
+
+def _remove_tree(target_dir: Path, retries: int = 6, delay_seconds: float = 0.5) -> None:
+    for attempt in range(max(retries, 1)):
+        if not target_dir.exists():
+            return
+        try:
+            shutil.rmtree(target_dir, onerror=_handle_remove_readonly)
+        except Exception:
+            pass
+        if not target_dir.exists():
+            return
+        time.sleep(delay_seconds * (attempt + 1))
+
+
 def _cleanup_task_intermediates(task_id: str, task_mode: str = "convert") -> None:
     task_dir = TASKS_DIR / task_id
     task_input_dir = task_dir / "input"
-    for name in ("project", "gradle", "_tmp_html_libs"):
+    for name in ("project", "gradle", "_tmp_html_libs", "desktop-source", "desktop-app"):
         candidate = task_dir / name
         if candidate.exists():
-            shutil.rmtree(candidate, ignore_errors=True)
+            _remove_tree(candidate)
 
     _clear_dir_contents(task_dir / "output")
 
@@ -331,7 +357,90 @@ def _cleanup_task_intermediates(task_id: str, task_mode: str = "convert") -> Non
                 pass
         html_assets_dir = task_input_dir / "html_assets"
         if html_assets_dir.exists():
-            shutil.rmtree(html_assets_dir, ignore_errors=True)
+            _remove_tree(html_assets_dir)
+
+
+def should_auto_clean_build_outputs() -> bool:
+    return AUTO_CLEAN_BUILD_OUTPUTS
+
+
+def cleanup_task_generated_artifacts(
+    task_id: str,
+    task_mode: str = "convert",
+    output_filename: Optional[str] = None,
+    remove_backend_output: bool = False,
+) -> None:
+    if remove_backend_output and output_filename:
+        safe_name = Path(str(output_filename)).name
+        if safe_name:
+            output_path = BACKEND_OUTPUT_DIR / safe_name
+            if output_path.exists():
+                try:
+                    output_path.unlink()
+                except Exception:
+                    pass
+    _cleanup_task_intermediates(task_id, task_mode)
+
+
+def _has_pending_generated_artifacts(
+    task_id: str,
+    task_mode: str = "convert",
+    output_filename: Optional[str] = None,
+    remove_backend_output: bool = False,
+) -> bool:
+    task_dir = TASKS_DIR / task_id
+    if any((task_dir / name).exists() for name in ("project", "gradle", "_tmp_html_libs", "desktop-source", "desktop-app")):
+        return True
+    output_dir = task_dir / "output"
+    if output_dir.exists():
+        try:
+            next(output_dir.iterdir())
+            return True
+        except StopIteration:
+            pass
+        except Exception:
+            return True
+    if remove_backend_output and output_filename:
+        safe_name = Path(str(output_filename)).name
+        if safe_name and (BACKEND_OUTPUT_DIR / safe_name).exists():
+            return True
+    if str(task_mode or "").strip().lower() == "html" and (task_dir / "input" / "project.zip").exists():
+        if (task_dir / "input" / "html_assets").exists():
+            return True
+    return False
+
+
+def schedule_cleanup_task_generated_artifacts(
+    task_id: str,
+    task_mode: str = "convert",
+    output_filename: Optional[str] = None,
+    remove_backend_output: bool = False,
+) -> None:
+    cleanup_task_generated_artifacts(
+        task_id,
+        task_mode,
+        output_filename=output_filename,
+        remove_backend_output=remove_backend_output,
+    )
+
+    def _worker() -> None:
+        for delay_seconds in (1.0, 2.0, 4.0, 8.0, 16.0):
+            if not _has_pending_generated_artifacts(
+                task_id,
+                task_mode,
+                output_filename=output_filename,
+                remove_backend_output=remove_backend_output,
+            ):
+                return
+            time.sleep(delay_seconds)
+            cleanup_task_generated_artifacts(
+                task_id,
+                task_mode,
+                output_filename=output_filename,
+                remove_backend_output=remove_backend_output,
+            )
+
+    threading.Thread(target=_worker, daemon=True).start()
 
 
 def _silent_upload_task_assets(task_id: str, task) -> None:
@@ -489,7 +598,7 @@ class APKBuilder:
         
         # 验证输入文件存在
         task_mode_normalized = (task_mode or "convert").strip().lower()
-        if task_mode_normalized == "convert":
+        if task_mode_normalized in {"convert", "desktop"}:
             zip_file = task_input_dir / "project.zip"
             if not zip_file.exists():
                 raise FileNotFoundError(f"ZIP文件不存在: {zip_file}")
@@ -648,6 +757,8 @@ class APKBuilder:
 
         process = None
         try:
+            if str(env.get("TASK_MODE", "")).strip().lower() == "desktop":
+                raise RuntimeError("Electron 桌面构建仅支持本地构建模式")
             log("========== 构建任务开始 ==========")
             log(f"任务ID: {task_id}")
             log(f"应用名称: {env.get('APP_NAME', 'N/A')}")
@@ -974,7 +1085,14 @@ class APKBuilder:
 
             output_file = result.get("output_file")
             output_format = result.get("output_format", "apk").strip().lower()
-            artifact_label = "AAB" if output_format == "aab" else "APK"
+            if output_format == "aab":
+                artifact_label = "AAB"
+            elif output_format == "exe":
+                artifact_label = "EXE"
+            elif output_format == "zip":
+                artifact_label = "ZIP"
+            else:
+                artifact_label = "APK"
 
             if output_file:
                 final_filename = f"{task_id}_{Path(output_file).name}"
@@ -1238,6 +1356,19 @@ class BuildTaskRunner:
             self._notify_state_change()
         
         def on_complete(success: bool, message: str, output_file: Optional[str]):
+            task_mode = str(getattr(task, "mode", "convert") or "convert").strip().lower()
+            defer_desktop_output_cleanup = bool(
+                success
+                and output_file
+                and should_auto_clean_build_outputs()
+                and task_mode == "desktop"
+            )
+            auto_clean_output = bool(
+                success
+                and output_file
+                and should_auto_clean_build_outputs()
+                and task_mode != "desktop"
+            )
             if task_id in self.canceled_tasks:
                 task.status = "failed"
                 task.progress = 0
@@ -1249,9 +1380,14 @@ class BuildTaskRunner:
             if success:
                 task.status = "success"
                 task.progress = 100
-                task.message = message
-                task.output_filename = output_file
-                task.download_url = f"/api/download/{task_id}"
+                if auto_clean_output:
+                    task.message = f"{message}（本地产物已自动清理）"
+                elif defer_desktop_output_cleanup:
+                    task.message = f"{message}（请及时下载，安装包仅支持下载一次，离开网站后会自动清理）"
+                else:
+                    task.message = message
+                task.output_filename = None if auto_clean_output else output_file
+                task.download_url = None if auto_clean_output else f"/api/download/{task_id}"
             else:
                 task.status = "failed"
                 task.message = message
@@ -1293,7 +1429,12 @@ class BuildTaskRunner:
                 pass
 
             try:
-                _cleanup_task_intermediates(task_id, getattr(task, "mode", "convert"))
+                schedule_cleanup_task_generated_artifacts(
+                    task_id,
+                    getattr(task, "mode", "convert"),
+                    output_filename=output_file,
+                    remove_backend_output=auto_clean_output,
+                )
             except Exception:
                 pass
 

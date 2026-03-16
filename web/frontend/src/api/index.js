@@ -169,6 +169,34 @@ export const getDownloadUrl = (taskId) => {
   return `/api/download/${taskId}?client_id=${encodeURIComponent(clientId)}`
 }
 
+export const releaseDesktopOutputs = async () => {
+  const clientId = getClientId()
+  const response = await api.post('/tasks/desktop-output/release', null, {
+    params: { client_id: clientId }
+  })
+  return response.data
+}
+
+export const sendReleaseDesktopOutputsBeacon = () => {
+  const clientId = getClientId()
+  const url = `/api/tasks/desktop-output/release?client_id=${encodeURIComponent(clientId)}`
+  if (typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function') {
+    try {
+      return navigator.sendBeacon(url, new Blob([], { type: 'text/plain;charset=UTF-8' }))
+    } catch (error) {
+      // 忽略 beacon 失败并回退到 fetch
+    }
+  }
+  if (typeof fetch === 'function') {
+    fetch(url, {
+      method: 'POST',
+      keepalive: true,
+      credentials: 'same-origin'
+    }).catch(() => {})
+  }
+  return true
+}
+
 export const getKeystoreUrl = (taskId) => {
   const clientId = getClientId()
   return `/api/keystore/${taskId}?client_id=${encodeURIComponent(clientId)}`
