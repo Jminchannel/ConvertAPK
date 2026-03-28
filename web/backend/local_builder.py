@@ -746,10 +746,13 @@ def _write_desktop_wrapper_project(
 
     build_dir = wrapper_root / "build"
     build_dir.mkdir(parents=True, exist_ok=True)
-    if logo_path and logo_path.exists():
+    has_custom_logo = bool(logo_path and logo_path.exists())
+    if has_custom_logo:
         shutil.copy2(logo_path, build_dir / "icon.png")
+        if str(logo_path.suffix).lower() == ".ico":
+            shutil.copy2(logo_path, build_dir / "icon.ico")
     default_ico = _resolve_default_desktop_icon_ico()
-    if default_ico and default_ico.exists():
+    if (not has_custom_logo) and default_ico and default_ico.exists():
         shutil.copy2(default_ico, build_dir / "icon.ico")
 
     safe_npm_name = re.sub(r"[^a-z0-9-]+", "-", str(package_name or "desktop-app").strip().lower()).strip("-")
@@ -773,7 +776,7 @@ def _write_desktop_wrapper_project(
         "artifactName": f"{safe_artifact_name}-desktop-v${{version}}.${{ext}}",
         "win": {"target": ["portable"]},
     }
-    if (build_dir / "icon.ico").exists():
+    if (build_dir / "icon.ico").exists() or (build_dir / "icon.png").exists():
         build_config["icon"] = "build/icon.ico"
         build_config["win"]["icon"] = "build/icon.ico"
 
@@ -784,11 +787,13 @@ def _write_desktop_wrapper_project(
         "main": "main.js",
         "private": True,
         "scripts": {
-            "dist": "electron-builder --win portable --publish never",
+            "prepare-icon": "node scripts/prepare-icon.js",
+            "dist": "npm run prepare-icon && electron-builder --win portable --publish never",
         },
         "devDependencies": {
             "electron": "^30.4.0",
             "electron-builder": "^24.13.3",
+            "png-to-ico": "^2.1.8",
         },
         "build": build_config,
     }
@@ -858,6 +863,40 @@ contextBridge.exposeInMainWorld("desktopApp", {
   platform: process.platform,
 });
 """
+    prepare_icon_js = """const fs = require("fs");
+const path = require("path");
+const pngToIco = require("png-to-ico");
+
+async function main() {
+  const buildDir = path.join(__dirname, "..", "build");
+  const pngPath = path.join(buildDir, "icon.png");
+  const icoPath = path.join(buildDir, "icon.ico");
+  if (fs.existsSync(pngPath)) {
+    try {
+      const buffer = await pngToIco(pngPath);
+      fs.writeFileSync(icoPath, buffer);
+      console.log(`[Desktop] generated icon.ico from ${pngPath}`);
+      return;
+    } catch (error) {
+      if (fs.existsSync(icoPath)) {
+        console.warn(`[Desktop] icon conversion failed, keep existing icon.ico: ${error}`);
+        return;
+      }
+      throw error;
+    }
+  }
+  if (!fs.existsSync(icoPath)) {
+    throw new Error("missing icon.png and icon.ico");
+  }
+}
+
+main().catch((error) => {
+  console.error(`[Desktop] prepare icon failed: ${error}`);
+  process.exit(1);
+});
+"""
+    scripts_dir = wrapper_root / "scripts"
+    scripts_dir.mkdir(parents=True, exist_ok=True)
 
     (wrapper_root / "package.json").write_text(
         json.dumps(package_json, ensure_ascii=False, indent=2),
@@ -865,6 +904,7 @@ contextBridge.exposeInMainWorld("desktopApp", {
     )
     (wrapper_root / "main.js").write_text(main_js, encoding="utf-8")
     (wrapper_root / "preload.js").write_text(preload_js, encoding="utf-8")
+    (scripts_dir / "prepare-icon.js").write_text(prepare_icon_js, encoding="utf-8")
     _log(on_log, f"[Desktop] Electron wrapper prepared: {wrapper_root}")
 
 def _offlineize_html_assets(entry_html: Path, env: Dict[str, str], on_log=None) -> None:

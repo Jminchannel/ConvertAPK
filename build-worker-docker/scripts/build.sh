@@ -520,7 +520,11 @@ installDependencies() {
     if [ "$packageManager" = "pnpm" ]; then
         if command -v pnpm >/dev/null 2>&1; then
             log_info "使用 pnpm-lock.yaml 锁定安装依赖..."
-            pnpm install --frozen-lockfile
+            if pnpm install --frozen-lockfile; then
+                return 0
+            fi
+            log_warning "pnpm install 失败，回退 npm install（可能导致版本漂移）"
+            npm install --legacy-peer-deps
             return $?
         fi
         log_warning "检测到 pnpm-lock.yaml 但未安装 pnpm，回退 npm install（可能导致版本漂移）"
@@ -531,7 +535,11 @@ installDependencies() {
     if [ "$packageManager" = "yarn" ]; then
         if command -v yarn >/dev/null 2>&1; then
             log_info "使用 yarn.lock 锁定安装依赖..."
-            yarn install --frozen-lockfile
+            if yarn install --frozen-lockfile; then
+                return 0
+            fi
+            log_warning "yarn install 失败，回退 npm install（可能导致版本漂移）"
+            npm install --legacy-peer-deps
             return $?
         fi
         log_warning "检测到 yarn.lock 但未安装 yarn，回退 npm install（可能导致版本漂移）"
@@ -541,8 +549,7 @@ installDependencies() {
 
     if [ "$packageManager" = "npm-ci" ]; then
         log_info "使用 package-lock 锁定安装依赖（npm ci）..."
-        npm ci --legacy-peer-deps
-        if [ $? -eq 0 ]; then
+        if npm ci --legacy-peer-deps; then
             return 0
         fi
         log_warning "npm ci 失败，回退 npm install（可能导致版本漂移）"
