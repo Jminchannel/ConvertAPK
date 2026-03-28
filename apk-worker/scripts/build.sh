@@ -1307,7 +1307,7 @@ if ! grep -q "@capacitor/share" package.json; then
     check_error "安装 @capacitor/share 失败"
 fi
 
-# 创建 capacitor.config.ts
+# 创建 capacitor.config.js（避免 TypeScript 依赖）
 log_info "创建 Capacitor 配置..."
 log_info "Force install Capacitor major ${CAPACITOR_MAJOR} ..."
 installCapacitorPackage "@capacitor/core" ""
@@ -1317,10 +1317,9 @@ installCapacitorPackage "@capacitor/browser" ""
 installCapacitorPackage "@capacitor/share" ""
 installCapacitorPackage "@capacitor/android" ""
 
-cat > capacitor.config.ts << EOF
-import type { CapacitorConfig } from '@capacitor/cli';
-
-const config: CapacitorConfig = {
+rm -f capacitor.config.ts capacitor.config.json
+cat > capacitor.config.js << EOF
+const config = {
   appId: '${PACKAGE_NAME}',
   appName: '${APP_NAME}',
   webDir: '${WEB_DIR}',
@@ -1329,7 +1328,7 @@ const config: CapacitorConfig = {
   }
 };
 
-export default config;
+module.exports = config;
 EOF
 
 log_success "Capacitor 初始化完成"

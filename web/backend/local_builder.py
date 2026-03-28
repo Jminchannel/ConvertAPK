@@ -2138,16 +2138,17 @@ def run_local_build(
         _ensure_dep(pkg, process_env, "@capacitor/cli", dev=True, on_log=on_log, force_major=8)
 
         config_text = (
-            "import type { CapacitorConfig } from '@capacitor/cli';\n\n"
-            "const config: CapacitorConfig = {\n"
+            "const config = {\n"
             f"  appId: '{env.get('PACKAGE_NAME', 'com.example.app')}',\n"
             f"  appName: '{env.get('APP_NAME', 'MyApp')}',\n"
             f"  webDir: '{web_dir.name}',\n"
             "  server: { androidScheme: 'https' }\n"
             "};\n\n"
-            "export default config;\n"
+            "module.exports = config;\n"
         )
-        (project_root / "capacitor.config.ts").write_text(config_text, encoding="utf-8")
+        (project_root / "capacitor.config.ts").unlink(missing_ok=True)
+        (project_root / "capacitor.config.json").unlink(missing_ok=True)
+        (project_root / "capacitor.config.js").write_text(config_text, encoding="utf-8")
 
         progress(45, "Step 3: 生成 Android 工程...")
         _log(on_log, "Step 3: 生成 Android 工程...")
