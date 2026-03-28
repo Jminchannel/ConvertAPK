@@ -2137,6 +2137,10 @@ def run_local_build(
         _ensure_dep(pkg, process_env, "@capacitor/core", dev=False, on_log=on_log, force_major=8)
         _ensure_dep(pkg, process_env, "@capacitor/cli", dev=True, on_log=on_log, force_major=8)
 
+        export_line = "module.exports = config;\n"
+        if str(pkg.get("type", "")).strip().lower() == "module":
+            export_line = "export default config;\n"
+
         config_text = (
             "const config = {\n"
             f"  appId: '{env.get('PACKAGE_NAME', 'com.example.app')}',\n"
@@ -2144,7 +2148,7 @@ def run_local_build(
             f"  webDir: '{web_dir.name}',\n"
             "  server: { androidScheme: 'https' }\n"
             "};\n\n"
-            "module.exports = config;\n"
+            + export_line
         )
         (project_root / "capacitor.config.ts").unlink(missing_ok=True)
         (project_root / "capacitor.config.json").unlink(missing_ok=True)
