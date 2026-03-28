@@ -6,6 +6,8 @@ import subprocess
 import zipfile
 import re
 import sys
+import urllib.request
+import urllib.error
 from pathlib import Path, PurePosixPath
 from typing import Callable, Dict, Optional, Tuple
 
@@ -600,6 +602,89 @@ def _patch_gradle_wrapper(android_project_root: Path, on_log=None) -> None:
         _log(on_log, f"[Gradle] Using distribution mirror: {target_url}")
 
 
+def _is_valid_gradle_wrapper_jar(jar_path: Path) -> bool:
+    if not jar_path.exists() or jar_path.stat().st_size <= 0:
+        return False
+    try:
+        with zipfile.ZipFile(jar_path, "r") as archive:
+            return "org/gradle/wrapper/GradleWrapperMain.class" in archive.namelist()
+    except Exception:
+        return False
+
+
+def _resolve_template_gradle_wrapper_jar() -> Optional[Path]:
+    templates_root = _resolve_templates_root()
+    candidates = [
+        templates_root / "Tubbim" / "gradle" / "wrapper" / "gradle-wrapper.jar",
+        templates_root / "HTML2APK" / "gradle" / "wrapper" / "gradle-wrapper.jar",
+    ]
+    for candidate in candidates:
+        if _is_valid_gradle_wrapper_jar(candidate):
+            return candidate
+    return None
+
+
+def _extract_gradle_version_from_wrapper_props(wrapper_props: Path) -> str:
+    default_version = "8.14.3"
+    if not wrapper_props.exists():
+        return default_version
+    try:
+        text = wrapper_props.read_text(encoding="utf-8", errors="ignore")
+    except Exception:
+        return default_version
+    match = re.search(r"gradle-([0-9]+(?:\.[0-9]+)+)-", text)
+    if match:
+        return match.group(1)
+    return default_version
+
+
+def _repair_gradle_wrapper_jar(android_project_root: Path, on_log=None) -> None:
+    wrapper_props = android_project_root / "gradle" / "wrapper" / "gradle-wrapper.properties"
+    wrapper_jar = android_project_root / "gradle" / "wrapper" / "gradle-wrapper.jar"
+    if _is_valid_gradle_wrapper_jar(wrapper_jar):
+        return
+
+    _log(on_log, "[Gradle] 检测到 gradle-wrapper.jar 缺失或损坏，尝试自动修复...")
+    wrapper_jar.parent.mkdir(parents=True, exist_ok=True)
+
+    template_jar = _resolve_template_gradle_wrapper_jar()
+    if template_jar:
+        try:
+            shutil.copy2(template_jar, wrapper_jar)
+            if _is_valid_gradle_wrapper_jar(wrapper_jar):
+                _log(on_log, f"[Gradle] 已通过模板修复 gradle-wrapper.jar: {template_jar}")
+                return
+        except Exception:
+            pass
+
+    gradle_version = _extract_gradle_version_from_wrapper_props(wrapper_props)
+    download_urls = [
+        f"https://raw.githubusercontent.com/gradle/gradle/v{gradle_version}/gradle/wrapper/gradle-wrapper.jar",
+        "https://raw.githubusercontent.com/gradle/gradle/v8.14.3/gradle/wrapper/gradle-wrapper.jar",
+    ]
+    temp_file = wrapper_jar.with_suffix(".jar.tmp")
+    for url in download_urls:
+        _log(on_log, f"[Gradle] 尝试下载 gradle-wrapper.jar: {url}")
+        try:
+            with urllib.request.urlopen(url, timeout=20) as response:
+                data = response.read()
+            temp_file.write_bytes(data)
+            if _is_valid_gradle_wrapper_jar(temp_file):
+                temp_file.replace(wrapper_jar)
+                _log(on_log, "[Gradle] 已下载并修复 gradle-wrapper.jar")
+                return
+        except (urllib.error.URLError, TimeoutError, OSError):
+            pass
+        finally:
+            if temp_file.exists():
+                try:
+                    temp_file.unlink()
+                except Exception:
+                    pass
+
+    raise RuntimeError("gradle-wrapper.jar 已损坏且自动修复失败")
+
+
 def _write_gradle_init(task_dir: Path, on_log=None) -> Path:
     init_script = task_dir / "gradle-init.gradle"
     mirror_public = os.getenv("CONVERTAPK_GRADLE_MAVEN_PUBLIC", "https://maven.aliyun.com/repository/public").strip()
@@ -728,11 +813,40 @@ def _resolve_default_desktop_icon_ico() -> Optional[Path]:
     return None
 
 
+def _shrink_desktop_web_assets(app_dir: Path, on_log=None) -> None:
+    if not app_dir.exists():
+        return
+    removed_files = 0
+    removed_bytes = 0
+    for candidate in app_dir.rglob("*"):
+        if not candidate.is_file():
+            continue
+        if not candidate.name.lower().endswith(".map"):
+            continue
+        try:
+            removed_bytes += candidate.stat().st_size
+            candidate.unlink()
+            removed_files += 1
+        except Exception:
+            continue
+    if removed_files > 0:
+        saved_mb = removed_bytes / (1024 * 1024)
+        _log(on_log, f"[Desktop] 清理 source map: {removed_files} 个文件，约节省 {saved_mb:.2f} MB")
+
+
+def _normalize_desktop_installer_mode(value: Optional[str]) -> str:
+    raw = str(value or "portable").strip().lower()
+    if raw in {"nsis-web", "nsisweb", "web", "web-installer", "nsis_web"}:
+        return "nsis-web"
+    return "portable"
+
+
 def _write_desktop_wrapper_project(
     wrapper_root: Path,
     app_name: str,
     package_name: str,
     version_name: str,
+    desktop_installer_mode: str,
     source_app_dir: Path,
     logo_path: Optional[Path],
     on_log=None,
@@ -743,6 +857,7 @@ def _write_desktop_wrapper_project(
 
     app_dir = wrapper_root / "app"
     shutil.copytree(source_app_dir, app_dir)
+    _shrink_desktop_web_assets(app_dir, on_log=on_log)
 
     build_dir = wrapper_root / "build"
     build_dir.mkdir(parents=True, exist_ok=True)
@@ -761,6 +876,7 @@ def _write_desktop_wrapper_project(
     safe_artifact_name = re.sub(r"[^A-Za-z0-9._-]+", "-", str(app_name or "DesktopApp").strip()).strip("-")
     if not safe_artifact_name:
         safe_artifact_name = "DesktopApp"
+    desktop_target = _normalize_desktop_installer_mode(desktop_installer_mode)
 
     build_config = {
         "appId": str(package_name or "com.example.desktop"),
@@ -773,8 +889,10 @@ def _write_desktop_wrapper_project(
             "build/**/*",
         ],
         "asar": True,
+        "compression": "maximum",
+        "electronLanguages": ["en-US", "zh-CN"],
         "artifactName": f"{safe_artifact_name}-desktop-v${{version}}.${{ext}}",
-        "win": {"target": ["portable"]},
+        "win": {"target": [{"target": desktop_target, "arch": ["x64"]}]},
     }
     if (build_dir / "icon.ico").exists() or (build_dir / "icon.png").exists():
         build_config["icon"] = "build/icon.ico"
@@ -788,7 +906,7 @@ def _write_desktop_wrapper_project(
         "private": True,
         "scripts": {
             "prepare-icon": "node scripts/prepare-icon.js",
-            "dist": "npm run prepare-icon && electron-builder --win portable --publish never",
+            "dist": f"npm run prepare-icon && electron-builder --win {desktop_target} --publish never",
         },
         "devDependencies": {
             "electron": "^30.4.0",
@@ -1822,8 +1940,10 @@ def run_local_build(
     is_html_task = task_mode == "html"
 
     if is_desktop_task:
+        desktop_installer_mode = _normalize_desktop_installer_mode(env.get("DESKTOP_INSTALLER_MODE"))
         progress(25, "Step 1: 解压 ZIP 项目...")
         _log(on_log, "Step 1: 解压 ZIP 项目...")
+        _log(on_log, f"[Desktop] 安装器模式: {desktop_installer_mode}")
 
         zip_files = list(task_input_dir.glob("*.zip"))
         if not zip_files:
@@ -1875,6 +1995,7 @@ def run_local_build(
             app_name=str(env.get("APP_NAME") or "DesktopApp"),
             package_name=str(env.get("PACKAGE_NAME") or "com.example.desktop"),
             version_name=str(env.get("VERSION_NAME") or "1.0.0"),
+            desktop_installer_mode=desktop_installer_mode,
             source_app_dir=web_dir,
             logo_path=logo_path if logo_path.exists() else None,
             on_log=on_log,
@@ -1889,7 +2010,12 @@ def run_local_build(
         progress(85, "Step 5: 打包桌面应用...")
         _log(on_log, "Step 5: 打包桌面应用...")
         process_env["CSC_IDENTITY_AUTO_DISCOVERY"] = "false"
-        _run_cmd([npx_cmd, "electron-builder", "--win", "portable", "--publish", "never"], cwd=wrapper_root, env=process_env, on_log=on_log)
+        _run_cmd(
+            [npx_cmd, "electron-builder", "--win", desktop_installer_mode, "--publish", "never"],
+            cwd=wrapper_root,
+            env=process_env,
+            on_log=on_log,
+        )
 
         dist_dir = wrapper_root / "dist"
         output_candidates = sorted(
@@ -2239,6 +2365,7 @@ def run_local_build(
     if not gradlew.exists():
         raise RuntimeError("未找到 gradlew")
     _patch_gradle_wrapper(android_project_root, on_log=on_log)
+    _repair_gradle_wrapper_jar(android_project_root, on_log=on_log)
     _ensure_gradle_properties(android_project_root, on_log=on_log)
     gradle_cmd = [str(gradlew)]
     gradle_cmd.append("bundleRelease" if output_format == "aab" else "assembleRelease")

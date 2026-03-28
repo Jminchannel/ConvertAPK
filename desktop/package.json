@@ -15,6 +15,11 @@
     "appId": "com.convertapk.desktop",
     "productName": "ConvertAPK",
     "icon": "build/icon.ico",
+    "compression": "maximum",
+    "electronLanguages": [
+      "en-US",
+      "zh-CN"
+    ],
     "win": {
       "icon": "build/icon.ico"
     },

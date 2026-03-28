@@ -328,6 +328,110 @@ patch_gradle_wrapper_version() {
     fi
 }
 
+is_valid_gradle_wrapper_jar() {
+    local jar_file="$1"
+    if [ ! -s "$jar_file" ]; then
+        return 1
+    fi
+    if ! unzip -tq "$jar_file" >/dev/null 2>&1; then
+        return 1
+    fi
+    if ! unzip -l "$jar_file" 2>/dev/null | grep -q "org/gradle/wrapper/GradleWrapperMain.class"; then
+        return 1
+    fi
+    return 0
+}
+
+ensure_gradle_wrapper_jar() {
+    local wrapper_props=""
+    local wrapper_jar=""
+    for candidate in "gradle/wrapper/gradle-wrapper.properties" "android/gradle/wrapper/gradle-wrapper.properties"; do
+        if [ -f "$candidate" ]; then
+            wrapper_props="$candidate"
+            break
+        fi
+    done
+    for candidate in "gradle/wrapper/gradle-wrapper.jar" "android/gradle/wrapper/gradle-wrapper.jar"; do
+        if [ -f "$candidate" ]; then
+            wrapper_jar="$candidate"
+            break
+        fi
+    done
+
+    if [ -z "$wrapper_props" ] && [ -z "$wrapper_jar" ]; then
+        log_warning "未找到 Gradle wrapper 文件，跳过 gradle-wrapper.jar 校验"
+        return 0
+    fi
+
+    if [ -z "$wrapper_jar" ] && [ -n "$wrapper_props" ]; then
+        wrapper_jar="$(dirname "$wrapper_props")/gradle-wrapper.jar"
+    fi
+
+    if [ -n "$wrapper_jar" ] && is_valid_gradle_wrapper_jar "$wrapper_jar"; then
+        return 0
+    fi
+
+    log_warning "检测到 gradle-wrapper.jar 缺失或损坏，开始自动修复..."
+
+    local template_candidates=(
+        "/workspace/templates/Tubbim/gradle/wrapper/gradle-wrapper.jar"
+        "/workspace/templates/HTML2APK/gradle/wrapper/gradle-wrapper.jar"
+    )
+    local template_jar=""
+    for src in "${template_candidates[@]}"; do
+        if [ -f "$src" ] && is_valid_gradle_wrapper_jar "$src"; then
+            template_jar="$src"
+            break
+        fi
+    done
+
+    if [ -n "$template_jar" ]; then
+        mkdir -p "$(dirname "$wrapper_jar")"
+        cp -f "$template_jar" "$wrapper_jar"
+        if is_valid_gradle_wrapper_jar "$wrapper_jar"; then
+            log_success "已使用模板修复 gradle-wrapper.jar"
+            return 0
+        fi
+    fi
+
+    local wrapper_version="8.14.3"
+    if [ -n "$wrapper_props" ] && [ -f "$wrapper_props" ]; then
+        local dist_url_raw
+        dist_url_raw="$(grep -E '^distributionUrl=' "$wrapper_props" | head -n 1 | cut -d'=' -f2-)"
+        if [ -n "$dist_url_raw" ]; then
+            local dist_url="${dist_url_raw//\\:/:}"
+            local parsed_version
+            parsed_version="$(printf '%s' "$dist_url" | sed -n -E 's#.*gradle-([0-9]+(\.[0-9]+)+)-.*#\1#p' | head -n 1)"
+            if [ -n "$parsed_version" ]; then
+                wrapper_version="$parsed_version"
+            fi
+        fi
+    fi
+
+    local urls=(
+        "https://raw.githubusercontent.com/gradle/gradle/v${wrapper_version}/gradle/wrapper/gradle-wrapper.jar"
+        "https://raw.githubusercontent.com/gradle/gradle/v8.14.3/gradle/wrapper/gradle-wrapper.jar"
+    )
+    local tmp_file="${wrapper_jar}.tmp.$$"
+    rm -f "$tmp_file"
+    for url in "${urls[@]}"; do
+        log_info "尝试下载 gradle-wrapper.jar: $url"
+        if curl -fL --connect-timeout 10 --retry 3 --retry-delay 2 -o "$tmp_file" "$url"; then
+            if is_valid_gradle_wrapper_jar "$tmp_file"; then
+                mkdir -p "$(dirname "$wrapper_jar")"
+                mv "$tmp_file" "$wrapper_jar"
+                chmod 644 "$wrapper_jar" 2>/dev/null || true
+                log_success "已下载并修复 gradle-wrapper.jar"
+                return 0
+            fi
+            rm -f "$tmp_file"
+        fi
+    done
+    rm -f "$tmp_file"
+    log_error "gradle-wrapper.jar 自动修复失败，请重新上传项目或移除 ZIP 内损坏的 android 目录"
+    exit 1
+}
+
 # ============================================
 # 调试：打印所有环境变量
 # ============================================
@@ -2991,6 +3095,7 @@ chmod +x gradlew
 
 # 如果已缓存 Gradle wrapper 分发包就复用，否则尝试从镜像预取
 patch_gradle_wrapper_version
+ensure_gradle_wrapper_jar
 ensure_gradle_wrapper_dist
 
 # 配置国内 Maven 镜像（降低 Maven Central 卡住的概率）

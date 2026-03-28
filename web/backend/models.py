@@ -28,6 +28,7 @@ class AppConfig(BaseModel):
     keystore_password: Optional[str] = None
     key_password: Optional[str] = None
     output_format: str = "apk"
+    desktop_installer_mode: str = "portable"
     # portrait / landscape / auto (auto = follow system, do not force in AndroidManifest)
     orientation: str = "auto"
     # Double-click back to exit
@@ -160,6 +161,14 @@ class AppConfig(BaseModel):
             return "aab"
         return "apk"
 
+    @field_validator("desktop_installer_mode")
+    @classmethod
+    def validate_desktop_installer_mode(cls, value: str) -> str:
+        raw = (value or "").strip().lower()
+        if raw in {"nsis-web", "nsisweb", "web", "web-installer", "nsis_web"}:
+            return "nsis-web"
+        return "portable"
+
 
 class BuildTask(BaseModel):
     """构建任务"""
@@ -270,6 +279,7 @@ class UpdateTaskRequest(BaseModel):
     version_name: str
     version_code: int
     output_format: Optional[str] = None  # apk / aab（可选）
+    desktop_installer_mode: Optional[str] = None  # portable / nsis-web（可选）
     # APK style overrides (optional)
     orientation: Optional[str] = None
     double_click_exit: Optional[bool] = None

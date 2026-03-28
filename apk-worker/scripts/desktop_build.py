@@ -14,6 +14,7 @@ def main() -> int:
     env = dict(os.environ)
     env.setdefault("TASK_MODE", "desktop")
     env.setdefault("OUTPUT_FORMAT", "exe")
+    env.setdefault("DESKTOP_INSTALLER_MODE", "portable")
     env.setdefault("TASK_INPUT_DIR", env.get("INPUT_DIR", "/workspace/input"))
     env.setdefault("TASK_OUTPUT_DIR", env.get("OUTPUT_DIR", "/workspace/output"))
     env.setdefault("TASK_KEYSTORE_DIR", env.get("KEYSTORE_DIR", "/workspace/keystore"))

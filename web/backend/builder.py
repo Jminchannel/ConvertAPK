@@ -594,6 +594,7 @@ class APKBuilder:
         version_name: str,
         version_code: int,
         output_format: str = "apk",
+        desktop_installer_mode: str = "portable",
         task_mode: str = "convert",
         web_url: Optional[str] = None,
         screen_orientation: Optional[str] = None,
@@ -677,6 +678,11 @@ class APKBuilder:
             output_format_normalized = "exe"
         elif output_format_normalized not in {"apk", "aab"}:
             output_format_normalized = "apk"
+        desktop_installer_mode_normalized = str(desktop_installer_mode or "portable").strip().lower()
+        if desktop_installer_mode_normalized in {"nsis-web", "nsisweb", "web", "web-installer", "nsis_web"}:
+            desktop_installer_mode_normalized = "nsis-web"
+        else:
+            desktop_installer_mode_normalized = "portable"
         status_bar_color_normalized = str(status_bar_color or "").strip()
         if not status_bar_color_normalized:
             status_bar_color_normalized = "#FFFFFF"
@@ -729,6 +735,7 @@ class APKBuilder:
             "KEY_ALIAS": key_alias or "key0",
             "KEY_PASSWORD": key_password or (keystore_password or "android"),
             "OUTPUT_FORMAT": output_format_normalized,
+            "DESKTOP_INSTALLER_MODE": desktop_installer_mode_normalized,
             "SCREEN_ORIENTATION": (screen_orientation or "auto").strip().lower(),
             "DOUBLE_CLICK_EXIT": "true" if double_click_exit else "false",
             "STATUS_BAR_HIDDEN": "true" if status_bar_hidden else "false",
@@ -863,6 +870,8 @@ class APKBuilder:
                 f"WEB_URL={env.get('WEB_URL', '')}",
                 "-e",
                 f"OUTPUT_FORMAT={container_output_format}",
+                "-e",
+                f"DESKTOP_INSTALLER_MODE={env.get('DESKTOP_INSTALLER_MODE', 'portable')}",
                 "-e",
                 f"SCREEN_ORIENTATION={env.get('SCREEN_ORIENTATION', 'auto')}",
                 "-e",
@@ -1496,6 +1505,7 @@ class BuildTaskRunner:
                 version_name=task.config.version_name,
                 version_code=task.config.version_code,
                 output_format=getattr(task.config, "output_format", "apk"),
+                desktop_installer_mode=getattr(task.config, "desktop_installer_mode", "portable"),
                 task_mode=getattr(task, "mode", "convert"),
                 web_url=getattr(task, "web_url", None),
                 screen_orientation=getattr(task.config, "orientation", None),
