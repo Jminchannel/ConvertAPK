@@ -66,7 +66,9 @@ app = FastAPI(
     version="1.0.0"
 )
 
-BUILDER_MODE = os.getenv("APK_BUILDER_MODE", "local").strip().lower()
+BUILDER_MODE = os.getenv("APK_BUILDER_MODE", "").strip().lower()
+if not BUILDER_MODE:
+    BUILDER_MODE = "local" if os.name == "nt" else "docker"
 LOCAL_MODE = BUILDER_MODE == "local"
 GITHUB_REPO_OWNER = (os.getenv("GITHUB_REPO_OWNER", "Jminchannel") or "Jminchannel").strip() or "Jminchannel"
 GITHUB_REPO_NAME = (os.getenv("GITHUB_REPO_NAME", "ConvertAPK-Desktop") or "ConvertAPK-Desktop").strip() or "ConvertAPK-Desktop"
@@ -1494,8 +1496,6 @@ async def create_task(task_data: BuildTaskCreate):
     if mode == "desktop":
         if not _is_desktop_mode_enabled():
             raise HTTPException(status_code=403, detail="desktop mode is disabled by admin")
-        if not LOCAL_MODE:
-            raise HTTPException(status_code=503, detail="desktop mode requires local builder mode")
     html_filename = None
     if mode == "html":
         html_filename = str(task_data.html_filename or "").strip()

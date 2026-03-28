@@ -6,6 +6,9 @@ services:
     image: convertapk-backend:latest
     environment:
       - TZ=Asia/Shanghai
+      - APK_BUILDER_MODE=docker
+      - APK_BUILDER_IMAGE=apk-builder:latest
+      - DESKTOP_BUILDER_IMAGE=desktop-builder:latest
       - APK_BUILDER_DATA_DIR=/data
       - APK_BUILDER_DATA_VOLUME=convertapk-data
       - APK_BUILDER_GRADLE_CACHE_MODE=volume
@@ -90,6 +93,16 @@ services:
       dockerfile: Dockerfile
     image: apk-builder:latest
     entrypoint: ["/bin/bash", "-lc", "echo 'apk-builder image is ready'; sleep infinity"]
+    restart: "no"
+
+  # Build desktop-builder image on demand.
+  desktop-builder:
+    profiles: ["builder"]
+    build:
+      context: .
+      dockerfile: apk-worker/desktop-builder.Dockerfile
+    image: desktop-builder:latest
+    entrypoint: ["/bin/bash", "-lc", "echo 'desktop-builder image is ready'; sleep infinity"]
     restart: "no"
 
 volumes:

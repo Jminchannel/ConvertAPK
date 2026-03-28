@@ -65,6 +65,40 @@ elif not DATA_VOLUME:
 else:
     TEMPLATES_DIR = ""
 
+
+def _ensure_writable_data_dir(preferred_dir: Path) -> Path:
+    """确保运行数据目录可写，避免因环境权限问题导致后端无法启动。"""
+    fallback_dirs = [BACKEND_DIR / ".runtime-data"]
+    if os.name == "nt":
+        appdata_root = os.getenv("APPDATA", "").strip()
+        if appdata_root:
+            fallback_dirs.insert(0, Path(appdata_root) / "ConvertAPK")
+
+    candidates: list[Path] = []
+    for candidate in [preferred_dir, *fallback_dirs]:
+        resolved = candidate.expanduser()
+        if not resolved.is_absolute():
+            resolved = (BACKEND_DIR / resolved).resolve()
+        if resolved not in candidates:
+            candidates.append(resolved)
+
+    last_error: Exception | None = None
+    for candidate in candidates:
+        try:
+            candidate.mkdir(parents=True, exist_ok=True)
+            probe_path = candidate / ".write-probe"
+            probe_path.write_text("ok", encoding="utf-8")
+            probe_path.unlink(missing_ok=True)
+            return candidate
+        except Exception as exc:
+            last_error = exc
+
+    if last_error is not None:
+        raise last_error
+    return preferred_dir
+
+
+DATA_DIR = _ensure_writable_data_dir(DATA_DIR)
 UPLOAD_DIR = DATA_DIR / "uploads"
 BACKEND_OUTPUT_DIR = DATA_DIR / "outputs"
 LOGS_DIR = DATA_DIR / "logs"
@@ -86,6 +120,8 @@ if DATA_VOLUME and GRADLE_CACHE_MODE == "task":
     GRADLE_CACHE_MODE = "volume"
 
 GRADLE_CACHE_VOLUME = os.getenv("APK_BUILDER_GRADLE_CACHE_VOLUME", "convertapk-gradle-cache").strip() or "convertapk-gradle-cache"
+APK_BUILDER_IMAGE = os.getenv("APK_BUILDER_IMAGE", "apk-builder:latest").strip() or "apk-builder:latest"
+DESKTOP_BUILDER_IMAGE = os.getenv("DESKTOP_BUILDER_IMAGE", "desktop-builder:latest").strip() or "desktop-builder:latest"
 
 # 确保目录存在
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -637,7 +673,9 @@ class APKBuilder:
         
         # 构建环境变量（包含任务专属目录路径）
         output_format_normalized = (output_format or "apk").strip().lower()
-        if output_format_normalized not in {"apk", "aab"}:
+        if task_mode_normalized == "desktop":
+            output_format_normalized = "exe"
+        elif output_format_normalized not in {"apk", "aab"}:
             output_format_normalized = "apk"
         status_bar_color_normalized = str(status_bar_color or "").strip()
         if not status_bar_color_normalized:
@@ -733,21 +771,11 @@ class APKBuilder:
         on_log: Optional[Callable[[str], None]] = None,
         on_complete: Optional[Callable[[bool, str, Optional[str]], None]] = None
     ):
-        """
-        运行 Docker 构建
-        
-        Args:
-            task_id: 任务ID
-            env: 环境变量字典
-            task_output_dir: 任务输出目录
-            on_progress: 进度回调 (progress: int, message: str)
-            on_log: 日志回调 (log_line: str)
-            on_complete: 完成回调 (success: bool, message: str, output_file: Optional[str])
-        """
+        """运行 Docker 构建。"""
         log_file = LOGS_DIR / f"{task_id}.log"
-        
+
         def log(message: str):
-            """写入日志"""
+            """写入日志。"""
             timestamp = datetime.now().strftime("%H:%M:%S")
             log_line = f"[{timestamp}] {message}"
             with open(log_file, "a", encoding="utf-8") as f:
@@ -756,39 +784,38 @@ class APKBuilder:
                 on_log(log_line)
 
         process = None
+        task_mode = str(env.get("TASK_MODE", "convert")).strip().lower()
+        is_desktop_task = task_mode == "desktop"
+        docker_image = DESKTOP_BUILDER_IMAGE if is_desktop_task else APK_BUILDER_IMAGE
+
         try:
-            if str(env.get("TASK_MODE", "")).strip().lower() == "desktop":
-                raise RuntimeError("Electron 桌面构建仅支持本地构建模式")
             log("========== 构建任务开始 ==========")
             log(f"任务ID: {task_id}")
             log(f"应用名称: {env.get('APP_NAME', 'N/A')}")
             log(f"包名: {env.get('PACKAGE_NAME', 'N/A')}")
             log(f"版本: {env.get('VERSION_NAME', 'N/A')}")
-            log(f"输出格式: {env.get('OUTPUT_FORMAT', 'N/A')}")
+            log(f"构建模式: {'desktop' if is_desktop_task else 'android'}")
+            log(f"构建镜像: {docker_image}")
             log("")
-            
+
             if on_progress:
-                on_progress(5, "准备Docker环境...")
-            log("Step 0: 准备Docker环境...")
+                on_progress(5, "准备 Docker 环境...")
+            log("Step 0: 准备 Docker 环境...")
             log(f"任务输入目录: {env.get('TASK_INPUT_DIR', 'N/A')}")
             log(f"任务输出目录: {env.get('TASK_OUTPUT_DIR', 'N/A')}")
             log(f"任务密钥目录: {env.get('TASK_KEYSTORE_DIR', 'N/A')}")
 
-            # Gradle 缓存挂载（默认使用 Docker volume，避免每次任务启动复制大量 wrapper 缓存）
             if env.get("GRADLE_CACHE_MODE") == "task":
                 gradle_mount = f"{env['TASK_GRADLE_DIR']}:/root/.gradle"
-                log(f"[Gradle] 缓存模式: task (目录: {env.get('TASK_GRADLE_DIR', '')})")
+                log(f"[Gradle] 缓存模式: task ({env.get('TASK_GRADLE_DIR', '')})")
             else:
                 volume_name = env.get("GRADLE_CACHE_VOLUME") or GRADLE_CACHE_VOLUME
                 gradle_mount = f"{volume_name}:/root/.gradle"
-                log(f"[Gradle] 缓存模式: volume (volume: {volume_name})")
-            
-            # 任务数据挂载策略：
-            # - bind：直接把宿主目录挂载进容器（适合后端直接跑在宿主机）
-            # - volume：把后端的数据卷挂载进容器（适合后端容器化部署，避免宿主路径映射问题）
+                log(f"[Gradle] 缓存模式: volume ({volume_name})")
+
             task_data_volume = env.get("DATA_VOLUME") or DATA_VOLUME
             if task_data_volume:
-                log(f"[Data] 挂载模式: volume (volume: {task_data_volume})")
+                log(f"[Data] 挂载模式: volume ({task_data_volume})")
                 task_mount_args = [
                     "-v",
                     f"{task_data_volume}:/data",
@@ -802,7 +829,7 @@ class APKBuilder:
                     f"KEYSTORE_DIR=/data/tasks/{task_id}/keystore",
                 ]
             else:
-                log("[Data] 挂载模式: bind (使用宿主路径挂载任务目录)")
+                log("[Data] 挂载模式: bind")
                 task_mount_args = [
                     "-v",
                     f"{env['TASK_INPUT_DIR']}:/workspace/input",
@@ -813,15 +840,14 @@ class APKBuilder:
                 ]
                 task_dir_env_args = []
 
-            # 使用docker run直接运行，挂载任务专属目录
             cmd = ["docker", "run", "--rm"]
             cmd += task_mount_args
-            if TEMPLATES_DIR:
+            if TEMPLATES_DIR and not is_desktop_task:
                 cmd += ["-v", f"{TEMPLATES_DIR}:/workspace/templates:ro"]
-            cmd += ["-v", gradle_mount]  # Gradle缓存
-            # 资源限制（Gradle构建需要较大内存）
+            cmd += ["-v", gradle_mount]
             cmd += ["--memory=6g", "--cpus=4"]
-            # 环境变量
+
+            container_output_format = "exe" if is_desktop_task else env.get("OUTPUT_FORMAT", "apk")
             cmd += [
                 "-e",
                 f"APP_NAME={env['APP_NAME']}",
@@ -836,7 +862,7 @@ class APKBuilder:
                 "-e",
                 f"WEB_URL={env.get('WEB_URL', '')}",
                 "-e",
-                f"OUTPUT_FORMAT={env.get('OUTPUT_FORMAT', 'apk')}",
+                f"OUTPUT_FORMAT={container_output_format}",
                 "-e",
                 f"SCREEN_ORIENTATION={env.get('SCREEN_ORIENTATION', 'auto')}",
                 "-e",
@@ -865,129 +891,131 @@ class APKBuilder:
                 f"KEY_PASSWORD={env['KEY_PASSWORD']}",
                 "-e",
                 f"KEYSTORE_REUSED={env['KEYSTORE_REUSED']}",
-                # 设置Gradle参数（减少内存占用）
                 "-e",
                 "GRADLE_OPTS=-Xmx2g -Dorg.gradle.daemon=true",
             ]
             cmd += task_dir_env_args
             if task_data_volume:
-                cmd += ['-e', 'NPM_CONFIG_CACHE=/data/npm-cache']
-                cmd += [
-                    "-e",
-                    f"PROJECT_DIR=/data/tasks/{task_id}/project",
-                ]
+                cmd += ["-e", "NPM_CONFIG_CACHE=/data/npm-cache"]
+                if is_desktop_task:
+                    cmd += ["-e", "ELECTRON_CACHE=/data/electron-cache"]
+                    cmd += ["-e", "ELECTRON_BUILDER_CACHE=/data/electron-builder-cache"]
+                else:
+                    cmd += [
+                        "-e",
+                        f"PROJECT_DIR=/data/tasks/{task_id}/project",
+                    ]
 
-            # 可选：允许在后端环境中指定 Gradle 镜像列表（空格分隔）
             gradle_dist_mirrors = os.environ.get("GRADLE_DIST_MIRRORS", "").strip()
-            if gradle_dist_mirrors:
+            if gradle_dist_mirrors and not is_desktop_task:
                 cmd += ["-e", f"GRADLE_DIST_MIRRORS={gradle_dist_mirrors}"]
 
-            cmd += ["apk-builder:latest"]
-            
-            # 调试：打印 Docker 命令中的 OUTPUT_FORMAT
-            log(f"[DEBUG] Docker 命令中的 OUTPUT_FORMAT: {env.get('OUTPUT_FORMAT', 'apk')}")
-            
-            # 设置环境变量
+            cmd += [docker_image]
+
+            log(f"[DEBUG] Docker OUTPUT_FORMAT: {container_output_format}")
             process_env = os.environ.copy()
             process_env.update(env)
             process_env.update(env_setup.get_npm_config())
-            
+
             if on_progress:
-                on_progress(10, "启动Docker容器构建...")
-            log("启动Docker容器...")
+                on_progress(10, "启动 Docker 容器构建...")
+            log("启动 Docker 容器...")
             log(f"工作目录: {APK_WORKER_DIR}")
             log("")
-            
-            # 运行docker-compose (设置环境编码为UTF-8)
+
             process_env["PYTHONIOENCODING"] = "utf-8"
             process_env["LANG"] = "en_US.UTF-8"
-            
+
             process = subprocess.Popen(
                 cmd,
                 cwd=str(APK_WORKER_DIR),
                 env=process_env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
-                text=False  # 使用字节模式
+                text=False,
             )
             self.running_processes[task_id] = process
-            
-            # 读取输出并更新进度
-            progress_map = {
-                "Step 0": (15, "准备工作..."),
-                "Step 1": (25, "构建Web项目..."),
-                "Step 2": (35, "初始化Capacitor..."),
-                "Step 3": (45, "添加Android平台..."),
-                "Step 4": (55, "设置应用图标..."),
-                "Step 5": (60, "同步代码..."),
-                "Step 6": (65, "配置Android项目..."),
-                "Step 7": (70, "构建 Release 产物..."),
-                "Step 8": (80, "准备签名密钥..."),
-                "Step 9": (85, "处理构建产物..."),
-                "Step 10": (90, "签名构建产物..."),
-                "APK 构建完成": (95, "构建完成，正在处理输出..."),
-                "AAB 构建完成": (95, "构建完成，正在处理输出..."),
-            }
-            
-            last_progress = 10
+
+            if is_desktop_task:
+                progress_map = {
+                    "Step 0": (15, "准备工作..."),
+                    "Step 1": (25, "解压 ZIP 项目..."),
+                    "Step 2": (40, "准备前端产物..."),
+                    "Step 3": (55, "生成 Electron 桌面壳..."),
+                    "Step 4": (70, "安装 Electron 依赖..."),
+                    "Step 5": (85, "打包桌面应用..."),
+                    "Electron 桌面应用构建成功": (95, "桌面应用构建完成，正在处理输出..."),
+                    "[DesktopBuilder] output:": (95, "桌面应用构建完成，正在处理输出..."),
+                }
+                success_markers = ("Electron 桌面应用构建成功", "[DesktopBuilder] output:")
+            else:
+                progress_map = {
+                    "Step 0": (15, "准备工作..."),
+                    "Step 1": (25, "构建 Web 项目..."),
+                    "Step 2": (35, "初始化 Capacitor..."),
+                    "Step 3": (45, "添加 Android 平台..."),
+                    "Step 4": (55, "设置应用图标..."),
+                    "Step 5": (60, "同步项目代码..."),
+                    "Step 6": (65, "配置 Android 项目..."),
+                    "Step 7": (70, "构建 Release 产物..."),
+                    "Step 8": (80, "准备签名密钥..."),
+                    "Step 9": (85, "处理构建产物..."),
+                    "Step 10": (90, "签名构建产物..."),
+                    "APK 构建完成": (95, "构建完成，正在处理输出..."),
+                    "AAB 构建完成": (95, "构建完成，正在处理输出..."),
+                }
+                success_markers = ("APK 构建完成", "AAB 构建完成")
+
             build_completed = False
-            
+
             for raw_line in process.stdout:
                 try:
-                    # 尝试UTF-8解码，失败则用替换模式
-                    line = raw_line.decode('utf-8', errors='replace').strip()
+                    line = raw_line.decode("utf-8", errors="replace").strip()
                 except Exception:
-                    line = raw_line.decode('latin-1', errors='replace').strip()
-                
+                    line = raw_line.decode("latin-1", errors="replace").strip()
+
                 if line:
-                    # 过滤 Docker daemon 的错误消息（容器已退出后的噪音）
                     if "Error response from daemon" in line or "dead or marked for removal" in line:
                         continue
-                    
-                    # 写入日志
+
                     log(line)
-                    # 打印时过滤非ASCII字符避免Windows终端编码问题
-                    safe_line = line.encode('ascii', errors='replace').decode('ascii')
+                    safe_line = line.encode("ascii", errors="replace").decode("ascii")
                     print(f"[Docker] {safe_line}")
-                    
-                    # 检测构建完成标志
-                    if "APK 构建完成" in line or "AAB 构建完成" in line:
+
+                    if any(marker in line for marker in success_markers):
                         build_completed = True
-                    
-                    # 检查进度关键词
+
                     for key, (prog, msg) in progress_map.items():
                         if key in line:
-                            last_progress = prog
                             if on_progress:
                                 on_progress(prog, msg)
                             break
-                
-                # 如果构建已完成，退出循环
+
                 if build_completed and process.poll() is not None:
                     break
-            
-            # 等待进程完成
+
             return_code = process.wait()
-            
+
             log("")
-            log(f"Docker进程退出，退出码: {return_code}")
-            
+            log(f"Docker 进程退出，退出码: {return_code}")
+
             if return_code == 0:
-                # task 模式：保存 Gradle wrapper 缓存供后续任务复用
                 if env.get("GRADLE_CACHE_MODE") == "task":
                     task_gradle_dir = TASKS_DIR / task_id / "gradle"
                     if task_gradle_dir.exists():
                         self._save_gradle_wrapper_cache(task_gradle_dir)
-                
-                output_format = (env.get("OUTPUT_FORMAT") or "apk").strip().lower()
-                if output_format == "aab":
+
+                output_format = (container_output_format or "apk").strip().lower()
+                if is_desktop_task:
+                    artifact_ext = ".exe"
+                    artifact_label = "EXE"
+                elif output_format == "aab":
                     artifact_ext = ".aab"
                     artifact_label = "AAB"
                 else:
                     artifact_ext = ".apk"
                     artifact_label = "APK"
 
-                # 查找任务输出目录中的产物文件
                 artifact_files = list(task_output_dir.glob(f"*{artifact_ext}"))
                 output_file = _select_artifact_file(
                     artifact_files,
@@ -996,17 +1024,16 @@ class APKBuilder:
                     artifact_ext,
                 )
                 if output_file:
-                    # 使用任务ID重命名，复制到后端outputs目录
                     final_filename = f"{task_id}_{output_file.name}"
                     dst_file = BACKEND_OUTPUT_DIR / final_filename
                     shutil.copy2(output_file, dst_file)
-                    
+
                     log(f"{artifact_label} 文件已生成: {output_file.name}")
                     log(f"最终文件名: {final_filename}")
                     log("========== 构建成功 ==========")
-                    
+
                     if on_progress:
-                        on_progress(100, "构建成功！")
+                        on_progress(100, "构建成功")
                     if on_complete:
                         on_complete(True, f"{artifact_label} 构建成功", final_filename)
                 else:
@@ -1016,11 +1043,11 @@ class APKBuilder:
                     if on_complete:
                         on_complete(False, f"构建完成但未找到{artifact_label}文件", None)
             else:
-                log(f"错误: Docker构建失败，退出码: {return_code}")
+                log(f"错误: Docker 构建失败，退出码: {return_code}")
                 log("========== 构建失败 ==========")
                 if on_complete:
                     on_complete(False, f"Docker构建失败，退出码: {return_code}", None)
-                    
+
         except FileNotFoundError as e:
             if getattr(e, "filename", "") == "docker":
                 error_msg = (
