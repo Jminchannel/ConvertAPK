@@ -796,6 +796,14 @@ if [ "$TASK_MODE" = "convert" ]; then
 # ============================================
 log_info "Step 1: 构建 Web 项目..."
 
+# 兼容性兜底：如果上传 ZIP 自带 android 工程，先清理再由 Capacitor 重新生成，
+# 避免旧工程中的 gradle-wrapper / gradlew 损坏导致构建失败。
+if [ -d "$PROJECT_ROOT/android" ]; then
+    log_warning "检测到上传包包含 android 目录，构建前将先清理以避免干扰"
+    rm -rf "$PROJECT_ROOT/android"
+    check_error "清理上传包内 android 目录失败"
+fi
+
 if [ "$SKIP_WEB_BUILD" = "true" ]; then
     log_warning "检测到预构建静态站点 ZIP：跳过 npm install / npm run build，直接使用 $WEB_DIR"
 else

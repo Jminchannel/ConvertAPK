@@ -165,8 +165,8 @@ class AppConfig(BaseModel):
     @classmethod
     def validate_desktop_installer_mode(cls, value: str) -> str:
         raw = (value or "").strip().lower()
-        if raw in {"nsis-web", "nsisweb", "web", "web-installer", "nsis_web"}:
-            return "nsis-web"
+        if raw in {"portable", "exe"}:
+            return "portable"
         return "portable"
 
 
@@ -279,7 +279,7 @@ class UpdateTaskRequest(BaseModel):
     version_name: str
     version_code: int
     output_format: Optional[str] = None  # apk / aab（可选）
-    desktop_installer_mode: Optional[str] = None  # portable / nsis-web（可选）
+    desktop_installer_mode: Optional[str] = None  # 仅支持 portable（可选）
     # APK style overrides (optional)
     orientation: Optional[str] = None
     double_click_exit: Optional[bool] = None

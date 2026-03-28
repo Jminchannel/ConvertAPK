@@ -649,7 +649,6 @@
                   <label class="form-label">{{ t('config.desktopInstallerMode') }}</label>
                   <select class="form-input form-select" v-model="config.desktop_installer_mode">
                     <option value="portable">{{ t('config.desktopInstallerPortable') }}</option>
-                    <option value="nsis-web">{{ t('config.desktopInstallerNsisWeb') }}</option>
                   </select>
                 </div>
               </div>

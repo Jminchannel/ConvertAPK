@@ -818,10 +818,12 @@ def _shrink_desktop_web_assets(app_dir: Path, on_log=None) -> None:
         return
     removed_files = 0
     removed_bytes = 0
+    removable_suffixes = (".map", ".license.txt", ".licenses.txt")
     for candidate in app_dir.rglob("*"):
         if not candidate.is_file():
             continue
-        if not candidate.name.lower().endswith(".map"):
+        lower_name = candidate.name.lower()
+        if not lower_name.endswith(removable_suffixes):
             continue
         try:
             removed_bytes += candidate.stat().st_size
@@ -831,13 +833,13 @@ def _shrink_desktop_web_assets(app_dir: Path, on_log=None) -> None:
             continue
     if removed_files > 0:
         saved_mb = removed_bytes / (1024 * 1024)
-        _log(on_log, f"[Desktop] 清理 source map: {removed_files} 个文件，约节省 {saved_mb:.2f} MB")
+        _log(on_log, f"[Desktop] 清理调试/许可证附加文件: {removed_files} 个，约节省 {saved_mb:.2f} MB")
 
 
 def _normalize_desktop_installer_mode(value: Optional[str]) -> str:
     raw = str(value or "portable").strip().lower()
-    if raw in {"nsis-web", "nsisweb", "web", "web-installer", "nsis_web"}:
-        return "nsis-web"
+    if raw == "portable":
+        return "portable"
     return "portable"
 
 
@@ -850,7 +852,7 @@ def _write_desktop_wrapper_project(
     source_app_dir: Path,
     logo_path: Optional[Path],
     on_log=None,
-) -> None:
+) -> str:
     if wrapper_root.exists():
         shutil.rmtree(wrapper_root, ignore_errors=True)
     wrapper_root.mkdir(parents=True, exist_ok=True)
@@ -877,7 +879,6 @@ def _write_desktop_wrapper_project(
     if not safe_artifact_name:
         safe_artifact_name = "DesktopApp"
     desktop_target = _normalize_desktop_installer_mode(desktop_installer_mode)
-
     build_config = {
         "appId": str(package_name or "com.example.desktop"),
         "productName": str(app_name or "DesktopApp"),
@@ -1024,6 +1025,7 @@ main().catch((error) => {
     (wrapper_root / "preload.js").write_text(preload_js, encoding="utf-8")
     (scripts_dir / "prepare-icon.js").write_text(prepare_icon_js, encoding="utf-8")
     _log(on_log, f"[Desktop] Electron wrapper prepared: {wrapper_root}")
+    return desktop_target
 
 def _offlineize_html_assets(entry_html: Path, env: Dict[str, str], on_log=None) -> None:
     if not entry_html.exists():
@@ -1990,7 +1992,7 @@ def run_local_build(
         _log(on_log, "Step 3: 生成 Electron 桌面壳...")
         wrapper_root = task_dir / "desktop-app"
         logo_path = task_input_dir / "logo.png"
-        _write_desktop_wrapper_project(
+        effective_desktop_target = _write_desktop_wrapper_project(
             wrapper_root=wrapper_root,
             app_name=str(env.get("APP_NAME") or "DesktopApp"),
             package_name=str(env.get("PACKAGE_NAME") or "com.example.desktop"),
@@ -2000,6 +2002,7 @@ def run_local_build(
             logo_path=logo_path if logo_path.exists() else None,
             on_log=on_log,
         )
+        _log(on_log, f"[Desktop] 实际打包目标: {effective_desktop_target}")
 
         progress(70, "Step 4: 安装 Electron 依赖...")
         _log(on_log, "Step 4: 安装 Electron 依赖...")
@@ -2011,7 +2014,7 @@ def run_local_build(
         _log(on_log, "Step 5: 打包桌面应用...")
         process_env["CSC_IDENTITY_AUTO_DISCOVERY"] = "false"
         _run_cmd(
-            [npx_cmd, "electron-builder", "--win", desktop_installer_mode, "--publish", "never"],
+            [npx_cmd, "electron-builder", "--win", effective_desktop_target, "--publish", "never"],
             cwd=wrapper_root,
             env=process_env,
             on_log=on_log,
@@ -2243,6 +2246,13 @@ def run_local_build(
 
         pkg = _read_package_json(package_json)
         pkg["_root"] = project_root
+
+        # 兼容性兜底：如果上传包自带 android 工程，先清理后再由 Capacitor 重新生成，
+        # 避免历史工程中的 gradle-wrapper/gradlew 损坏导致构建失败。
+        stale_android_dir = project_root / "android"
+        if stale_android_dir.exists():
+            _log(on_log, "[Android] 检测到上传包包含 android 目录，构建前先清理以避免干扰")
+            shutil.rmtree(stale_android_dir, ignore_errors=True)
 
         progress(25, "Step 1: 构建 Web 前端...")
         _log(on_log, "Step 1: 构建 Web 前端...")

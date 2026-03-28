@@ -679,9 +679,7 @@ class APKBuilder:
         elif output_format_normalized not in {"apk", "aab"}:
             output_format_normalized = "apk"
         desktop_installer_mode_normalized = str(desktop_installer_mode or "portable").strip().lower()
-        if desktop_installer_mode_normalized in {"nsis-web", "nsisweb", "web", "web-installer", "nsis_web"}:
-            desktop_installer_mode_normalized = "nsis-web"
-        else:
+        if desktop_installer_mode_normalized != "portable":
             desktop_installer_mode_normalized = "portable"
         status_bar_color_normalized = str(status_bar_color or "").strip()
         if not status_bar_color_normalized:
