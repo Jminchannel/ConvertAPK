@@ -118,6 +118,32 @@ export const useAppState = () => {
   })
   const isWebModeEnabled = computed(() => Boolean(featureFlags.value.web_link_to_apk_enabled))
   const isDesktopModeEnabled = computed(() => Boolean(featureFlags.value.zip_to_desktop_enabled))
+  const desktopPortMin = 1024
+  const desktopPortMax = 65535
+  const desktopPortDefaultMin = 20000
+  const desktopPortDefaultMax = 59999
+  const desktopPopularPortSet = new Set([
+    1080, 1433, 1521, 1883, 2049, 2375, 2376, 27017, 3000, 3306, 3389, 4000, 4200, 5000, 5001,
+    5173, 5174, 5175, 5432, 5672, 5900, 6379, 7000, 7070, 8000, 8001, 8080, 8081, 8088, 8443,
+    8888, 9000, 9001, 9002, 9090, 9200, 9300, 27018
+  ])
+
+  const generateDesktopPort = () => {
+    for (let i = 0; i < 160; i += 1) {
+      const candidate = Math.floor(Math.random() * (desktopPortDefaultMax - desktopPortDefaultMin + 1)) + desktopPortDefaultMin
+      if (!desktopPopularPortSet.has(candidate)) {
+        return candidate
+      }
+    }
+    return 52001
+  }
+
+  const normalizeDesktopPort = (value) => {
+    const port = Number(value)
+    if (!Number.isInteger(port)) return generateDesktopPort()
+    if (port < desktopPortMin || port > desktopPortMax) return generateDesktopPort()
+    return port
+  }
   const mainRef = ref(null)
   const mobilePageHeadRef = ref(null)
   const convertUploadSection = ref(null)
@@ -628,6 +654,7 @@ export const useAppState = () => {
     version_code: 1,
     output_format: 'apk',
     desktop_installer_mode: 'portable',
+    desktop_port: generateDesktopPort(),
     orientation: 'portrait',
     double_click_exit: true,
     status_bar_hidden: false,
@@ -665,6 +692,7 @@ export const useAppState = () => {
       version_code: 1,
       output_format: 'apk',
       desktop_installer_mode: 'portable',
+      desktop_port: normalizeDesktopPort(config.value.desktop_port),
       orientation: 'portrait',
       double_click_exit: true,
       status_bar_hidden: true,
@@ -759,6 +787,18 @@ export const useAppState = () => {
     return isValidPackageName(config.value.package_name) ? '' : t('config.packageNameRule')
   })
 
+  const desktopPortError = computed(() => {
+    if (mode.value !== 'desktop') return ''
+    const port = Number(config.value.desktop_port)
+    if (!Number.isInteger(port)) return t('config.desktopPortRule')
+    if (port < desktopPortMin || port > desktopPortMax) return t('config.desktopPortRule')
+    return ''
+  })
+
+  const assignRandomDesktopPort = () => {
+    config.value.desktop_port = generateDesktopPort()
+  }
+
   const keystorePasswordError = computed(() => {
     const value = String(config.value.keystore_password || '')
     if (!value) return ''
@@ -828,6 +868,7 @@ export const useAppState = () => {
       config.value.app_name &&
       config.value.package_name &&
       !packageNameError.value &&
+      !desktopPortError.value &&
       !keystoreUpgradeVersionError.value &&
       (!shouldCheckKeystore || (!keystorePasswordError.value && !keyPasswordError.value)) &&
       hasIcon
@@ -1196,7 +1237,7 @@ export const useAppState = () => {
 
     const triggerDownload = () => {
       if (isDesktopArtifact) {
-        consumeDesktopTaskLocally(taskId, 'EXE 下载已开始，安装包将从服务器移除')
+        consumeDesktopTaskLocally(taskId, 'EXE 下载已开始，仅可下载一次，下载后服务器将自动删除该安装包')
       }
       triggerTaskDownload(url)
       if (isDesktopArtifact) {
@@ -2116,6 +2157,7 @@ export const useAppState = () => {
       version_code: (task.config.version_code || 1) + 1,
       output_format: task.config.output_format ?? 'apk',
       desktop_installer_mode: task.config.desktop_installer_mode ?? 'portable',
+      desktop_port: normalizeDesktopPort(task.config.desktop_port),
       orientation: task.config.orientation ?? 'portrait',
       double_click_exit: task.config.double_click_exit ?? true,
       status_bar_hidden: task.config.status_bar_hidden ?? false,
@@ -2263,6 +2305,10 @@ export const useAppState = () => {
       showToast(packageNameError.value, 'error')
       return
     }
+    if (desktopPortError.value) {
+      showToast(desktopPortError.value, 'error')
+      return
+    }
     if (!isKeystoreUploaded.value && keystorePasswordError.value) {
       showToast(keystorePasswordError.value, 'error')
       return
@@ -2304,6 +2350,7 @@ export const useAppState = () => {
           version_code: config.value.version_code,
           output_format: config.value.output_format,
           desktop_installer_mode: config.value.desktop_installer_mode,
+          desktop_port: config.value.desktop_port,
           orientation: config.value.orientation,
           double_click_exit: config.value.double_click_exit,
           status_bar_hidden: config.value.status_bar_hidden,
@@ -2341,6 +2388,7 @@ export const useAppState = () => {
             version_code: config.value.version_code,
             output_format: config.value.output_format,
             desktop_installer_mode: config.value.desktop_installer_mode,
+            desktop_port: config.value.desktop_port,
             orientation: config.value.orientation,
             double_click_exit: config.value.double_click_exit,
             status_bar_hidden: config.value.status_bar_hidden,
@@ -2420,6 +2468,7 @@ export const useAppState = () => {
       version_code: 1,
       output_format: 'apk',
       desktop_installer_mode: 'portable',
+      desktop_port: generateDesktopPort(),
       orientation: 'portrait',
       double_click_exit: true,
       status_bar_hidden: false,
@@ -2868,6 +2917,7 @@ export const useAppState = () => {
     isValidWebUrl,
     webUrlError,
     packageNameError,
+    desktopPortError,
     keystorePasswordError,
     keyPasswordError,
     isKeystoreUploaded,
@@ -2893,6 +2943,7 @@ export const useAppState = () => {
     bumpPatchVersion,
     getStatusText,
     getTaskIcon,
+    assignRandomDesktopPort,
     getDownloadUrl,
     getKeystoreUrl,
     downloadTaskArtifact,

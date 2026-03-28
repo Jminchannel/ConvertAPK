@@ -651,6 +651,25 @@
                     <option value="portable">{{ t('config.desktopInstallerPortable') }}</option>
                   </select>
                 </div>
+                <div v-if="mode === 'desktop'" class="form-group">
+                  <label class="form-label">{{ t('config.desktopPort') }}</label>
+                  <div class="desktop-port-row">
+                    <input
+                      type="number"
+                      class="form-input"
+                      v-model.number="config.desktop_port"
+                      :placeholder="t('config.desktopPortPlaceholder')"
+                      :min="1024"
+                      :max="65535"
+                      step="1"
+                    />
+                    <button type="button" class="btn btn-ghost btn-sm" @click="assignRandomDesktopPort">
+                      {{ t('config.desktopPortRandom') }}
+                    </button>
+                  </div>
+                  <div v-if="desktopPortError" class="form-error">{{ desktopPortError }}</div>
+                  <div v-else class="form-hint">{{ t('config.desktopPortHint') }}</div>
+                </div>
               </div>
 
               <template v-if="mode !== 'desktop'">
@@ -1951,6 +1970,17 @@ export default defineComponent({
   margin-top: 6px;
   color: var(--warning-start);
   font-size: 12px;
+}
+
+.desktop-port-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.desktop-port-row .form-input {
+  flex: 1;
+  min-width: 0;
 }
 
 .keystore-toggle {

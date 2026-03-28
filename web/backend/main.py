@@ -901,10 +901,7 @@ async def ensure_env_ready(request: Request, call_next):
 
 
 def _should_cleanup_desktop_output_on_download(task: BuildTask) -> bool:
-    return bool(
-        should_auto_clean_build_outputs()
-        and str(getattr(task, "mode", "") or "").strip().lower() == "desktop"
-    )
+    return str(getattr(task, "mode", "") or "").strip().lower() == "desktop"
 
 
 def _consume_desktop_output(task: BuildTask, reason: str) -> str | None:
@@ -920,6 +917,10 @@ def _consume_desktop_output(task: BuildTask, reason: str) -> str | None:
         task.message = "EXE 已下载，安装包已从服务器移除"
     else:
         task.message = "已退出网站，桌面安装包已从服务器移除"
+    if reason == "download":
+        task.message = "EXE 下载成功，仅可下载一次；为降低服务器占用，安装包已自动删除"
+    else:
+        task.message = "已离开网站，EXE 仅可下载一次；为降低服务器占用，安装包已自动删除"
     try:
         persist_tasks_db(force=True)
     except Exception:
@@ -929,9 +930,9 @@ def _consume_desktop_output(task: BuildTask, reason: str) -> str | None:
 
 def _get_desktop_output_unavailable_detail(task: BuildTask) -> str:
     message = str(getattr(task, "message", "") or "").strip()
-    if message and "移除" in message:
+    if message:
         return message
-    return "桌面安装包已不可下载"
+    return "桌面安装包已不可下载（仅提供一次下载机会，为降低服务器占用已自动清理）"
 
 # 内存存储（MVP版本）
 tasks_db = {}
@@ -1993,12 +1994,12 @@ async def download_file(task_id: str, client_id: str = None):
 @app.post("/api/tasks/desktop-output/release")
 async def release_desktop_outputs(client_id: str = None):
     client_id = _require_client_id(client_id)
-    if not should_auto_clean_build_outputs():
-        return {"enabled": False, "released": 0}
 
     released = 0
     for task in list(tasks_db.values()):
         if str(getattr(task, "client_id", "") or "") != client_id:
+            continue
+        if str(getattr(task, "mode", "") or "").strip().lower() != "desktop":
             continue
         if getattr(task, "status", None) != BuildStatus.SUCCESS:
             continue
@@ -2184,6 +2185,8 @@ async def update_task(task_id: str, update_data: UpdateTaskRequest):
         style_updates["web_fill_mode"] = update_data.web_fill_mode
     if update_data.desktop_installer_mode is not None:
         style_updates["desktop_installer_mode"] = update_data.desktop_installer_mode
+    if update_data.desktop_port is not None:
+        style_updates["desktop_port"] = update_data.desktop_port
     if update_data.permissions is not None:
         style_updates["permissions"] = update_data.permissions
     if style_updates:

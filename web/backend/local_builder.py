@@ -843,12 +843,23 @@ def _normalize_desktop_installer_mode(value: Optional[str]) -> str:
     return "portable"
 
 
+def _normalize_desktop_port(value) -> int:
+    try:
+        port = int(str(value).strip())
+    except Exception:
+        return 0
+    if 1024 <= port <= 65535:
+        return port
+    return 0
+
+
 def _write_desktop_wrapper_project(
     wrapper_root: Path,
     app_name: str,
     package_name: str,
     version_name: str,
     desktop_installer_mode: str,
+    desktop_port: int,
     source_app_dir: Path,
     logo_path: Optional[Path],
     on_log=None,
@@ -918,10 +929,134 @@ def _write_desktop_wrapper_project(
     }
 
     window_title = json.dumps(str(app_name or "DesktopApp"), ensure_ascii=False)
+    desktop_port_literal = str(int(desktop_port)) if isinstance(desktop_port, int) and desktop_port > 0 else "0"
     main_js = """const { app, BrowserWindow, shell } = require("electron");
 const path = require("path");
+const fs = require("fs");
+const http = require("http");
 
-function createWindow() {
+const LOCAL_HOST = "127.0.0.1";
+const PREFERRED_PORT = __DESKTOP_PORT__;
+const appRootDir = path.join(__dirname, "app");
+let staticServer = null;
+let localOrigin = "";
+
+function getMimeType(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  const mimeMap = {
+    ".html": "text/html; charset=utf-8",
+    ".htm": "text/html; charset=utf-8",
+    ".js": "text/javascript; charset=utf-8",
+    ".mjs": "text/javascript; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".svg": "image/svg+xml",
+    ".ico": "image/x-icon",
+    ".webp": "image/webp",
+    ".woff": "font/woff",
+    ".woff2": "font/woff2",
+    ".ttf": "font/ttf",
+    ".otf": "font/otf",
+    ".map": "application/json; charset=utf-8",
+    ".txt": "text/plain; charset=utf-8",
+    ".wasm": "application/wasm",
+  };
+  return mimeMap[ext] || "application/octet-stream";
+}
+
+function resolveRequestFile(rootDir, requestUrl) {
+  let pathname = "/";
+  try {
+    const parsed = new URL(requestUrl || "/", "http://127.0.0.1");
+    pathname = decodeURIComponent(parsed.pathname || "/");
+  } catch {
+    pathname = "/";
+  }
+  if (!pathname || pathname === "/") {
+    pathname = "/index.html";
+  }
+  const normalized = path.posix.normalize(pathname);
+  const relativePath = normalized.startsWith("/") ? normalized.slice(1) : normalized;
+  const safeRelativePath = relativePath.replace(/^\\.\\.(\\/|\\\\|$)+/g, "");
+  const candidate = path.resolve(rootDir, safeRelativePath);
+  const safeRoot = path.resolve(rootDir);
+  if (!candidate.startsWith(safeRoot)) {
+    return null;
+  }
+  if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+    return candidate;
+  }
+  const fallback = path.join(rootDir, "index.html");
+  if (fs.existsSync(fallback) && fs.statSync(fallback).isFile()) {
+    return fallback;
+  }
+  return null;
+}
+
+function startStaticServer(rootDir, preferredPort) {
+  return new Promise((resolve, reject) => {
+    const server = http.createServer((req, res) => {
+      const filePath = resolveRequestFile(rootDir, req.url || "/");
+      if (!filePath) {
+        res.statusCode = 404;
+        res.end("Not Found");
+        return;
+      }
+      res.setHeader("Content-Type", getMimeType(filePath));
+      const stream = fs.createReadStream(filePath);
+      stream.on("error", () => {
+        if (!res.headersSent) {
+          res.statusCode = 500;
+        }
+        res.end("Internal Server Error");
+      });
+      stream.pipe(res);
+    });
+    const finishListen = () => {
+      const address = server.address();
+      if (!address || typeof address !== "object") {
+        reject(new Error("local static server listen failed"));
+        return;
+      }
+      resolve({
+        server,
+        origin: `http://${LOCAL_HOST}:${address.port}`,
+      });
+    };
+    const tryListen = (port, fallbackToRandom) => {
+      const handleError = (error) => {
+        server.off("listening", handleListening);
+        if (fallbackToRandom && error && error.code === "EADDRINUSE") {
+          console.warn(`[Desktop] preferred port ${port} in use, fallback to random`);
+          tryListen(0, false);
+          return;
+        }
+        reject(error);
+      };
+      const handleListening = () => {
+        server.off("error", handleError);
+        finishListen();
+      };
+      server.once("error", handleError);
+      server.once("listening", handleListening);
+      server.listen(port, LOCAL_HOST);
+    };
+    const normalizedPreferredPort = Number.isInteger(preferredPort) && preferredPort >= 1024 && preferredPort <= 65535
+      ? preferredPort
+      : 0;
+    tryListen(normalizedPreferredPort, normalizedPreferredPort > 0);
+  });
+}
+
+function isSameLocalOrigin(url) {
+  return Boolean(localOrigin) && String(url || "").startsWith(localOrigin);
+}
+
+function createWindow(entryUrl) {
   const iconPath = path.join(__dirname, "build", "icon.png");
   const win = new BrowserWindow({
     title: __WINDOW_TITLE__,
@@ -948,25 +1083,57 @@ function createWindow() {
 
   win.once("ready-to-show", () => win.show());
   win.webContents.setWindowOpenHandler(({ url }) => {
+    if (isSameLocalOrigin(url)) {
+      return { action: "allow" };
+    }
     shell.openExternal(url);
     return { action: "deny" };
   });
   win.webContents.on("will-navigate", (event, url) => {
-    if (!url.startsWith("file://")) {
-      event.preventDefault();
+    if (isSameLocalOrigin(url)) {
+      return;
+    }
+    event.preventDefault();
+    if (String(url || "").startsWith("http://") || String(url || "").startsWith("https://")) {
       shell.openExternal(url);
     }
   });
-  win.loadFile(path.join(__dirname, "app", "index.html"));
+  if (entryUrl) {
+    win.loadURL(entryUrl);
+  } else {
+    win.loadFile(path.join(__dirname, "app", "index.html"));
+  }
+}
+
+async function bootstrap() {
+  let entryUrl = null;
+  try {
+    const started = await startStaticServer(appRootDir, PREFERRED_PORT);
+    staticServer = started.server;
+    localOrigin = started.origin;
+    entryUrl = localOrigin;
+  } catch (error) {
+    console.error(`[Desktop] static server start failed: ${error}`);
+  }
+  createWindow(entryUrl);
 }
 
 app.whenReady().then(() => {
-  createWindow();
+  bootstrap();
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
+      createWindow(localOrigin || null);
     }
   });
+});
+
+app.on("before-quit", () => {
+  if (staticServer) {
+    try {
+      staticServer.close();
+    } catch {}
+    staticServer = null;
+  }
 });
 
 app.on("window-all-closed", () => {
@@ -976,6 +1143,7 @@ app.on("window-all-closed", () => {
 });
 """
     main_js = main_js.replace("__WINDOW_TITLE__", window_title)
+    main_js = main_js.replace("__DESKTOP_PORT__", desktop_port_literal)
     preload_js = """const { contextBridge } = require("electron");
 
 contextBridge.exposeInMainWorld("desktopApp", {
@@ -1943,6 +2111,7 @@ def run_local_build(
 
     if is_desktop_task:
         desktop_installer_mode = _normalize_desktop_installer_mode(env.get("DESKTOP_INSTALLER_MODE"))
+        desktop_port = _normalize_desktop_port(env.get("DESKTOP_PORT"))
         progress(25, "Step 1: 解压 ZIP 项目...")
         _log(on_log, "Step 1: 解压 ZIP 项目...")
         _log(on_log, f"[Desktop] 安装器模式: {desktop_installer_mode}")
@@ -1998,6 +2167,7 @@ def run_local_build(
             package_name=str(env.get("PACKAGE_NAME") or "com.example.desktop"),
             version_name=str(env.get("VERSION_NAME") or "1.0.0"),
             desktop_installer_mode=desktop_installer_mode,
+            desktop_port=desktop_port,
             source_app_dir=web_dir,
             logo_path=logo_path if logo_path.exists() else None,
             on_log=on_log,

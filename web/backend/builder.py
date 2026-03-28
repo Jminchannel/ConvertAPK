@@ -595,6 +595,7 @@ class APKBuilder:
         version_code: int,
         output_format: str = "apk",
         desktop_installer_mode: str = "portable",
+        desktop_port: Optional[int] = None,
         task_mode: str = "convert",
         web_url: Optional[str] = None,
         screen_orientation: Optional[str] = None,
@@ -681,6 +682,13 @@ class APKBuilder:
         desktop_installer_mode_normalized = str(desktop_installer_mode or "portable").strip().lower()
         if desktop_installer_mode_normalized != "portable":
             desktop_installer_mode_normalized = "portable"
+        desktop_port_normalized = 0
+        try:
+            parsed_desktop_port = int(str(desktop_port).strip()) if desktop_port is not None else 0
+        except Exception:
+            parsed_desktop_port = 0
+        if 1024 <= parsed_desktop_port <= 65535:
+            desktop_port_normalized = parsed_desktop_port
         status_bar_color_normalized = str(status_bar_color or "").strip()
         if not status_bar_color_normalized:
             status_bar_color_normalized = "#FFFFFF"
@@ -734,6 +742,7 @@ class APKBuilder:
             "KEY_PASSWORD": key_password or (keystore_password or "android"),
             "OUTPUT_FORMAT": output_format_normalized,
             "DESKTOP_INSTALLER_MODE": desktop_installer_mode_normalized,
+            "DESKTOP_PORT": str(desktop_port_normalized),
             "SCREEN_ORIENTATION": (screen_orientation or "auto").strip().lower(),
             "DOUBLE_CLICK_EXIT": "true" if double_click_exit else "false",
             "STATUS_BAR_HIDDEN": "true" if status_bar_hidden else "false",
@@ -870,6 +879,8 @@ class APKBuilder:
                 f"OUTPUT_FORMAT={container_output_format}",
                 "-e",
                 f"DESKTOP_INSTALLER_MODE={env.get('DESKTOP_INSTALLER_MODE', 'portable')}",
+                "-e",
+                f"DESKTOP_PORT={env.get('DESKTOP_PORT', '0')}",
                 "-e",
                 f"SCREEN_ORIENTATION={env.get('SCREEN_ORIENTATION', 'auto')}",
                 "-e",
@@ -1394,7 +1405,6 @@ class BuildTaskRunner:
             defer_desktop_output_cleanup = bool(
                 success
                 and output_file
-                and should_auto_clean_build_outputs()
                 and task_mode == "desktop"
             )
             auto_clean_output = bool(
@@ -1420,6 +1430,8 @@ class BuildTaskRunner:
                     task.message = f"{message}（请及时下载，安装包仅支持下载一次，离开网站后会自动清理）"
                 else:
                     task.message = message
+                if defer_desktop_output_cleanup:
+                    task.message = "构建完成（desktop 模式仅提供一次 EXE 下载机会；下载成功或离开网站后将自动删除安装包，以降低服务器占用）"
                 task.output_filename = None if auto_clean_output else output_file
                 task.download_url = None if auto_clean_output else f"/api/download/{task_id}"
             else:
@@ -1504,6 +1516,7 @@ class BuildTaskRunner:
                 version_code=task.config.version_code,
                 output_format=getattr(task.config, "output_format", "apk"),
                 desktop_installer_mode=getattr(task.config, "desktop_installer_mode", "portable"),
+                desktop_port=getattr(task.config, "desktop_port", None),
                 task_mode=getattr(task, "mode", "convert"),
                 web_url=getattr(task, "web_url", None),
                 screen_orientation=getattr(task.config, "orientation", None),

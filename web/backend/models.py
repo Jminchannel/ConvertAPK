@@ -3,8 +3,9 @@ from typing_compat import patch_typing_eval_type
 patch_typing_eval_type()
 
 import re
+import random
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator, Field
 from typing import Optional, List
 from enum import Enum
 from datetime import datetime
@@ -17,6 +18,26 @@ class BuildStatus(str, Enum):
     FAILED = "failed"
 
 
+_DESKTOP_PORT_MIN = 1024
+_DESKTOP_PORT_MAX = 65535
+_DESKTOP_PORT_DEFAULT_MIN = 20000
+_DESKTOP_PORT_DEFAULT_MAX = 59999
+_DESKTOP_PORT_POPULAR = {
+    1080, 1433, 1521, 1883, 2049, 2375, 2376, 27017, 3000, 3306, 3389, 4000, 4200, 5000, 5001,
+    5173, 5174, 5175, 5432, 5672, 5900, 6379, 7000, 7070, 8000, 8001, 8080, 8081, 8088, 8443,
+    8888, 9000, 9001, 9002, 9090, 9200, 9300, 27018,
+}
+_desktopPortRandom = random.SystemRandom()
+
+
+def generate_safe_desktop_port() -> int:
+    for _ in range(128):
+        candidate = _desktopPortRandom.randint(_DESKTOP_PORT_DEFAULT_MIN, _DESKTOP_PORT_DEFAULT_MAX)
+        if candidate not in _DESKTOP_PORT_POPULAR:
+            return candidate
+    return 52001
+
+
 class AppConfig(BaseModel):
     """APK构建配置"""
     model_config = ConfigDict(from_attributes=True)
@@ -24,6 +45,7 @@ class AppConfig(BaseModel):
     package_name: str
     version_name: str = "1.0.0"
     version_code: int = 1
+    desktop_port: int = Field(default_factory=generate_safe_desktop_port)
     keystore_alias: Optional[str] = None
     keystore_password: Optional[str] = None
     key_password: Optional[str] = None
@@ -169,6 +191,19 @@ class AppConfig(BaseModel):
             return "portable"
         return "portable"
 
+    @field_validator("desktop_port", mode="before")
+    @classmethod
+    def validate_desktop_port(cls, value) -> int:
+        if value is None or value == "":
+            return generate_safe_desktop_port()
+        try:
+            port = int(str(value).strip())
+        except Exception:
+            raise ValueError("desktop_port must be an integer")
+        if port < _DESKTOP_PORT_MIN or port > _DESKTOP_PORT_MAX:
+            raise ValueError("desktop_port must be between 1024 and 65535")
+        return port
+
 
 class BuildTask(BaseModel):
     """构建任务"""
@@ -280,6 +315,7 @@ class UpdateTaskRequest(BaseModel):
     version_code: int
     output_format: Optional[str] = None  # apk / aab（可选）
     desktop_installer_mode: Optional[str] = None  # 仅支持 portable（可选）
+    desktop_port: Optional[int] = None
     # APK style overrides (optional)
     orientation: Optional[str] = None
     double_click_exit: Optional[bool] = None

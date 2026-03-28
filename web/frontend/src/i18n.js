@@ -1296,6 +1296,22 @@ messages['zh-CN'].config.keystoreUpgradeVersionHint = '{packageName} 已有成�
 messages['zh-TW'].config.keystoreUpgradeVersionRule = '同套件名稱升級安裝時，versionCode 必須大於 {current}，建議至少填寫 {next}。'
 messages['zh-TW'].config.keystoreUpgradeVersionHint = '{packageName} 已有成功的簽名建構，如需覆蓋安裝，請將 versionCode 設為至少 {next}。'
 
+messages.en.config.desktopPort = 'Desktop Local Port'
+messages.en.config.desktopPortPlaceholder = 'e.g. 24567'
+messages.en.config.desktopPortHint = 'Default random value avoids common ports; valid range: 1024-65535.'
+messages.en.config.desktopPortRule = 'Desktop port must be an integer between 1024 and 65535.'
+messages.en.config.desktopPortRandom = 'Random'
+messages['zh-CN'].config.desktopPort = '桌面本地端口'
+messages['zh-CN'].config.desktopPortPlaceholder = '例如：24567'
+messages['zh-CN'].config.desktopPortHint = '默认随机值会避开常用端口；有效范围：1024-65535。'
+messages['zh-CN'].config.desktopPortRule = '桌面端口必须是 1024-65535 的整数。'
+messages['zh-CN'].config.desktopPortRandom = '随机'
+messages['zh-TW'].config.desktopPort = '桌面本地埠號'
+messages['zh-TW'].config.desktopPortPlaceholder = '例如：24567'
+messages['zh-TW'].config.desktopPortHint = '預設隨機值會避開常用埠號；有效範圍：1024-65535。'
+messages['zh-TW'].config.desktopPortRule = '桌面埠號必須是 1024-65535 的整數。'
+messages['zh-TW'].config.desktopPortRandom = '隨機'
+
 export function getBrowserLanguage() {
   const lang = navigator.language || navigator.userLanguage
   if (lang.startsWith('zh')) {
