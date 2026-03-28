@@ -1040,38 +1040,11 @@ if ! grep -q "@capacitor/share" package.json; then
     check_error "安装 @capacitor/share 失败"
 fi
 
-# 创建 capacitor.config.js（避免 TypeScript 依赖）
+# 创建 capacitor.config.json（规避 ESM/CJS 与 TypeScript 依赖）
 log_info "创建 Capacitor 配置..."
-rm -f capacitor.config.ts capacitor.config.json
-if node -e "const fs=require('fs'); try { const pkg = JSON.parse(fs.readFileSync('package.json','utf8')); process.exit(pkg && pkg.type === 'module' ? 0 : 1); } catch (_) { process.exit(1); }"; then
-    log_info "检测到 ESM 项目，生成 export default 配置..."
-    cat > capacitor.config.js << EOF
-const config = {
-  appId: '${PACKAGE_NAME}',
-  appName: '${APP_NAME}',
-  webDir: '${WEB_DIR}',
-  server: {
-    androidScheme: 'https'
-  }
-};
-
-export default config;
-EOF
-else
-    log_info "生成 CommonJS 配置..."
-    cat > capacitor.config.js << EOF
-const config = {
-  appId: '${PACKAGE_NAME}',
-  appName: '${APP_NAME}',
-  webDir: '${WEB_DIR}',
-  server: {
-    androidScheme: 'https'
-  }
-};
-
-module.exports = config;
-EOF
-fi
+rm -f capacitor.config.ts capacitor.config.js
+node -e "const fs=require('fs'); const config={ appId: process.env.PACKAGE_NAME || 'com.example.app', appName: process.env.APP_NAME || 'MyApp', webDir: process.env.WEB_DIR || 'dist', server: { androidScheme: 'https' } }; fs.writeFileSync('capacitor.config.json', JSON.stringify(config, null, 2), 'utf8');"
+check_error "生成 capacitor.config.json 失败"
 
 log_success "Capacitor 初始化完成"
 

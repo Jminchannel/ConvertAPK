@@ -2137,22 +2137,16 @@ def run_local_build(
         _ensure_dep(pkg, process_env, "@capacitor/core", dev=False, on_log=on_log, force_major=8)
         _ensure_dep(pkg, process_env, "@capacitor/cli", dev=True, on_log=on_log, force_major=8)
 
-        export_line = "module.exports = config;\n"
-        if str(pkg.get("type", "")).strip().lower() == "module":
-            export_line = "export default config;\n"
-
-        config_text = (
-            "const config = {\n"
-            f"  appId: '{env.get('PACKAGE_NAME', 'com.example.app')}',\n"
-            f"  appName: '{env.get('APP_NAME', 'MyApp')}',\n"
-            f"  webDir: '{web_dir.name}',\n"
-            "  server: { androidScheme: 'https' }\n"
-            "};\n\n"
-            + export_line
-        )
+        config_data = {
+            "appId": str(env.get("PACKAGE_NAME", "com.example.app")),
+            "appName": str(env.get("APP_NAME", "MyApp")),
+            "webDir": web_dir.name,
+            "server": {"androidScheme": "https"},
+        }
+        config_text = json.dumps(config_data, ensure_ascii=False, indent=2) + "\n"
         (project_root / "capacitor.config.ts").unlink(missing_ok=True)
-        (project_root / "capacitor.config.json").unlink(missing_ok=True)
-        (project_root / "capacitor.config.js").write_text(config_text, encoding="utf-8")
+        (project_root / "capacitor.config.js").unlink(missing_ok=True)
+        (project_root / "capacitor.config.json").write_text(config_text, encoding="utf-8")
 
         progress(45, "Step 3: 生成 Android 工程...")
         _log(on_log, "Step 3: 生成 Android 工程...")
