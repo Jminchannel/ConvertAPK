@@ -853,6 +853,43 @@ def _normalize_desktop_port(value) -> int:
     return 0
 
 
+def _sanitize_windows_artifact_base_name(value: str, fallback: str = "DesktopApp") -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return fallback
+    safe = re.sub(r'[<>:"/\\|?*\x00-\x1F]+', "-", raw)
+    safe = re.sub(r"\s+", " ", safe).strip().rstrip(" .")
+    if not safe or safe in {".", ".."}:
+        return fallback
+    reserved_names = {
+        "CON",
+        "PRN",
+        "AUX",
+        "NUL",
+        "COM1",
+        "COM2",
+        "COM3",
+        "COM4",
+        "COM5",
+        "COM6",
+        "COM7",
+        "COM8",
+        "COM9",
+        "LPT1",
+        "LPT2",
+        "LPT3",
+        "LPT4",
+        "LPT5",
+        "LPT6",
+        "LPT7",
+        "LPT8",
+        "LPT9",
+    }
+    if safe.upper() in reserved_names:
+        safe = f"{safe}-app"
+    return safe or fallback
+
+
 def _write_desktop_wrapper_project(
     wrapper_root: Path,
     app_name: str,
@@ -886,9 +923,7 @@ def _write_desktop_wrapper_project(
     safe_npm_name = re.sub(r"[^a-z0-9-]+", "-", str(package_name or "desktop-app").strip().lower()).strip("-")
     if not safe_npm_name:
         safe_npm_name = "desktop-app"
-    safe_artifact_name = re.sub(r"[^A-Za-z0-9._-]+", "-", str(app_name or "DesktopApp").strip()).strip("-")
-    if not safe_artifact_name:
-        safe_artifact_name = "DesktopApp"
+    safe_artifact_name = _sanitize_windows_artifact_base_name(str(app_name or "DesktopApp"), fallback="DesktopApp")
     desktop_target = _normalize_desktop_installer_mode(desktop_installer_mode)
     build_config = {
         "appId": str(package_name or "com.example.desktop"),
@@ -903,7 +938,7 @@ def _write_desktop_wrapper_project(
         "asar": True,
         "compression": "maximum",
         "electronLanguages": ["en-US", "zh-CN"],
-        "artifactName": f"{safe_artifact_name}-desktop-v${{version}}.${{ext}}",
+        "artifactName": f"{safe_artifact_name}.${{ext}}",
         "win": {"target": [{"target": desktop_target, "arch": ["x64"]}]},
     }
     if (build_dir / "icon.ico").exists() or (build_dir / "icon.png").exists():
