@@ -1976,11 +1976,17 @@ export default defineComponent({
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 .desktop-port-row .form-input {
-  flex: 1;
-  min-width: 0;
+  flex: 1 1 160px;
+  min-width: 140px;
+}
+
+.desktop-port-row .btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .keystore-toggle {
