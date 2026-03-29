@@ -595,7 +595,7 @@
               <div class="divider"></div>
 
               <!-- Basic info -->
-              <div class="grid grid-2">
+              <div class="grid grid-2" :class="{ 'desktop-basic-grid': mode === 'desktop' }">
                 <div class="form-group">
                   <label class="form-label">
                     {{ t('config.appName') }} <span class="required">*</span>
@@ -627,12 +627,12 @@
 
 
 
-              <div class="grid grid-3">
-                <div class="form-group">
+              <div class="grid" :class="mode === 'desktop' ? 'desktop-meta-grid' : 'grid-3'">
+                <div class="form-group desktop-field-version-name">
                   <label class="form-label">{{ t('config.versionName') }}</label>
                   <input type="text" class="form-input" v-model="config.version_name" placeholder="1.0.0" />
                 </div>
-                <div class="form-group">
+                <div class="form-group desktop-field-version-code">
                   <label class="form-label">{{ t('config.versionCode') }}</label>
                   <input type="number" class="form-input" v-model.number="config.version_code" placeholder="1" :min="1" />
                   <div v-if="keystoreUpgradeVersionError" class="form-error">{{ keystoreUpgradeVersionError }}</div>
@@ -645,13 +645,13 @@
                     <option value="aab">{{ t('config.aab') }}</option>
                   </select>
                 </div>
-                <div v-else class="form-group">
+                <div v-else class="form-group desktop-field-installer">
                   <label class="form-label">{{ t('config.desktopInstallerMode') }}</label>
                   <select class="form-input form-select" v-model="config.desktop_installer_mode">
                     <option value="portable">{{ t('config.desktopInstallerPortable') }}</option>
                   </select>
                 </div>
-                <div v-if="mode === 'desktop'" class="form-group">
+                <div v-if="mode === 'desktop'" class="form-group desktop-port-group">
                   <label class="form-label">{{ t('config.desktopPort') }}</label>
                   <div class="desktop-port-row">
                     <input
@@ -1972,6 +1972,45 @@ export default defineComponent({
   font-size: 12px;
 }
 
+.desktop-basic-grid,
+.desktop-meta-grid {
+  align-items: start;
+}
+
+.desktop-basic-grid {
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.desktop-meta-grid {
+  gap: 16px;
+  grid-template-columns: minmax(180px, 1.35fr) minmax(120px, 0.8fr) minmax(170px, 1fr);
+}
+
+.desktop-basic-grid .form-group,
+.desktop-meta-grid .form-group {
+  margin-bottom: 0;
+}
+
+.desktop-meta-grid .desktop-field-installer .form-label {
+  white-space: nowrap;
+}
+
+.desktop-meta-grid .desktop-port-group {
+  grid-column: 1 / -1;
+}
+
+.desktop-meta-grid .desktop-port-row,
+.desktop-meta-grid .desktop-port-group .form-hint,
+.desktop-meta-grid .desktop-port-group .form-error {
+  max-width: 420px;
+}
+
+.desktop-meta-grid .desktop-port-group .form-hint,
+.desktop-meta-grid .desktop-port-group .form-error {
+  line-height: 1.45;
+}
+
 .desktop-port-row {
   display: flex;
   align-items: center;
@@ -1987,6 +2026,30 @@ export default defineComponent({
 .desktop-port-row .btn {
   flex: 0 0 auto;
   white-space: nowrap;
+}
+
+@media (max-width: 1100px) {
+  .desktop-meta-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .desktop-basic-grid,
+  .desktop-meta-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .desktop-meta-grid .desktop-field-installer .form-label {
+    white-space: normal;
+  }
+
+  .desktop-meta-grid .desktop-port-row,
+  .desktop-meta-grid .desktop-port-group .form-hint,
+  .desktop-meta-grid .desktop-port-group .form-error {
+    max-width: 100%;
+  }
 }
 
 .keystore-toggle {
