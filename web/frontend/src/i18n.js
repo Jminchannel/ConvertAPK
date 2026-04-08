@@ -1312,6 +1312,128 @@ messages['zh-TW'].config.desktopPortHint = '預設隨機值會避開常用埠號
 messages['zh-TW'].config.desktopPortRule = '桌面埠號必須是 1024-65535 的整數。'
 messages['zh-TW'].config.desktopPortRandom = '隨機'
 
+messages.en.auth = {
+  entry: 'Login / Register',
+  loginTitle: 'Welcome Back',
+  registerTitle: 'Create Account',
+  loginTab: 'Login',
+  registerTab: 'Register',
+  email: 'Email',
+  emailPlaceholder: 'you@example.com',
+  password: 'Password',
+  passwordPlaceholder: 'At least 6 characters',
+  confirmPassword: 'Confirm Password',
+  confirmPasswordPlaceholder: 'Re-enter password',
+  loginSubmit: 'Login',
+  registerSubmit: 'Register',
+  cancel: 'Cancel',
+  submitting: 'Submitting...',
+  logout: 'Logout',
+  loginSuccess: 'Logged in successfully',
+  registerSuccess: 'Registered successfully',
+  logoutSuccess: 'Logged out',
+  entryDisabled: 'Login and registration are disabled by admin',
+  loginDisabled: 'Login is disabled by admin',
+  registerDisabled: 'Registration is disabled by admin',
+  errorGeneral: 'Operation failed, please try again',
+  errorEmailFormat: 'Please enter a valid email',
+  errorPasswordLength: 'Password must be at least 6 characters',
+  errorPasswordConfirm: 'Passwords do not match',
+  errorEmailExists: 'Email is already registered',
+  errorCredential: 'Email or password is incorrect',
+  errorClientBound: 'This client is already bound to another account',
+  orDivider: 'or',
+  githubSubmit: 'Continue with GitHub',
+  githubRedirecting: 'Redirecting...',
+  githubLoginSuccess: 'GitHub login successful',
+  githubUnavailable: 'GitHub login is not configured yet',
+  githubStateInvalid: 'GitHub login state is invalid, please retry',
+  githubAccessDenied: 'GitHub login was canceled',
+  githubCallbackFailed: 'GitHub login failed, please try again'
+}
+
+messages['zh-CN'].auth = {
+  entry: '登录 / 注册',
+  loginTitle: '欢迎回来',
+  registerTitle: '创建账号',
+  loginTab: '登录',
+  registerTab: '注册',
+  email: '邮箱',
+  emailPlaceholder: 'you@example.com',
+  password: '密码',
+  passwordPlaceholder: '至少 6 位字符',
+  confirmPassword: '确认密码',
+  confirmPasswordPlaceholder: '再次输入密码',
+  loginSubmit: '登录',
+  registerSubmit: '注册',
+  cancel: '取消',
+  submitting: '提交中...',
+  logout: '退出登录',
+  loginSuccess: '登录成功',
+  registerSuccess: '注册成功',
+  logoutSuccess: '已退出登录',
+  entryDisabled: '管理员已关闭登录与注册功能',
+  loginDisabled: '管理员已关闭登录功能',
+  registerDisabled: '管理员已关闭注册功能',
+  errorGeneral: '操作失败，请稍后重试',
+  errorEmailFormat: '请输入有效邮箱地址',
+  errorPasswordLength: '密码至少需要 6 位字符',
+  errorPasswordConfirm: '两次输入的密码不一致',
+  errorEmailExists: '该邮箱已被注册',
+  errorCredential: '邮箱或密码错误',
+  errorClientBound: '当前客户端已绑定到其他账号'
+}
+
+messages['zh-TW'].auth = {
+  entry: '登入 / 註冊',
+  loginTitle: '歡迎回來',
+  registerTitle: '建立帳號',
+  loginTab: '登入',
+  registerTab: '註冊',
+  email: '信箱',
+  emailPlaceholder: 'you@example.com',
+  password: '密碼',
+  passwordPlaceholder: '至少 6 位字元',
+  confirmPassword: '確認密碼',
+  confirmPasswordPlaceholder: '再次輸入密碼',
+  loginSubmit: '登入',
+  registerSubmit: '註冊',
+  cancel: '取消',
+  submitting: '提交中...',
+  logout: '登出',
+  loginSuccess: '登入成功',
+  registerSuccess: '註冊成功',
+  logoutSuccess: '已登出',
+  entryDisabled: '管理員已關閉登入與註冊功能',
+  loginDisabled: '管理員已關閉登入功能',
+  registerDisabled: '管理員已關閉註冊功能',
+  errorGeneral: '操作失敗，請稍後再試',
+  errorEmailFormat: '請輸入有效信箱地址',
+  errorPasswordLength: '密碼至少需要 6 位字元',
+  errorPasswordConfirm: '兩次輸入的密碼不一致',
+  errorEmailExists: '該信箱已被註冊',
+  errorCredential: '信箱或密碼錯誤',
+  errorClientBound: '目前客戶端已綁定到其他帳號'
+}
+
+messages['zh-CN'].auth.orDivider = '或'
+messages['zh-CN'].auth.githubSubmit = '使用 GitHub 快捷登录'
+messages['zh-CN'].auth.githubRedirecting = '正在跳转...'
+messages['zh-CN'].auth.githubLoginSuccess = 'GitHub 登录成功'
+messages['zh-CN'].auth.githubUnavailable = 'GitHub 登录暂未配置'
+messages['zh-CN'].auth.githubStateInvalid = '登录状态已失效，请重试'
+messages['zh-CN'].auth.githubAccessDenied = '你已取消 GitHub 授权'
+messages['zh-CN'].auth.githubCallbackFailed = 'GitHub 登录失败，请重试'
+
+messages['zh-TW'].auth.orDivider = '或'
+messages['zh-TW'].auth.githubSubmit = '使用 GitHub 快速登入'
+messages['zh-TW'].auth.githubRedirecting = '正在跳轉...'
+messages['zh-TW'].auth.githubLoginSuccess = 'GitHub 登入成功'
+messages['zh-TW'].auth.githubUnavailable = 'GitHub 登入尚未設定'
+messages['zh-TW'].auth.githubStateInvalid = '登入狀態已失效，請重試'
+messages['zh-TW'].auth.githubAccessDenied = '你已取消 GitHub 授權'
+messages['zh-TW'].auth.githubCallbackFailed = 'GitHub 登入失敗，請重試'
+
 export function getBrowserLanguage() {
   const lang = navigator.language || navigator.userLanguage
   if (lang.startsWith('zh')) {

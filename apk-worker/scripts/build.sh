@@ -171,6 +171,145 @@ runOfflineizeAssets() {
     fi
 }
 
+normalizeWebCssForLegacyWebView() {
+    local webDir="$1"
+    if [ -z "$webDir" ] || [ ! -d "$webDir" ]; then
+        return 0
+    fi
+
+    local cssCount
+    cssCount="$(find "$webDir" -type f -name '*.css' | wc -l | tr -d '[:space:]')"
+    if [ -z "$cssCount" ] || [ "$cssCount" = "0" ]; then
+        return 0
+    fi
+
+    log_info "Step 1.6: 兼容旧版 WebView 颜色语法..."
+    WEB_DIR="$webDir" node <<'NODE'
+const fs = require("fs");
+const path = require("path");
+
+function walkCssFiles(dir, result) {
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      walkCssFiles(full, result);
+      continue;
+    }
+    if (entry.isFile() && full.toLowerCase().endsWith(".css")) {
+      result.push(full);
+    }
+  }
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function linearToSrgb(value) {
+  if (value <= 0.0031308) {
+    return 12.92 * value;
+  }
+  return 1.055 * Math.pow(value, 1 / 2.4) - 0.055;
+}
+
+function parseAlpha(alphaRaw) {
+  if (!alphaRaw) {
+    return null;
+  }
+  const text = String(alphaRaw).trim();
+  if (!text) {
+    return null;
+  }
+  if (text.endsWith("%")) {
+    const value = Number.parseFloat(text.slice(0, -1));
+    if (Number.isFinite(value)) {
+      return clamp(value / 100, 0, 1);
+    }
+    return null;
+  }
+  const value = Number.parseFloat(text);
+  if (!Number.isFinite(value)) {
+    return null;
+  }
+  return clamp(value, 0, 1);
+}
+
+function oklchToRgbCss(lPctRaw, chromaRaw, hueRaw, alphaRaw) {
+  const lPct = Number.parseFloat(lPctRaw);
+  const chroma = Number.parseFloat(chromaRaw);
+  const hueDeg = Number.parseFloat(hueRaw);
+  if (!Number.isFinite(lPct) || !Number.isFinite(chroma) || !Number.isFinite(hueDeg)) {
+    return null;
+  }
+
+  const l = clamp(lPct / 100, 0, 1);
+  const hueRad = (hueDeg * Math.PI) / 180;
+  const a = chroma * Math.cos(hueRad);
+  const b = chroma * Math.sin(hueRad);
+
+  const l_ = l + 0.3963377774 * a + 0.2158037573 * b;
+  const m_ = l - 0.1055613458 * a - 0.0638541728 * b;
+  const s_ = l - 0.0894841775 * a - 1.2914855480 * b;
+
+  const l3 = l_ * l_ * l_;
+  const m3 = m_ * m_ * m_;
+  const s3 = s_ * s_ * s_;
+
+  const rLin = 4.0767416621 * l3 - 3.3077115913 * m3 + 0.2309699292 * s3;
+  const gLin = -1.2684380046 * l3 + 2.6097574011 * m3 - 0.3413193965 * s3;
+  const bLin = -0.0041960863 * l3 - 0.7034186147 * m3 + 1.7076147010 * s3;
+
+  const r = Math.round(clamp(linearToSrgb(rLin), 0, 1) * 255);
+  const g = Math.round(clamp(linearToSrgb(gLin), 0, 1) * 255);
+  const bl = Math.round(clamp(linearToSrgb(bLin), 0, 1) * 255);
+
+  const alpha = parseAlpha(alphaRaw);
+  if (alpha === null) {
+    return `rgb(${r}, ${g}, ${bl})`;
+  }
+  return `rgba(${r}, ${g}, ${bl}, ${alpha.toFixed(3).replace(/0+$/, "").replace(/\.$/, "")})`;
+}
+
+const webDir = process.env.WEB_DIR ? path.resolve(process.cwd(), process.env.WEB_DIR) : "";
+if (!webDir || !fs.existsSync(webDir)) {
+  process.exit(0);
+}
+
+const cssFiles = [];
+walkCssFiles(webDir, cssFiles);
+
+let patchedFiles = 0;
+let patchedColors = 0;
+const colorPattern = /oklch\(\s*([0-9]*\.?[0-9]+)%\s+([0-9]*\.?[0-9]+)\s+(-?[0-9]*\.?[0-9]+)(?:\s*\/\s*([0-9]*\.?[0-9]+%?))?\s*\)/gi;
+
+for (const filePath of cssFiles) {
+  const original = fs.readFileSync(filePath, "utf8");
+  let localCount = 0;
+  const patched = original.replace(colorPattern, (full, lPct, chroma, hue, alpha) => {
+    const rgbCss = oklchToRgbCss(lPct, chroma, hue, alpha);
+    if (!rgbCss) {
+      return full;
+    }
+    localCount += 1;
+    return rgbCss;
+  });
+
+  if (localCount > 0 && patched !== original) {
+    fs.writeFileSync(filePath, patched, "utf8");
+    patchedFiles += 1;
+    patchedColors += localCount;
+  }
+}
+
+if (patchedFiles > 0) {
+  console.log(`[WebViewCompat] patched ${patchedColors} oklch colors in ${patchedFiles} css files`);
+} else {
+  console.log("[WebViewCompat] no oklch colors patched");
+}
+NODE
+}
+
 normalizeProjectRootForBuild() {
     local projectRoot="$1"
     if [ -z "$projectRoot" ] || [ ! -d "$projectRoot" ]; then
@@ -822,6 +961,187 @@ detectPackageManager() {
 }
 
 # 安装依赖（优先使用 lock 文件，避免版本漂移）
+forceNextConfigExport() {
+    if [ ! -f "package.json" ]; then
+        return 0
+    fi
+    node <<'NODE'
+const fs = require("fs");
+const path = require("path");
+
+const pkgPath = path.join(process.cwd(), "package.json");
+let pkg = {};
+try {
+  pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
+} catch {
+  process.exit(0);
+}
+
+const deps = Object.assign({}, pkg.dependencies || {}, pkg.devDependencies || {});
+if (!Object.prototype.hasOwnProperty.call(deps, "next")) {
+  process.exit(0);
+}
+
+const candidates = ["next.config.ts", "next.config.js", "next.config.mjs", "next.config.cjs"];
+let configPath = null;
+for (const filename of candidates) {
+  const fullPath = path.join(process.cwd(), filename);
+  if (fs.existsSync(fullPath) && fs.statSync(fullPath).isFile()) {
+    configPath = fullPath;
+    break;
+  }
+}
+
+if (!configPath) {
+  console.log("[Next.js] 未找到 next.config.*，跳过 output 自动改写");
+  process.exit(0);
+}
+
+let content = fs.readFileSync(configPath, "utf8");
+const outputPattern = /(\boutput\s*:\s*)(['"])([^'"\r\n]+)\2/;
+const matched = content.match(outputPattern);
+let status = "no_change";
+
+if (matched) {
+  const currentValue = String(matched[3] || "").trim().toLowerCase();
+  if (currentValue === "export") {
+    status = "already_export";
+  } else {
+    content = content.replace(outputPattern, `${matched[1]}${matched[2]}export${matched[2]}`);
+    status = "updated";
+  }
+} else {
+  const injectPatterns = [
+    /(const\s+nextConfig(?:\s*:\s*NextConfig)?\s*=\s*\{)/,
+    /(module\.exports\s*=\s*\{)/,
+    /(export\s+default\s*\{)/,
+  ];
+  for (const pattern of injectPatterns) {
+    if (pattern.test(content)) {
+      content = content.replace(pattern, "$1\n  output: 'export',");
+      status = "injected";
+      break;
+    }
+  }
+}
+
+const configName = path.basename(configPath);
+if (status === "updated" || status === "injected") {
+  fs.writeFileSync(configPath, content, "utf8");
+  console.log(`[Next.js] 已自动改写 ${configName} 为 output: 'export'`);
+} else if (status === "already_export") {
+  console.log(`[Next.js] ${configName} 已是 output: 'export'`);
+} else {
+  console.log(`[Next.js] 未能自动改写 ${configName}，将继续尝试导出兜底流程`);
+}
+NODE
+}
+
+forceNextIgnoreTypeErrors() {
+    node <<'NODE'
+const fs = require("fs");
+const path = require("path");
+
+const pkgPath = path.join(process.cwd(), "package.json");
+let pkg = {};
+try {
+  pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
+} catch {
+  process.exit(0);
+}
+
+const deps = Object.assign({}, pkg.dependencies || {}, pkg.devDependencies || {});
+if (!Object.prototype.hasOwnProperty.call(deps, "next")) {
+  process.exit(0);
+}
+
+const candidates = ["next.config.ts", "next.config.js", "next.config.mjs", "next.config.cjs"];
+let configPath = null;
+for (const filename of candidates) {
+  const fullPath = path.join(process.cwd(), filename);
+  if (fs.existsSync(fullPath) && fs.statSync(fullPath).isFile()) {
+    configPath = fullPath;
+    break;
+  }
+}
+
+if (!configPath) {
+  const createdConfigPath = path.join(process.cwd(), "next.config.mjs");
+  const scaffold = `/** @type {import('next').NextConfig} */
+const nextConfig = {
+  typescript: { ignoreBuildErrors: true },
+  eslint: { ignoreDuringBuilds: true },
+};
+
+export default nextConfig;
+`;
+  fs.writeFileSync(createdConfigPath, scaffold, "utf8");
+  console.log("[Next.js] 未找到 next.config.*，已创建 next.config.mjs 并注入类型检查兜底配置");
+  process.exit(0);
+}
+
+let content = fs.readFileSync(configPath, "utf8");
+let changed = false;
+
+if (/typescript\s*:\s*\{[^}]*ignoreBuildErrors\s*:\s*true/i.test(content)) {
+  // no-op
+} else if (/typescript\s*:\s*\{/i.test(content)) {
+  content = content.replace(/typescript\s*:\s*\{([\s\S]*?)\}/m, (m, inner) => {
+    if (/ignoreBuildErrors\s*:/i.test(inner)) {
+      return m.replace(/ignoreBuildErrors\s*:\s*[^,\n}]+/i, "ignoreBuildErrors: true");
+    }
+    return m.replace(/\}\s*$/, ", ignoreBuildErrors: true }");
+  });
+  changed = true;
+} else {
+  const injectPatterns = [
+    /(const\s+nextConfig(?:\s*:\s*NextConfig)?\s*=\s*\{)/,
+    /(module\.exports\s*=\s*\{)/,
+    /(export\s+default\s*\{)/,
+  ];
+  for (const pattern of injectPatterns) {
+    if (pattern.test(content)) {
+      content = content.replace(pattern, "$1\n  typescript: { ignoreBuildErrors: true },\n  eslint: { ignoreDuringBuilds: true },");
+      changed = true;
+      break;
+    }
+  }
+}
+
+if (!/eslint\s*:\s*\{[^}]*ignoreDuringBuilds\s*:\s*true/i.test(content)) {
+  if (/eslint\s*:\s*\{/i.test(content)) {
+    content = content.replace(/eslint\s*:\s*\{([\s\S]*?)\}/m, (m, inner) => {
+      if (/ignoreDuringBuilds\s*:/i.test(inner)) {
+        return m.replace(/ignoreDuringBuilds\s*:\s*[^,\n}]+/i, "ignoreDuringBuilds: true");
+      }
+      return m.replace(/\}\s*$/, ", ignoreDuringBuilds: true }");
+    });
+    changed = true;
+  } else {
+    const injectPatterns = [
+      /(const\s+nextConfig(?:\s*:\s*NextConfig)?\s*=\s*\{)/,
+      /(module\.exports\s*=\s*\{)/,
+      /(export\s+default\s*\{)/,
+    ];
+    for (const pattern of injectPatterns) {
+      if (pattern.test(content)) {
+        content = content.replace(pattern, "$1\n  eslint: { ignoreDuringBuilds: true },");
+        changed = true;
+        break;
+      }
+    }
+  }
+}
+
+if (changed) {
+  fs.writeFileSync(configPath, content, "utf8");
+  console.log(`[Next.js] 已注入类型检查兜底配置: ${path.basename(configPath)}`);
+} else {
+  console.log(`[Next.js] ${path.basename(configPath)} 已包含类型检查兜底配置`);
+}
+NODE
+}
+
 installDependencies() {
     local installMode="${1:-normal}"
     local packageManager
@@ -905,6 +1225,9 @@ reinstallDependencies() {
 
 # 首次安装依赖
 log_info "安装项目依赖..."
+if command -v node >/dev/null 2>&1; then
+    forceNextConfigExport || log_warning "Next.js config auto rewrite failed, continue build"
+fi
 installDependencies
 check_error "依赖安装失败"
 
@@ -917,6 +1240,20 @@ if [ "$BUILD_SUCCESS" = "true" ]; then
 else
     log_warning "首次构建失败，分析错误..."
     echo "$BUILD_OUTPUT"
+
+    if echo "$BUILD_OUTPUT" | grep -q "Type error:"; then
+        log_warning "检测到 Next.js 类型检查失败，尝试注入 ignoreBuildErrors 后重试..."
+        if command -v node >/dev/null 2>&1; then
+            forceNextIgnoreTypeErrors || log_warning "Next.js 类型检查兜底注入失败，继续后续兜底流程"
+            BUILD_OUTPUT=$(npm run build 2>&1) && BUILD_SUCCESS=true || BUILD_SUCCESS=false
+            if [ "$BUILD_SUCCESS" = "true" ]; then
+                log_success "已通过类型检查兜底完成构建"
+            else
+                log_warning "类型检查兜底后仍构建失败，继续后续兜底流程"
+                echo "$BUILD_OUTPUT"
+            fi
+        fi
+    fi
 
     if echo "$BUILD_OUTPUT" | grep -qE '\[vite:build-html\].*EISDIR' && \
        echo "$BUILD_OUTPUT" | grep -qE 'index\.html'; then
@@ -1017,8 +1354,10 @@ if [ -d "dist" ]; then
     WEB_DIR="dist"
 elif [ -d "build" ]; then
     WEB_DIR="build"
+elif [ -d "out" ]; then
+    WEB_DIR="out"
 else
-    log_error "未找到构建输出目录 (dist 或 build)"
+    log_error "未找到构建输出目录 (dist/build/out)"
     exit 1
 fi
 
@@ -1032,8 +1371,10 @@ if [ -z "$WEB_DIR" ]; then
         WEB_DIR="dist"
     elif [ -d "build" ]; then
         WEB_DIR="build"
+    elif [ -d "out" ]; then
+        WEB_DIR="out"
     else
-        log_error "未找到 Web 输出目录 (dist 或 build)"
+        log_error "未找到 Web 输出目录 (dist/build/out)"
         exit 1
     fi
 fi
@@ -1042,6 +1383,8 @@ if [ ! -d "$WEB_DIR" ]; then
     log_error "Web 输出目录不存在: $WEB_DIR"
     exit 1
 fi
+
+normalizeWebCssForLegacyWebView "$WEB_DIR"
 
 if [ "$TASK_MODE" = "convert" ]; then
     runOfflineizeAssets "$WEB_DIR/index.html" "Step 1.5"
@@ -1096,7 +1439,20 @@ const downloadScript = `<script id="convertapk-download-helper">(function(){
     while (el && el.tagName !== 'A') el = el.parentElement;
     return el;
   }
-  function getFilename(a, href){
+  function withDefaultExtension(name, mimeType){
+    var safe = String(name || '').trim();
+    if (!safe) safe = 'download';
+    safe = safe.replace(/[\\\\/:*?"<>|]+/g, '_');
+    if (safe.includes('.')) return safe;
+    var mime = String(mimeType || '').toLowerCase();
+    if (mime.includes('json')) return safe + '.json';
+    if (mime.includes('pdf')) return safe + '.pdf';
+    if (mime.includes('csv')) return safe + '.csv';
+    if (mime.includes('zip')) return safe + '.zip';
+    if (mime.startsWith('text/')) return safe + '.txt';
+    return safe;
+  }
+  function getFilename(a, href, mimeType){
     var name = (a.getAttribute('download') || a.download || '').trim();
     if (name) return name;
     try {
@@ -1105,7 +1461,98 @@ const downloadScript = `<script id="convertapk-download-helper">(function(){
     } catch (e) {
       name = 'download';
     }
-    return name;
+    return withDefaultExtension(name, mimeType);
+  }
+  function getDownloadRequestKey(a, href){
+    var downloadName = '';
+    try {
+      downloadName = (a && (a.getAttribute('download') || a.download || '')) || '';
+    } catch (e) {
+    }
+    var normalizedHref = String(href || '');
+    if (normalizedHref.startsWith('blob:')) {
+      // blob URL 每次都可能变化，这里做归一化避免同一导出动作重复触发
+      normalizedHref = 'blob:';
+    } else if (normalizedHref.startsWith('data:')) {
+      normalizedHref = 'data:';
+    }
+    return normalizedHref + '|' + String(downloadName || '');
+  }
+  function shouldSkipDuplicateRequest(a, href){
+    var now = Date.now();
+    var state = window.__convertapkDownloadDedupeState;
+    if (!state) {
+      state = { lastKey: '', lastAt: 0, inFlight: {} };
+      window.__convertapkDownloadDedupeState = state;
+    }
+    var key = getDownloadRequestKey(a, href);
+    var recentWindow = 1200;
+    var inFlightWindow = 4000;
+    try {
+      for (var k in state.inFlight) {
+        if (!Object.prototype.hasOwnProperty.call(state.inFlight, k)) continue;
+        if (now - Number(state.inFlight[k] || 0) > inFlightWindow) {
+          delete state.inFlight[k];
+        }
+      }
+    } catch (e) {
+    }
+    if (state.inFlight[key]) {
+      return true;
+    }
+    if (state.lastKey === key && now - Number(state.lastAt || 0) < recentWindow) {
+      return true;
+    }
+    state.lastKey = key;
+    state.lastAt = now;
+    state.inFlight[key] = now;
+    return false;
+  }
+  function releaseDownloadRequest(a, href){
+    try {
+      var state = window.__convertapkDownloadDedupeState;
+      if (!state || !state.inFlight) return;
+      var key = getDownloadRequestKey(a, href);
+      delete state.inFlight[key];
+    } catch (e) {
+    }
+  }
+  function getShareState(){
+    var state = window.__convertapkShareState;
+    if (!state) {
+      state = { inFlight: false, currentFile: '', lastFile: '', lastAt: 0 };
+      window.__convertapkShareState = state;
+    }
+    return state;
+  }
+  function beginShare(fileKey){
+    var state = getShareState();
+    var now = Date.now();
+    var cooldownMs = 10000;
+    if (state.inFlight) {
+      return false;
+    }
+    // 任意文件在冷却窗口内都跳过，防止多条导出路径导致重复弹窗
+    if (now - Number(state.lastAt || 0) < cooldownMs) {
+      return false;
+    }
+    state.inFlight = true;
+    state.currentFile = fileKey;
+    return true;
+  }
+  function endShare(fileKey, shared){
+    var state = getShareState();
+    if (shared) {
+      state.lastFile = fileKey;
+      state.lastAt = Date.now();
+    }
+    setTimeout(function(){
+      var latest = getShareState();
+      if (latest.currentFile === fileKey) {
+        latest.inFlight = false;
+        latest.currentFile = '';
+      }
+    }, 300);
   }
   function readAsDataUrl(blob){
     return new Promise(function(resolve, reject){
@@ -1127,8 +1574,25 @@ const downloadScript = `<script id="convertapk-download-helper">(function(){
         fileUrl = uriResult && uriResult.uri ? uriResult.uri : '';
       }
       if (!fileUrl) return false;
-      await cap.Plugins.Share.share({ title: filename, text: filename, url: fileUrl });
-      return true;
+      var fileKey = String(filename || 'download');
+      if (!beginShare(fileKey)) {
+        return true;
+      }
+      var shared = false;
+      try {
+        await cap.Plugins.Share.share({
+          title: filename,
+          text: filename,
+          files: [fileUrl],
+          dialogTitle: filename
+        });
+        shared = true;
+        return true;
+      } catch (e) {
+        return false;
+      } finally {
+        endShare(fileKey, shared);
+      }
     } catch (e) {
       return false;
     }
@@ -1136,7 +1600,10 @@ const downloadScript = `<script id="convertapk-download-helper">(function(){
   async function maybeShareSavedFile(filename, triggerPicker){
     if (triggerPicker === false) return;
     if (downloadMode === 'silent') return;
-    await shareFile(filename);
+    var shared = await shareFile(filename);
+    if (!shared) {
+      console.warn('[ConvertAPK] 文件已保存，但当前设备无法直接拉起分享面板:', filename);
+    }
   }
   async function saveBlob(blob, filename, triggerPicker){
     var cap = window.Capacitor;
@@ -1144,10 +1611,10 @@ const downloadScript = `<script id="convertapk-download-helper">(function(){
     var dataUrl = await readAsDataUrl(blob);
     var base64 = String(dataUrl).split(',')[1] || '';
     var fsPlugin = cap.Plugins.Filesystem;
-    try {
-      await fsPlugin.writeFile({ path: filename, data: base64, directory: 'DOCUMENTS', recursive: true });
-      await maybeShareSavedFile(filename, triggerPicker);
-      return true;
+      try {
+        await fsPlugin.writeFile({ path: filename, data: base64, directory: 'DOCUMENTS', recursive: true });
+        await maybeShareSavedFile(filename, triggerPicker);
+        return true;
     } catch (e) {
       try {
         await fsPlugin.writeFile({ path: filename, data: base64, directory: 'DATA', recursive: true });
@@ -1160,35 +1627,44 @@ const downloadScript = `<script id="convertapk-download-helper">(function(){
   }
   async function handleDownload(a, href){
     if (!href) return false;
-    var isBlob = href.startsWith('blob:');
-    var isData = href.startsWith('data:');
-    if (!isBlob && !isData) {
-      if (downloadMode === 'silent') return false;
-      try {
-        var url = new URL(href, window.location.href).toString();
-        var cap = window.Capacitor;
-        if (cap && cap.Plugins && cap.Plugins.Browser) {
-          cap.Plugins.Browser.open({ url: url });
+    if (shouldSkipDuplicateRequest(a, href)) {
+      return true;
+    }
+    try {
+      var isBlob = href.startsWith('blob:');
+      var isData = href.startsWith('data:');
+      if (!isBlob && !isData) {
+        if (downloadMode === 'silent') return false;
+        try {
+          var url = new URL(href, window.location.href).toString();
+          var cap = window.Capacitor;
+          if (cap && cap.Plugins && cap.Plugins.Browser) {
+            cap.Plugins.Browser.open({ url: url });
+            return true;
+          }
+          window.open(url, '_blank');
           return true;
+        } catch (e) {
+          return false;
         }
-        window.open(url, '_blank');
-        return true;
+      }
+      try {
+        var res = await fetch(href);
+        var blob = await res.blob();
+        return await saveBlob(blob, getFilename(a, href, blob && blob.type), true);
       } catch (e) {
         return false;
       }
-    }
-    try {
-      var res = await fetch(href);
-      var blob = await res.blob();
-      return await saveBlob(blob, getFilename(a, href), true);
-    } catch (e) {
-      return false;
+    } finally {
+      setTimeout(function(){
+        releaseDownloadRequest(a, href);
+      }, 1600);
     }
   }
   async function shareFiles(files, title){
     if (!files || !files.length) return false;
     var file = files[0];
-    var name = (file && file.name) || title || 'share';
+    var name = withDefaultExtension((file && file.name) || title || 'share', file && file.type);
     try {
       var ok = await saveBlob(file, name, false);
       if (!ok) return false;
@@ -1212,6 +1688,8 @@ const downloadScript = `<script id="convertapk-download-helper">(function(){
         if (data && data.files && data.files.length) {
           var ok = await shareFiles(data.files, data.title || data.text || '');
           if (ok) return;
+          // 文件分享失败时不回退到文本分享，避免出现额外弹窗
+          throw new Error('file share failed');
         }
         return origShare(data);
       };
@@ -1220,6 +1698,8 @@ const downloadScript = `<script id="convertapk-download-helper">(function(){
         if (data && data.files && data.files.length) {
           var ok = await shareFiles(data.files, data.title || data.text || '');
           if (ok) return;
+          // 文件分享失败时不回退到文本分享，避免出现额外弹窗
+          throw new Error('file share failed');
         }
         throw new Error('share not supported');
       };
@@ -1279,20 +1759,7 @@ const downloadScript = `<script id="convertapk-download-helper">(function(){
   };
   var _origDispatch = HTMLAnchorElement.prototype.dispatchEvent;
   HTMLAnchorElement.prototype.dispatchEvent = function(evt){
-    try {
-      if (evt && evt.type === 'click') {
-        var href = this.getAttribute('href') || this.href || '';
-        var download = this.getAttribute('download') || this.download;
-        var isBlob = href.startsWith('blob:');
-        var isData = href.startsWith('data:');
-        var shouldHandle = isBlob || isData || (download && downloadMode !== 'silent');
-        if (shouldHandle) {
-          handleDownload(this, href);
-          return true;
-        }
-      }
-    } catch (e) {
-    }
+    // 仅保留原生 dispatch，避免 click/dispatch 双拦截导致重复导出
     return _origDispatch.call(this, evt);
   };
   document.addEventListener('click', function(e){
@@ -1430,7 +1897,7 @@ installCapacitorPackage "@capacitor/share" ""
 installCapacitorPackage "@capacitor/android" ""
 
 rm -f capacitor.config.ts capacitor.config.js
-node -e "const fs=require('fs'); const config={ appId: process.env.PACKAGE_NAME || 'com.example.app', appName: process.env.APP_NAME || 'MyApp', webDir: process.env.WEB_DIR || 'dist', server: { androidScheme: 'https' } }; fs.writeFileSync('capacitor.config.json', JSON.stringify(config, null, 2), 'utf8');"
+WEB_DIR="$WEB_DIR" node -e "const fs=require('fs'); const config={ appId: process.env.PACKAGE_NAME || 'com.example.app', appName: process.env.APP_NAME || 'MyApp', webDir: process.env.WEB_DIR || 'dist', server: { androidScheme: 'https' } }; fs.writeFileSync('capacitor.config.json', JSON.stringify(config, null, 2), 'utf8');"
 check_error "生成 capacitor.config.json 失败"
 
 log_success "Capacitor 初始化完成"
@@ -1804,12 +2271,8 @@ class MainActivity : BridgeActivity() {
             val status = insets.getInsets(WindowInsetsCompat.Type.statusBars())
             val statusStable = insets.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.statusBars())
             val cutout = insets.getInsets(WindowInsetsCompat.Type.displayCutout())
-            val fallbackStatusBarHeight = if (BuildConfig.HIDE_STATUS_BAR) {
-                val resId = resources.getIdentifier("status_bar_height", "dimen", "android")
-                if (resId > 0) resources.getDimensionPixelSize(resId) else 0
-            } else 0
-            val topSystemInset = maxOf(status.top, statusStable.top, cutout.top, fallbackStatusBarHeight)
-            val shouldApplyTopInset = useWebViewTopPadding && (drawBehindStatusBar || BuildConfig.HIDE_STATUS_BAR)
+            val topSystemInset = maxOf(status.top, statusStable.top, cutout.top)
+            val shouldApplyTopInset = useWebViewTopPadding && drawBehindStatusBar && !BuildConfig.HIDE_STATUS_BAR
             val topInset = if (shouldApplyTopInset) topSystemInset else 0
             val bottomInset = if (useWebViewBottomPadding) nav.bottom else 0
             webView.setPadding(nav.left, topInset, nav.right, bottomInset)
@@ -1918,13 +2381,18 @@ class MainActivity : BridgeActivity() {
 
     private fun applySystemBars() {
         val statusBarBackground = BuildConfig.STATUS_BAR_BACKGROUND.trim().lowercase()
-        val drawBehind = statusBarBackground == "transparent"
+        val drawBehind = BuildConfig.HIDE_STATUS_BAR || statusBarBackground == "transparent"
         WindowCompat.setDecorFitsSystemWindows(window, !drawBehind)
         @Suppress("DEPRECATION")
         window.statusBarColor = if (drawBehind) android.graphics.Color.TRANSPARENT else android.graphics.Color.WHITE
         val controller = WindowInsetsControllerCompat(window, window.decorView)
         controller.isAppearanceLightStatusBars = BuildConfig.LIGHT_STATUS_BAR_ICONS
         if (BuildConfig.HIDE_STATUS_BAR) {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                val lp = window.attributes
+                lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                window.attributes = lp
+            }
             window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
             window.clearFlags(WindowManager.LayoutParams.FLAG_FORCE_NOT_FULLSCREEN)
             @Suppress("DEPRECATION")
@@ -2124,13 +2592,8 @@ if (!isKotlin) {
     "                Insets status = insets.getInsets(WindowInsetsCompat.Type.statusBars());\n" +
     "                Insets statusStable = insets.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.statusBars());\n" +
     "                Insets cutout = insets.getInsets(WindowInsetsCompat.Type.displayCutout());\n" +
-    "                int fallbackStatusBarHeight = 0;\n" +
-    "                if (hideStatusBar) {\n" +
-    "                    int resId = getResources().getIdentifier(\"status_bar_height\", \"dimen\", \"android\");\n" +
-    "                    fallbackStatusBarHeight = resId > 0 ? getResources().getDimensionPixelSize(resId) : 0;\n" +
-    "                }\n" +
-    "                int topSystemInset = Math.max(Math.max(status.top, statusStable.top), Math.max(cutout.top, fallbackStatusBarHeight));\n" +
-    "                boolean shouldApplyTopInset = useWebViewTopPadding && (drawBehindStatusBar || hideStatusBar);\n" +
+    "                int topSystemInset = Math.max(Math.max(status.top, statusStable.top), cutout.top);\n" +
+    "                boolean shouldApplyTopInset = useWebViewTopPadding && drawBehindStatusBar && !hideStatusBar;\n" +
     "                int topInset = shouldApplyTopInset ? topSystemInset : 0;\n" +
     "                int bottomInset = useWebViewBottomPadding ? nav.bottom : 0;\n" +
     "                webView.setPadding(nav.left, topInset, nav.right, bottomInset);\n" +
@@ -2244,6 +2707,14 @@ if (!isKotlin) {
     const helper = 
       "    // ConvertAPK: status bar helper\n" +
       "    private void applyStatusBarHidden() {\n" +
+      "        getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN);\n" +
+      "        getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_FORCE_NOT_FULLSCREEN);\n" +
+      "        getWindow().setStatusBarColor(android.graphics.Color.TRANSPARENT);\n" +
+      "        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {\n" +
+      "            android.view.WindowManager.LayoutParams lp = getWindow().getAttributes();\n" +
+      "            lp.layoutInDisplayCutoutMode = android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;\n" +
+      "            getWindow().setAttributes(lp);\n" +
+      "        }\n" +
       "        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {\n" +
       "            getWindow().setDecorFitsSystemWindows(false);\n" +
       "            android.view.WindowInsetsController controller = getWindow().getInsetsController();\n" +
@@ -2608,30 +3079,39 @@ function syncMinimalDownloadListener(source, isKotlinFile, enabled, downloadMode
       "        if (webView != null) {\n" +
       "            webView.setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->\n" +
       "                try {\n" +
+      "                    val safeUrl = (url ?: \"\").trim()\n" +
+      "                    if (safeUrl.isBlank()) {\n" +
+      "                        return@setDownloadListener\n" +
+      "                    }\n" +
+      "                    val lowerUrl = safeUrl.lowercase()\n" +
+      "                    val isHttp = lowerUrl.startsWith(\"http://\") || lowerUrl.startsWith(\"https://\")\n" +
+      "                    if (!isHttp) {\n" +
+      "                        return@setDownloadListener\n" +
+      "                    }\n" +
       "                    val downloadMode = \"" + normalizedDownloadMode + "\"\n" +
       "                    if (downloadMode != \"silent\") {\n" +
       "                        try {\n" +
-      "                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))\n" +
+      "                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(safeUrl))\n" +
       "                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)\n" +
       "                            startActivity(intent)\n" +
       "                            return@setDownloadListener\n" +
       "                        } catch (_: Exception) {\n" +
       "                        }\n" +
       "                    }\n" +
-      "                    val request = DownloadManager.Request(Uri.parse(url))\n" +
+      "                    val request = DownloadManager.Request(Uri.parse(safeUrl))\n" +
       "                    if (!mimeType.isNullOrBlank()) {\n" +
       "                        request.setMimeType(mimeType)\n" +
       "                    }\n" +
       "                    if (!userAgent.isNullOrBlank()) {\n" +
       "                        request.addRequestHeader(\"User-Agent\", userAgent)\n" +
       "                    }\n" +
-      "                    val cookie = CookieManager.getInstance().getCookie(url)\n" +
+      "                    val cookie = CookieManager.getInstance().getCookie(safeUrl)\n" +
       "                    if (!cookie.isNullOrBlank()) {\n" +
       "                        request.addRequestHeader(\"cookie\", cookie)\n" +
       "                    }\n" +
-      "                    val fileName = URLUtil.guessFileName(url, contentDisposition, mimeType)\n" +
+      "                    val fileName = URLUtil.guessFileName(safeUrl, contentDisposition, mimeType)\n" +
       "                    request.setTitle(fileName)\n" +
-      "                    request.setDescription(url)\n" +
+      "                    request.setDescription(safeUrl)\n" +
       "                    request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)\n" +
       "                    request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)\n" +
       "                    val dm = getSystemService(DOWNLOAD_SERVICE) as DownloadManager\n" +
@@ -2658,30 +3138,39 @@ function syncMinimalDownloadListener(source, isKotlinFile, enabled, downloadMode
     "        if (webView != null) {\n" +
     "            webView.setDownloadListener((url, userAgent, contentDisposition, mimeType, _contentLength) -> {\n" +
     "                try {\n" +
+    "                    String safeUrl = url == null ? \"\" : url.trim();\n" +
+    "                    if (safeUrl.isEmpty()) {\n" +
+    "                        return;\n" +
+    "                    }\n" +
+    "                    String lowerUrl = safeUrl.toLowerCase();\n" +
+    "                    boolean isHttp = lowerUrl.startsWith(\"http://\") || lowerUrl.startsWith(\"https://\");\n" +
+    "                    if (!isHttp) {\n" +
+    "                        return;\n" +
+    "                    }\n" +
     "                    String downloadMode = \"" + normalizedDownloadMode + "\";\n" +
     "                    if (!\"silent\".equals(downloadMode)) {\n" +
     "                        try {\n" +
-    "                            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));\n" +
+    "                            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(safeUrl));\n" +
     "                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);\n" +
     "                            startActivity(intent);\n" +
     "                            return;\n" +
     "                        } catch (Exception ignored) {\n" +
     "                        }\n" +
     "                    }\n" +
-    "                    DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url));\n" +
+    "                    DownloadManager.Request request = new DownloadManager.Request(Uri.parse(safeUrl));\n" +
     "                    if (mimeType != null && !mimeType.isEmpty()) {\n" +
     "                        request.setMimeType(mimeType);\n" +
     "                    }\n" +
     "                    if (userAgent != null && !userAgent.isEmpty()) {\n" +
     "                        request.addRequestHeader(\"User-Agent\", userAgent);\n" +
     "                    }\n" +
-    "                    String cookie = CookieManager.getInstance().getCookie(url);\n" +
+    "                    String cookie = CookieManager.getInstance().getCookie(safeUrl);\n" +
     "                    if (cookie != null && !cookie.isEmpty()) {\n" +
     "                        request.addRequestHeader(\"cookie\", cookie);\n" +
     "                    }\n" +
-    "                    String fileName = URLUtil.guessFileName(url, contentDisposition, mimeType);\n" +
+    "                    String fileName = URLUtil.guessFileName(safeUrl, contentDisposition, mimeType);\n" +
     "                    request.setTitle(fileName);\n" +
-    "                    request.setDescription(url);\n" +
+    "                    request.setDescription(safeUrl);\n" +
     "                    request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);\n" +
     "                    request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName);\n" +
     "                    DownloadManager dm = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);\n" +
@@ -2694,6 +3183,48 @@ function syncMinimalDownloadListener(source, isKotlinFile, enabled, downloadMode
     "            });\n" +
     "        }\n" +
     "    // ConvertAPK: download end (minimal)\n";
+  updated = injectMinimalSnippetIntoOnCreate(updated, false, onCreateSnippet);
+  return updated;
+}
+
+function removeDisablePinchZoom(source) {
+  source = source.replace(
+    /\n?\s*\/\/ ConvertAPK: disable-zoom start \(minimal\)\n[\s\S]*?\n\s*\/\/ ConvertAPK: disable-zoom end \(minimal\)\n?/gm,
+    "\n"
+  );
+  return source;
+}
+
+function syncDisablePinchZoom(source, isKotlinFile, enabled) {
+  let updated = removeDisablePinchZoom(source);
+  if (!enabled) {
+    return updated;
+  }
+  if (isKotlinFile) {
+    updated = insertAfterMainActivityClassOpen(updated, "", true);
+    const onCreateSnippet =
+      "        // ConvertAPK: disable-zoom start (minimal)\n" +
+      "        val convertApkWebView = bridge?.webView\n" +
+      "        if (convertApkWebView != null) {\n" +
+      "            val settings = convertApkWebView.settings\n" +
+      "            settings.setSupportZoom(false)\n" +
+      "            settings.builtInZoomControls = false\n" +
+      "            settings.displayZoomControls = false\n" +
+      "        }\n" +
+      "        // ConvertAPK: disable-zoom end (minimal)\n";
+    updated = injectMinimalSnippetIntoOnCreate(updated, true, onCreateSnippet);
+    return updated;
+  }
+  const onCreateSnippet =
+    "        // ConvertAPK: disable-zoom start (minimal)\n" +
+    "        android.webkit.WebView convertApkWebView = getBridge() != null ? getBridge().getWebView() : null;\n" +
+    "        if (convertApkWebView != null) {\n" +
+    "            android.webkit.WebSettings settings = convertApkWebView.getSettings();\n" +
+    "            settings.setSupportZoom(false);\n" +
+    "            settings.setBuiltInZoomControls(false);\n" +
+    "            settings.setDisplayZoomControls(false);\n" +
+    "        }\n" +
+    "        // ConvertAPK: disable-zoom end (minimal)\n";
   updated = injectMinimalSnippetIntoOnCreate(updated, false, onCreateSnippet);
   return updated;
 }
@@ -2721,15 +3252,38 @@ function syncMinimalStatusBarHidden(source, isKotlinFile, enabled) {
       "    // ConvertAPK: status-bar-hidden start (minimal)\n" +
       "    override fun onCreate(savedInstanceState: Bundle?) {\n" +
       "        super.onCreate(savedInstanceState)\n" +
+      "        normalizeConvertApkWebViewInsets()\n" +
       "        applyConvertApkStatusBarHidden()\n" +
       "    }\n\n" +
       "    override fun onWindowFocusChanged(hasFocus: Boolean) {\n" +
       "        super.onWindowFocusChanged(hasFocus)\n" +
       "        if (hasFocus) {\n" +
+      "            normalizeConvertApkWebViewInsets()\n" +
       "            applyConvertApkStatusBarHidden()\n" +
       "        }\n" +
       "    }\n\n" +
+      "    private fun normalizeConvertApkWebViewInsets() {\n" +
+      "        val convertApkWebView = bridge?.webView ?: return\n" +
+      "        convertApkWebView.setPadding(0, 0, 0, 0)\n" +
+      "        convertApkWebView.clipToPadding = false\n" +
+      "        val parentView = convertApkWebView.parent as? View\n" +
+      "        if (parentView != null) {\n" +
+      "            parentView.setPadding(0, 0, 0, 0)\n" +
+      "            parentView.fitsSystemWindows = false\n" +
+      "        }\n" +
+      "    }\n\n" +
       "    private fun applyConvertApkStatusBarHidden() {\n" +
+      "        @Suppress(\"DEPRECATION\")\n" +
+      "        window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)\n" +
+      "        @Suppress(\"DEPRECATION\")\n" +
+      "        window.clearFlags(WindowManager.LayoutParams.FLAG_FORCE_NOT_FULLSCREEN)\n" +
+      "        @Suppress(\"DEPRECATION\")\n" +
+      "        window.statusBarColor = android.graphics.Color.TRANSPARENT\n" +
+      "        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {\n" +
+      "            val lp = window.attributes\n" +
+      "            lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES\n" +
+      "            window.attributes = lp\n" +
+      "        }\n" +
       "        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {\n" +
       "            window.setDecorFitsSystemWindows(false)\n" +
       "            val controller = window.insetsController\n" +
@@ -2766,16 +3320,40 @@ function syncMinimalStatusBarHidden(source, isKotlinFile, enabled) {
     "    @Override\n" +
     "    protected void onCreate(Bundle savedInstanceState) {\n" +
     "        super.onCreate(savedInstanceState);\n" +
+    "        normalizeConvertApkWebViewInsets();\n" +
     "        applyConvertApkStatusBarHidden();\n" +
     "    }\n\n" +
     "    @Override\n" +
     "    public void onWindowFocusChanged(boolean hasFocus) {\n" +
     "        super.onWindowFocusChanged(hasFocus);\n" +
     "        if (hasFocus) {\n" +
+    "            normalizeConvertApkWebViewInsets();\n" +
     "            applyConvertApkStatusBarHidden();\n" +
     "        }\n" +
     "    }\n\n" +
+    "    private void normalizeConvertApkWebViewInsets() {\n" +
+    "        android.webkit.WebView convertApkWebView = getBridge() != null ? getBridge().getWebView() : null;\n" +
+    "        if (convertApkWebView == null) {\n" +
+    "            return;\n" +
+    "        }\n" +
+    "        convertApkWebView.setPadding(0, 0, 0, 0);\n" +
+    "        convertApkWebView.setClipToPadding(false);\n" +
+    "        android.view.ViewParent parent = convertApkWebView.getParent();\n" +
+    "        if (parent instanceof View) {\n" +
+    "            View parentView = (View) parent;\n" +
+    "            parentView.setPadding(0, 0, 0, 0);\n" +
+    "            parentView.setFitsSystemWindows(false);\n" +
+    "        }\n" +
+    "    }\n\n" +
     "    private void applyConvertApkStatusBarHidden() {\n" +
+    "        getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);\n" +
+    "        getWindow().clearFlags(WindowManager.LayoutParams.FLAG_FORCE_NOT_FULLSCREEN);\n" +
+    "        getWindow().setStatusBarColor(android.graphics.Color.TRANSPARENT);\n" +
+    "        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {\n" +
+    "            WindowManager.LayoutParams lp = getWindow().getAttributes();\n" +
+    "            lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;\n" +
+    "            getWindow().setAttributes(lp);\n" +
+    "        }\n" +
     "        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {\n" +
     "            getWindow().setDecorFitsSystemWindows(false);\n" +
     "            android.view.WindowInsetsController controller = getWindow().getInsetsController();\n" +
@@ -2830,6 +3408,12 @@ if (skipMainActivityInjection) {
   if (beforeMinimalDownloadSync !== text) {
     console.log(`[MainActivity] ${enableMinimalDownloadListener ? "enabled" : "disabled"} minimal download-listener`);
   }
+}
+
+const beforeDisablePinchZoomSync = text;
+text = syncDisablePinchZoom(text, isKotlin, taskMode === "convert");
+if (beforeDisablePinchZoomSync !== text) {
+  console.log(`[MainActivity] ${(taskMode === "convert") ? "enabled" : "disabled"} disable-pinch-zoom`);
 }
 
 writeText(mainActivity, text);
@@ -2890,6 +3474,20 @@ if (fs.existsSync(manifest)) {
         return ` android:screenOrientation="${desired}"${suffix}`;
       });
     }
+    if (taskMode === "convert" && statusBarHidden) {
+      const fullscreenLaunchThemeRef = "@style/ConvertApk.FullscreenLaunch";
+      if (/\bandroid:theme=/.test(updated)) {
+        updated = updated.replace(
+          /\bandroid:theme="[^"]*"/,
+          `android:theme="${fullscreenLaunchThemeRef}"`
+        );
+      } else {
+        updated = updated.replace(/\s*\/?>$/, (end) => {
+          const suffix = end.includes("/>") ? " />" : ">";
+          return ` android:theme="${fullscreenLaunchThemeRef}"${suffix}`;
+        });
+      }
+    }
     if (updated !== tag) changed = true;
     return updated;
   });
@@ -2927,25 +3525,130 @@ if (fs.existsSync(manifest)) {
   }
 }
 
+const convertApkFullscreenThemesFile = path.join(
+  androidDir,
+  "app",
+  "src",
+  "main",
+  "res",
+  "values",
+  "convertapk_statusbar_themes.xml"
+);
+if (taskMode === "convert" && statusBarHidden) {
+  const fullscreenThemesXml = `<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="ConvertApk.FullscreenBase" parent="@style/Theme.AppCompat.DayNight.NoActionBar">
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowTranslucentStatus">false</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+    </style>
+    <style name="ConvertApk.FullscreenLaunch" parent="@style/Theme.SplashScreen">
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowTranslucentStatus">false</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+        <item name="postSplashScreenTheme">@style/ConvertApk.FullscreenBase</item>
+    </style>
+</resources>
+`;
+  fs.mkdirSync(path.dirname(convertApkFullscreenThemesFile), { recursive: true });
+  writeText(convertApkFullscreenThemesFile, fullscreenThemesXml);
+}
+
 // Status bar configuration (styles.xml/themes.xml)
 // - STATUS_BAR_HIDDEN=true  -> fullscreen
 // - STATUS_BAR_COLOR=transparent|#FFFFFF
 // - STATUS_BAR_STYLE=dark|light (dark = dark icons for light background)
-const styleFiles = [];
-const resDir = path.join(androidDir, "app", "src", "main", "res");
-if (fs.existsSync(resDir)) {
-  const entries = fs.readdirSync(resDir, { withFileTypes: true });
+const styleFileSet = new Set();
+
+function collectStyleFilesFromResDir(resDirPath) {
+  if (!fs.existsSync(resDirPath)) return;
+  const entries = fs.readdirSync(resDirPath, { withFileTypes: true });
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
     if (!entry.name.startsWith("values")) continue;
     for (const name of ["styles.xml", "themes.xml"]) {
-      const candidate = path.join(resDir, entry.name, name);
+      const candidate = path.join(resDirPath, entry.name, name);
       if (fs.existsSync(candidate)) {
-        styleFiles.push(candidate);
+        styleFileSet.add(candidate);
       }
     }
   }
 }
+
+const moduleRoots = new Set();
+moduleRoots.add(androidDir);
+if (fs.existsSync(androidDir)) {
+  const entries = fs.readdirSync(androidDir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    if (entry.name.startsWith(".")) continue;
+    moduleRoots.add(path.join(androidDir, entry.name));
+  }
+}
+
+const settingsCandidates = [
+  path.join(androidDir, "settings.gradle"),
+  path.join(androidDir, "settings.gradle.kts"),
+  path.join(androidDir, "capacitor.settings.gradle"),
+  path.join(androidDir, "capacitor.settings.gradle.kts"),
+];
+for (const settingsFile of settingsCandidates) {
+  if (!fs.existsSync(settingsFile)) continue;
+  const settingsDir = path.dirname(settingsFile);
+  const settingsText = readText(settingsFile);
+  const projectDirRegex = /(?:new\s+File|file|File)\(\s*["']([^"']+)["']\s*\)/g;
+  let match;
+  while ((match = projectDirRegex.exec(settingsText)) !== null) {
+    const relPath = String(match[1] || "").trim();
+    if (!relPath) continue;
+    const absolutePath = path.resolve(settingsDir, relPath);
+    if (fs.existsSync(absolutePath)) {
+      moduleRoots.add(absolutePath);
+    }
+  }
+}
+
+const capacitorAndroidModuleDir = path.join(
+  projectRoot,
+  "node_modules",
+  "@capacitor",
+  "android",
+  "capacitor"
+);
+if (fs.existsSync(capacitorAndroidModuleDir)) {
+  moduleRoots.add(capacitorAndroidModuleDir);
+}
+
+const capacitorPackagesRoot = path.join(projectRoot, "node_modules", "@capacitor");
+if (fs.existsSync(capacitorPackagesRoot)) {
+  const packages = fs.readdirSync(capacitorPackagesRoot, { withFileTypes: true });
+  for (const pkg of packages) {
+    if (!pkg.isDirectory()) continue;
+    const pkgDir = path.join(capacitorPackagesRoot, pkg.name);
+    const candidateDirs = [
+      pkgDir,
+      path.join(pkgDir, "android"),
+      path.join(pkgDir, "capacitor"),
+      path.join(pkgDir, "android", "capacitor"),
+    ];
+    for (const candidateDir of candidateDirs) {
+      if (fs.existsSync(candidateDir)) {
+        moduleRoots.add(candidateDir);
+      }
+    }
+  }
+}
+
+for (const moduleRoot of moduleRoots) {
+  const moduleResDir = path.join(moduleRoot, "src", "main", "res");
+  collectStyleFilesFromResDir(moduleResDir);
+}
+
+const styleFiles = Array.from(styleFileSet);
 
 const hidden = String(process.env.STATUS_BAR_HIDDEN || "")
   .trim()
@@ -2968,7 +3671,17 @@ const statusBarColor =
       ? "#FFFFFF"
       : colorRaw;
 const lightStatusBar = style === "dark"; // windowLightStatusBar=true => dark icons
-const styleNames = ["AppTheme", "AppTheme.NoActionBar", "Theme.App", "Theme.App.NoActionBar"];
+const styleNames = [
+  "AppTheme",
+  "AppTheme.NoActionBar",
+  "AppTheme.NoActionBarLaunch",
+  "Theme.App",
+  "Theme.App.NoActionBar"
+];
+if (taskMode === "convert" && hidden) {
+  styleNames.push("ConvertApk.FullscreenBase");
+  styleNames.push("ConvertApk.FullscreenLaunch");
+}
 if (typeof themeNames !== "undefined" && themeNames.length) {
   for (const name of themeNames) {
     if (!styleNames.includes(name)) {
@@ -2982,9 +3695,10 @@ function escapeRegExp(str) {
 }
 
 function patchStylesFile(filePath) {
-  if (!fs.existsSync(filePath)) return false;
+  if (!fs.existsSync(filePath)) return { changed: false, matchedStyles: new Set() };
   let stext = readText(filePath);
   const original = stext;
+  const matchedStyles = new Set();
 
   function patchStyleBlock(styleName, items) {
     const re = new RegExp(
@@ -2992,11 +3706,13 @@ function patchStylesFile(filePath) {
     );
     const match = stext.match(re);
     if (!match) return false;
+    matchedStyles.add(styleName);
     let inner = match[2] || "";
     inner = inner.replace(/\s*<item\s+name="android:windowFullscreen">[\s\S]*?<\/item>\s*/g, "\n");
     inner = inner.replace(/\s*<item\s+name="android:windowTranslucentStatus">[\s\S]*?<\/item>\s*/g, "\n");
     inner = inner.replace(/\s*<item\s+name="android:statusBarColor">[\s\S]*?<\/item>\s*/g, "\n");
     inner = inner.replace(/\s*<item\s+name="android:windowLightStatusBar">[\s\S]*?<\/item>\s*/g, "\n");
+    inner = inner.replace(/\s*<item\s+name="android:windowLayoutInDisplayCutoutMode">[\s\S]*?<\/item>\s*/g, "\n");
     const insert = items.length ? "\n        " + items.join("\n        ") + "\n" : "\n";
     const updated = match[1] + insert + inner.replace(/^\n+/, "\n") + match[3];
     stext = stext.replace(match[0], updated);
@@ -3006,6 +3722,10 @@ function patchStylesFile(filePath) {
   const items = [];
   if (hidden) {
     items.push('<item name="android:windowFullscreen">true</item>');
+    items.push('<item name="android:windowTranslucentStatus">false</item>');
+    items.push('<item name="android:statusBarColor">@android:color/transparent</item>');
+    items.push('<item name="android:windowLightStatusBar">false</item>');
+    items.push('<item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>');
   } else {
     items.push('<item name="android:windowFullscreen">false</item>');
     items.push('<item name="android:windowTranslucentStatus">false</item>');
@@ -3021,12 +3741,27 @@ function patchStylesFile(filePath) {
   }
   if (patched && stext !== original) {
     writeText(filePath, stext);
+    return { changed: true, matchedStyles };
   }
-  return patched;
+  return { changed: false, matchedStyles };
 }
 
+const patchedStyleNames = new Set();
+let patchedFileCount = 0;
 for (const filePath of styleFiles) {
-  patchStylesFile(filePath);
+  const result = patchStylesFile(filePath);
+  if (result.changed) {
+    patchedFileCount += 1;
+    console.log(`[StylesPatch] patched: ${filePath}`);
+  }
+  for (const styleName of result.matchedStyles) {
+    patchedStyleNames.add(styleName);
+  }
+}
+console.log(`[StylesPatch] scanned ${styleFiles.length} style files in android modules`);
+const missingStyleNames = styleNames.filter((name) => !patchedStyleNames.has(name));
+if (missingStyleNames.length) {
+  console.log(`[StylesPatch] styles not found: ${missingStyleNames.join(", ")}`);
 }
 
 // Layout patch removed: rely on theme + window flags to avoid status bar overlap.

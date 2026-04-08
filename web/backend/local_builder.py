@@ -19,6 +19,18 @@ def _log(on_log: Optional[Callable[[str], None]], message: str) -> None:
         on_log(message)
 
 
+def _decode_process_output(raw: bytes) -> str:
+    """优先按 UTF-8 解码，失败时回退到 GB18030，减少中文日志乱码。"""
+    if not raw:
+        return ""
+    for encoding in ("utf-8", "gb18030"):
+        try:
+            return raw.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("utf-8", errors="replace")
+
+
 def _run_cmd(cmd, cwd=None, env=None, on_log=None) -> None:
     _log(on_log, f"$ {' '.join(cmd)}")
     process = subprocess.Popen(
@@ -27,13 +39,14 @@ def _run_cmd(cmd, cwd=None, env=None, on_log=None) -> None:
         env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
     )
     if process.stdout:
-        for line in process.stdout:
-            _log(on_log, line.rstrip())
+        for line in iter(process.stdout.readline, b""):
+            if not line:
+                break
+            decoded = _decode_process_output(line).rstrip("\r\n")
+            _log(on_log, decoded)
+        process.stdout.close()
     return_code = process.wait()
     if return_code != 0:
         raise RuntimeError(f"command failed: {cmd[0]} (exit {return_code})")
@@ -47,11 +60,8 @@ def _run_cmd_capture(cmd, cwd=None, env=None, on_log=None) -> str:
         env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
     )
-    output = process.stdout or ""
+    output = _decode_process_output(process.stdout or b"")
     for line in output.splitlines():
         _log(on_log, line.rstrip())
     if process.returncode != 0:
@@ -781,6 +791,60 @@ def _extract_zip_safely(archive_path: Path, dst_dir: Path) -> None:
                 shutil.copyfileobj(source, output)
 
 
+_text_encoding_extensions = {
+    ".html", ".htm", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx",
+    ".css", ".scss", ".less", ".json", ".md", ".txt", ".vue",
+    ".xml", ".yml", ".yaml", ".java", ".kt", ".properties",
+}
+
+
+def _normalize_text_file_to_utf8(path: Path) -> bool:
+    """将常见中文本编码（GB18030/GBK）归一化为 UTF-8。"""
+    try:
+        raw = path.read_bytes()
+    except Exception:
+        return False
+    if not raw or b"\x00" in raw:
+        return False
+    try:
+        raw.decode("utf-8")
+        return False
+    except UnicodeDecodeError:
+        pass
+    for encoding in ("gb18030", "gbk"):
+        try:
+            text = raw.decode(encoding)
+            path.write_text(text, encoding="utf-8")
+            return True
+        except UnicodeDecodeError:
+            continue
+        except Exception:
+            return False
+    return False
+
+
+def _normalize_project_text_encodings(project_root: Path, on_log=None) -> int:
+    """扫描项目文本文件并尝试转换到 UTF-8，减少中文乱码。"""
+    converted = 0
+    for file_path in project_root.rglob("*"):
+        if not file_path.is_file():
+            continue
+        suffix = file_path.suffix.lower()
+        if suffix not in _text_encoding_extensions:
+            continue
+        # 跳过超大文本，避免影响构建性能。
+        try:
+            if file_path.stat().st_size > 5 * 1024 * 1024:
+                continue
+        except Exception:
+            continue
+        if _normalize_text_file_to_utf8(file_path):
+            converted += 1
+    if converted:
+        _log(on_log, f"[Encoding] 已将 {converted} 个文本文件转换为 UTF-8")
+    return converted
+
+
 def _pick_index_html(root_dir: Path) -> Path:
     candidates: list[tuple[int, int, Path]] = []
     for file_path in root_dir.rglob("index.html"):
@@ -804,6 +868,90 @@ def _find_web_build_dir(project_root: Path) -> Path:
         if candidate.exists() and (candidate / "index.html").exists():
             return candidate
     raise RuntimeError("未找到 Web 构建产物目录（dist/build/out）")
+
+
+def _is_next_project(pkg: Dict) -> bool:
+    return _has_dep(pkg, "next")
+
+
+def _find_next_config_file(project_root: Path) -> Optional[Path]:
+    for filename in ("next.config.ts", "next.config.js", "next.config.mjs", "next.config.cjs"):
+        candidate = project_root / filename
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _rewrite_next_config_output_export(content: str) -> Tuple[str, str]:
+    output_pattern = re.compile(r"(\boutput\s*:\s*)(['\"])([^'\"\r\n]+)\2")
+    match = output_pattern.search(content)
+    if match:
+        current_value = str(match.group(3) or "").strip().lower()
+        if current_value == "export":
+            return content, "already_export"
+        replacement = f"{match.group(1)}{match.group(2)}export{match.group(2)}"
+        updated = output_pattern.sub(replacement, content, count=1)
+        return updated, "updated"
+
+    inject_patterns = (
+        re.compile(r"(const\s+nextConfig(?:\s*:\s*NextConfig)?\s*=\s*\{)"),
+        re.compile(r"(module\.exports\s*=\s*\{)"),
+        re.compile(r"(export\s+default\s*\{)"),
+    )
+    for pattern in inject_patterns:
+        if pattern.search(content):
+            updated = pattern.sub(r"\1\n  output: 'export',", content, count=1)
+            return updated, "injected"
+
+    return content, "no_change"
+
+
+def _ensure_next_config_output_export(project_root: Path, on_log=None) -> None:
+    config_path = _find_next_config_file(project_root)
+    if not config_path:
+        _log(on_log, "[Next.js] 未找到 next.config.*，跳过 output 自动改写")
+        return
+    try:
+        original = config_path.read_text(encoding="utf-8")
+    except Exception as exc:
+        _log(on_log, f"[Next.js] 读取 {config_path.name} 失败：{str(exc)}")
+        return
+
+    rewritten, status = _rewrite_next_config_output_export(original)
+    if status in {"updated", "injected"}:
+        config_path.write_text(rewritten, encoding="utf-8")
+        _log(on_log, f"[Next.js] 已自动改写 {config_path.name} 为 output: 'export'")
+        return
+    if status == "already_export":
+        _log(on_log, f"[Next.js] {config_path.name} 已是 output: 'export'")
+        return
+    _log(on_log, f"[Next.js] 未能自动改写 {config_path.name}，将继续尝试导出兜底流程")
+
+
+def _try_export_next_static_site(
+    project_root: Path,
+    pkg: Dict,
+    npm_cmd: str,
+    npx_cmd: str,
+    env: Dict[str, str],
+    on_log=None,
+) -> None:
+    scripts = pkg.get("scripts")
+    if isinstance(scripts, dict):
+        export_script = str(scripts.get("export", "")).strip()
+        if export_script:
+            _log(on_log, "[Next.js] 检测到 export 脚本，尝试执行 npm run export")
+            _run_cmd([npm_cmd, "run", "export"], cwd=project_root, env=env, on_log=on_log)
+            return
+    _log(on_log, "[Next.js] 未检测到 export 脚本，尝试执行 npx next export")
+    _run_cmd([npx_cmd, "next", "export"], cwd=project_root, env=env, on_log=on_log)
+
+
+def _raise_next_static_export_error() -> None:
+    raise RuntimeError(
+        "检测到 Next.js 项目，但未生成静态产物目录（out/dist/build）。"
+        "convert 模式仅支持静态导出，请在 next.config.* 中设置 output: 'export'，并确保构建后存在 out/index.html。"
+    )
 
 
 def _resolve_default_desktop_icon_ico() -> Optional[Path]:
@@ -1861,6 +2009,153 @@ def _remove_minimal_double_click_exit(source: str) -> str:
     )
     return source
 
+def _remove_minimal_status_bar_hidden(source: str) -> str:
+    source = re.sub(
+        r"(?ms)\n?\s*// ConvertAPK: status-bar-hidden start \(minimal\)\n.*?\n\s*// ConvertAPK: status-bar-hidden end \(minimal\)\n?",
+        "\n",
+        source,
+    )
+    return source
+
+def _sync_minimal_status_bar_hidden(
+    main_activity: Path,
+    enable: bool,
+    on_log=None,
+) -> None:
+    if not main_activity.exists():
+        return
+    text = main_activity.read_text(encoding="utf-8")
+    if "BridgeActivity" not in text:
+        return
+    is_kotlin = main_activity.suffix.lower() == ".kt"
+    original = text
+    text = _remove_minimal_status_bar_hidden(text)
+    if enable:
+        if is_kotlin:
+            text = _insert_after_main_activity_class_open(text, "", is_kotlin=True)
+            text = _ensure_import_line(text, "import android.os.Build")
+            text = _ensure_import_line(text, "import android.os.Bundle")
+            text = _ensure_import_line(text, "import android.view.View")
+            text = _ensure_import_line(text, "import android.view.WindowInsets")
+            text = _ensure_import_line(text, "import android.view.WindowManager")
+            method_block = (
+                "    // ConvertAPK: status-bar-hidden start (minimal)\n"
+                "    override fun onCreate(savedInstanceState: Bundle?) {\n"
+                "        super.onCreate(savedInstanceState)\n"
+                "        normalizeConvertApkWebViewInsets()\n"
+                "        applyConvertApkStatusBarHidden()\n"
+                "    }\n\n"
+                "    override fun onWindowFocusChanged(hasFocus: Boolean) {\n"
+                "        super.onWindowFocusChanged(hasFocus)\n"
+                "        if (hasFocus) {\n"
+                "            normalizeConvertApkWebViewInsets()\n"
+                "            applyConvertApkStatusBarHidden()\n"
+                "        }\n"
+                "    }\n\n"
+                "    private fun normalizeConvertApkWebViewInsets() {\n"
+                "        val convertApkWebView = bridge?.webView ?: return\n"
+                "        convertApkWebView.setPadding(0, 0, 0, 0)\n"
+                "        convertApkWebView.clipToPadding = false\n"
+                "        val parentView = convertApkWebView.parent as? View\n"
+                "        if (parentView != null) {\n"
+                "            parentView.setPadding(0, 0, 0, 0)\n"
+                "            parentView.fitsSystemWindows = false\n"
+                "        }\n"
+                "    }\n\n"
+                "    private fun applyConvertApkStatusBarHidden() {\n"
+                "        @Suppress(\"DEPRECATION\")\n"
+                "        window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)\n"
+                "        @Suppress(\"DEPRECATION\")\n"
+                "        window.clearFlags(WindowManager.LayoutParams.FLAG_FORCE_NOT_FULLSCREEN)\n"
+                "        @Suppress(\"DEPRECATION\")\n"
+                "        window.statusBarColor = android.graphics.Color.TRANSPARENT\n"
+                "        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {\n"
+                "            window.setDecorFitsSystemWindows(false)\n"
+                "            val controller = window.insetsController\n"
+                "            if (controller != null) {\n"
+                "                controller.hide(WindowInsets.Type.statusBars())\n"
+                "                controller.show(WindowInsets.Type.navigationBars())\n"
+                "            }\n"
+                "        } else {\n"
+                "            @Suppress(\"DEPRECATION\")\n"
+                "            window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)\n"
+                "            @Suppress(\"DEPRECATION\")\n"
+                "            window.decorView.systemUiVisibility =\n"
+                "                View.SYSTEM_UI_FLAG_FULLSCREEN or\n"
+                "                View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or\n"
+                "                View.SYSTEM_UI_FLAG_LAYOUT_STABLE\n"
+                "        }\n"
+                "    }\n"
+                "    // ConvertAPK: status-bar-hidden end (minimal)\n"
+            )
+        else:
+            text = _ensure_import_line(text, "import android.os.Build;")
+            text = _ensure_import_line(text, "import android.os.Bundle;")
+            text = _ensure_import_line(text, "import android.view.View;")
+            text = _ensure_import_line(text, "import android.view.WindowInsets;")
+            text = _ensure_import_line(text, "import android.view.WindowManager;")
+            method_block = (
+                "    // ConvertAPK: status-bar-hidden start (minimal)\n"
+                "    @Override\n"
+                "    protected void onCreate(Bundle savedInstanceState) {\n"
+                "        super.onCreate(savedInstanceState);\n"
+                "        normalizeConvertApkWebViewInsets();\n"
+                "        applyConvertApkStatusBarHidden();\n"
+                "    }\n\n"
+                "    @Override\n"
+                "    public void onWindowFocusChanged(boolean hasFocus) {\n"
+                "        super.onWindowFocusChanged(hasFocus);\n"
+                "        if (hasFocus) {\n"
+                "            normalizeConvertApkWebViewInsets();\n"
+                "            applyConvertApkStatusBarHidden();\n"
+                "        }\n"
+                "    }\n\n"
+                "    private void normalizeConvertApkWebViewInsets() {\n"
+                "        android.webkit.WebView convertApkWebView = getBridge() != null ? getBridge().getWebView() : null;\n"
+                "        if (convertApkWebView == null) {\n"
+                "            return;\n"
+                "        }\n"
+                "        convertApkWebView.setPadding(0, 0, 0, 0);\n"
+                "        convertApkWebView.setClipToPadding(false);\n"
+                "        android.view.ViewParent parent = convertApkWebView.getParent();\n"
+                "        if (parent instanceof View) {\n"
+                "            View parentView = (View) parent;\n"
+                "            parentView.setPadding(0, 0, 0, 0);\n"
+                "            parentView.setFitsSystemWindows(false);\n"
+                "        }\n"
+                "    }\n\n"
+                "    private void applyConvertApkStatusBarHidden() {\n"
+                "        getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);\n"
+                "        getWindow().clearFlags(WindowManager.LayoutParams.FLAG_FORCE_NOT_FULLSCREEN);\n"
+                "        getWindow().setStatusBarColor(android.graphics.Color.TRANSPARENT);\n"
+                "        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {\n"
+                "            getWindow().setDecorFitsSystemWindows(false);\n"
+                "            android.view.WindowInsetsController controller = getWindow().getInsetsController();\n"
+                "            if (controller != null) {\n"
+                "                controller.hide(WindowInsets.Type.statusBars());\n"
+                "                controller.show(WindowInsets.Type.navigationBars());\n"
+                "            }\n"
+                "        } else {\n"
+                "            getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);\n"
+                "            getWindow().getDecorView().setSystemUiVisibility(\n"
+                "                View.SYSTEM_UI_FLAG_FULLSCREEN |\n"
+                "                View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN |\n"
+                "                View.SYSTEM_UI_FLAG_LAYOUT_STABLE\n"
+                "            );\n"
+                "        }\n"
+                "    }\n"
+                "    // ConvertAPK: status-bar-hidden end (minimal)\n"
+            )
+        class_close = text.rfind("}")
+        if class_close != -1:
+            text = text[:class_close] + "\n" + method_block + "\n" + text[class_close:]
+    if text != original:
+        main_activity.write_text(text, encoding="utf-8")
+        _log(
+            on_log,
+            f"[MainActivity] {'enabled' if enable else 'disabled'} minimal status-bar-hidden: {main_activity}",
+        )
+
 def _sync_minimal_double_click_exit(
     main_activity: Path,
     enable: bool,
@@ -2440,10 +2735,21 @@ def run_local_build(
         project_dir.mkdir(parents=True, exist_ok=True)
         if zip_file.suffix.lower() != ".zip":
             raise RuntimeError("上传文件不是 ZIP 格式")
-        with zipfile.ZipFile(zip_file, "r") as zf:
-            zf.extractall(project_dir)
+        _extract_zip_safely(zip_file, project_dir)
+        _normalize_project_text_encodings(project_dir, on_log=on_log)
 
-        package_json_candidates = list(project_dir.rglob("package.json"))
+        package_json_candidates = [
+            candidate
+            for candidate in project_dir.rglob("package.json")
+            if candidate.is_file()
+            and not {"node_modules", ".git", "__macosx", "android"} & {part.lower() for part in candidate.parts}
+        ]
+        package_json_candidates.sort(
+            key=lambda item: (
+                len(item.relative_to(project_dir).parts),
+                len(str(item.relative_to(project_dir)).replace("\\", "/")),
+            )
+        )
         if not package_json_candidates:
             raise RuntimeError("ZIP 中未找到 package.json")
         package_json = package_json_candidates[0]
@@ -2451,6 +2757,8 @@ def run_local_build(
 
         pkg = _read_package_json(package_json)
         pkg["_root"] = project_root
+        if _is_next_project(pkg):
+            _ensure_next_config_output_export(project_root, on_log=on_log)
 
         # 兼容性兜底：如果上传包自带 android 工程，先清理后再由 Capacitor 重新生成，
         # 避免历史工程中的 gradle-wrapper/gradlew 损坏导致构建失败。
@@ -2466,11 +2774,25 @@ def run_local_build(
             _mark_npm_install(project_root)
         _run_cmd([npm_cmd, "run", "build"], cwd=project_root, env=process_env, on_log=on_log)
 
-        web_dir = project_root / "dist"
-        if not web_dir.exists():
-            web_dir = project_root / "build"
-        if not web_dir.exists():
-            raise RuntimeError("构建产物目录不存在: dist/build")
+        try:
+            web_dir = _find_web_build_dir(project_root)
+        except RuntimeError as build_dir_error:
+            if not _is_next_project(pkg):
+                raise build_dir_error
+            _log(on_log, "[Next.js] 构建后未检测到静态产物，尝试执行静态导出")
+            try:
+                _try_export_next_static_site(
+                    project_root=project_root,
+                    pkg=pkg,
+                    npm_cmd=npm_cmd,
+                    npx_cmd=npx_cmd,
+                    env=process_env,
+                    on_log=on_log,
+                )
+                web_dir = _find_web_build_dir(project_root)
+            except Exception as export_error:
+                _log(on_log, f"[Next.js] 静态导出失败：{str(export_error)}")
+                _raise_next_static_export_error()
 
         progress(35, "Step 2: 准备 Capacitor...")
         _log(on_log, "Step 2: 准备 Capacitor...")
@@ -2528,6 +2850,7 @@ def run_local_build(
         _patch_android_build_config(build_gradle, env, on_log=on_log)
     if not is_web_task and not is_html_task:
         package_name = str(env.get("PACKAGE_NAME", "")).strip()
+        status_bar_hidden_enabled = str(env.get("STATUS_BAR_HIDDEN", "false")).strip().lower() == "true"
         double_click_exit_enabled = str(env.get("DOUBLE_CLICK_EXIT", "true")).strip().lower() == "true"
         raw_download_mode = str(env.get("DOWNLOAD_MODE", "picker")).strip().lower()
         if raw_download_mode not in {"silent", "picker"}:
@@ -2544,6 +2867,11 @@ def run_local_build(
             _reset_main_activity_if_convertapk_injected(
                 main_candidates[0],
                 package_name,
+                on_log=on_log,
+            )
+            _sync_minimal_status_bar_hidden(
+                main_candidates[0],
+                enable=status_bar_hidden_enabled,
                 on_log=on_log,
             )
             _sync_minimal_double_click_exit(

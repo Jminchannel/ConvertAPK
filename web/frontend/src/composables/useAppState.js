@@ -114,10 +114,15 @@ export const useAppState = () => {
   const mode = ref('convert') // convert | web | html | desktop
   const featureFlags = ref({
     web_link_to_apk_enabled: false,
-    zip_to_desktop_enabled: false
+    zip_to_desktop_enabled: false,
+    client_login_enabled: true,
+    client_register_enabled: true,
   })
   const isWebModeEnabled = computed(() => Boolean(featureFlags.value.web_link_to_apk_enabled))
   const isDesktopModeEnabled = computed(() => Boolean(featureFlags.value.zip_to_desktop_enabled))
+  const isClientLoginEnabled = computed(() => featureFlags.value.client_login_enabled !== false)
+  const isClientRegisterEnabled = computed(() => featureFlags.value.client_register_enabled !== false)
+  const isAuthEntryEnabled = computed(() => isClientLoginEnabled.value || isClientRegisterEnabled.value)
   const desktopPortMin = 1024
   const desktopPortMax = 65535
   const desktopPortDefaultMin = 20000
@@ -772,6 +777,287 @@ export const useAppState = () => {
     setTimeout(() => (toast.value.show = false), 3000)
   }
 
+  const showAuthModal = ref(false)
+  const authMode = ref('login')
+  const authSubmitting = ref(false)
+  const githubAuthSubmitting = ref(false)
+  const authSubmitButtonShake = ref(false)
+  const authError = ref('')
+  const authForm = ref({
+    email: '',
+    password: '',
+    confirmPassword: ''
+  })
+  const authUser = ref(null)
+  const authEmailPattern = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/
+  let authShakeTimer = null
+
+  const isLoggedIn = computed(() => Boolean(api.getAuthToken() && authUser.value?.id))
+  const authDisplayName = computed(() => {
+    const user = authUser.value || {}
+    const githubLogin = String(user.github_login || '').trim()
+    const email = String(user.email || '').trim()
+    return githubLogin || email || ''
+  })
+
+  const extractAuthErrorDetail = (errorLike) => {
+    if (typeof errorLike === 'string') return errorLike.trim()
+    return String(errorLike?.response?.data?.detail || errorLike?.message || '').trim()
+  }
+
+  const resolveAuthErrorMessage = (errorLike) => {
+    const detail = extractAuthErrorDetail(errorLike).toLowerCase()
+    if (!detail) return t('auth.errorGeneral')
+    if (detail.includes('login is disabled by admin')) return t('auth.loginDisabled')
+    if (detail.includes('register is disabled by admin')) return t('auth.registerDisabled')
+    if (detail.includes('login_disabled')) return t('auth.loginDisabled')
+    if (detail.includes('email format')) return t('auth.errorEmailFormat')
+    if (detail.includes('password must be at least')) return t('auth.errorPasswordLength')
+    if (detail.includes('password mismatch')) return t('auth.errorPasswordConfirm')
+    if (detail.includes('email already exists')) return t('auth.errorEmailExists')
+    if (detail.includes('email or password is incorrect')) return t('auth.errorCredential')
+    if (detail.includes('client_id has been bound')) return t('auth.errorClientBound')
+    if (detail.includes('github oauth is not configured')) return t('auth.githubUnavailable')
+    if (detail.includes('invalid_state')) return t('auth.githubStateInvalid')
+    if (detail.includes('access_denied')) return t('auth.githubAccessDenied')
+    if (detail.includes('missing_code')) return t('auth.githubCallbackFailed')
+    if (detail.includes('missing_client_id')) return t('auth.githubCallbackFailed')
+    if (detail.includes('github_login_failed')) return t('auth.githubCallbackFailed')
+    return t('auth.errorGeneral')
+  }
+
+  const triggerAuthSubmitShake = () => {
+    authSubmitButtonShake.value = false
+    if (authShakeTimer) {
+      clearTimeout(authShakeTimer)
+      authShakeTimer = null
+    }
+    nextTick(() => {
+      authSubmitButtonShake.value = true
+      authShakeTimer = setTimeout(() => {
+        authSubmitButtonShake.value = false
+        authShakeTimer = null
+      }, 520)
+    })
+  }
+
+  const applyAuthError = (errorLike) => {
+    authError.value = resolveAuthErrorMessage(errorLike)
+    triggerAuthSubmitShake()
+  }
+
+  const resetAuthForm = (keepEmail = false) => {
+    const nextEmail = keepEmail ? String(authForm.value.email || '').trim() : ''
+    authForm.value = {
+      email: nextEmail,
+      password: '',
+      confirmPassword: ''
+    }
+  }
+
+  const openAuthModal = (mode = 'login') => {
+    const targetMode = mode === 'register' ? 'register' : 'login'
+    if (!isAuthEntryEnabled.value) {
+      showToast(t('auth.entryDisabled'), 'error')
+      return
+    }
+    if (targetMode === 'register' && !isClientRegisterEnabled.value) {
+      if (!isClientLoginEnabled.value) {
+        showToast(t('auth.entryDisabled'), 'error')
+        return
+      }
+      showToast(t('auth.registerDisabled'), 'error')
+      authMode.value = 'login'
+    } else if (targetMode === 'login' && !isClientLoginEnabled.value) {
+      if (!isClientRegisterEnabled.value) {
+        showToast(t('auth.entryDisabled'), 'error')
+        return
+      }
+      showToast(t('auth.loginDisabled'), 'error')
+      authMode.value = 'register'
+    } else {
+      authMode.value = targetMode
+    }
+    authError.value = ''
+    authSubmitButtonShake.value = false
+    if (authMode.value === 'login') {
+      authForm.value.confirmPassword = ''
+    }
+    showAuthModal.value = true
+  }
+
+  const closeAuthModal = () => {
+    showAuthModal.value = false
+    authError.value = ''
+    authSubmitButtonShake.value = false
+    authSubmitting.value = false
+    githubAuthSubmitting.value = false
+    resetAuthForm(true)
+  }
+
+  const switchAuthMode = (mode = 'login') => {
+    if (authSubmitting.value || githubAuthSubmitting.value) return
+    const targetMode = mode === 'register' ? 'register' : 'login'
+    if (targetMode === 'register' && !isClientRegisterEnabled.value) {
+      showToast(t('auth.registerDisabled'), 'error')
+      return
+    }
+    if (targetMode === 'login' && !isClientLoginEnabled.value) {
+      showToast(t('auth.loginDisabled'), 'error')
+      return
+    }
+    authMode.value = targetMode
+    authError.value = ''
+    authSubmitButtonShake.value = false
+    if (authMode.value === 'login') {
+      authForm.value.confirmPassword = ''
+    }
+  }
+
+  const validateAuthForm = () => {
+    if (authMode.value === 'login' && !isClientLoginEnabled.value) {
+      applyAuthError('login is disabled by admin')
+      return null
+    }
+    if (authMode.value === 'register' && !isClientRegisterEnabled.value) {
+      applyAuthError('register is disabled by admin')
+      return null
+    }
+    const email = String(authForm.value.email || '').trim().toLowerCase()
+    const password = String(authForm.value.password || '')
+    const confirmPassword = String(authForm.value.confirmPassword || '')
+    if (!authEmailPattern.test(email)) {
+      applyAuthError('email format is invalid')
+      return null
+    }
+    if (password.length < 6) {
+      applyAuthError('password must be at least 6 characters')
+      return null
+    }
+    if (authMode.value === 'register' && password !== confirmPassword) {
+      applyAuthError('password mismatch')
+      return null
+    }
+    return { email, password }
+  }
+
+  const syncAuthUser = async ({ silent = false } = {}) => {
+    const token = api.getAuthToken()
+    if (!token) {
+      authUser.value = null
+      return false
+    }
+    try {
+      const result = await api.getAuthMe(api.getClientId())
+      if (result?.authenticated && result?.user) {
+        authUser.value = result.user
+        return true
+      }
+      authUser.value = null
+      api.clearAuthToken()
+      return false
+    } catch (error) {
+      if (error?.response?.status === 401) {
+        authUser.value = null
+        api.clearAuthToken()
+        return false
+      }
+      if (!silent) {
+        showToast(t('auth.errorGeneral'), 'error')
+      }
+      return false
+    }
+  }
+
+  const submitAuthForm = async () => {
+    if (authSubmitting.value || githubAuthSubmitting.value) return
+    const normalized = validateAuthForm()
+    if (!normalized) return
+    authSubmitting.value = true
+    authError.value = ''
+    try {
+      const payload = {
+        email: normalized.email,
+        password: normalized.password,
+        clientId: api.getClientId()
+      }
+      const result = authMode.value === 'register'
+        ? await api.registerAccount(payload)
+        : await api.loginAccount(payload)
+      authUser.value = result?.user || null
+      closeAuthModal()
+      showToast(authMode.value === 'register' ? t('auth.registerSuccess') : t('auth.loginSuccess'), 'success')
+      await refreshTasks()
+    } catch (error) {
+      applyAuthError(error)
+    } finally {
+      authSubmitting.value = false
+    }
+  }
+
+  const consumeGithubCallbackHash = () => {
+    if (typeof window === 'undefined') return { handled: false, success: false, error: '' }
+    const rawHash = String(window.location.hash || '').replace(/^#/, '').trim()
+    if (!rawHash) return { handled: false, success: false, error: '' }
+    const hashParams = new URLSearchParams(rawHash)
+    const provider = String(hashParams.get('auth_provider') || '').trim().toLowerCase()
+    const callbackToken = String(hashParams.get('auth_token') || '').trim()
+    const callbackError = String(hashParams.get('auth_error') || '').trim()
+    if (provider !== 'github' && !callbackToken && !callbackError) {
+      return { handled: false, success: false, error: '' }
+    }
+    if (typeof window.history?.replaceState === 'function') {
+      const cleanUrl = `${window.location.pathname}${window.location.search}`
+      window.history.replaceState(null, '', cleanUrl)
+    }
+    if (callbackToken) {
+      api.setAuthToken(callbackToken)
+      return { handled: true, success: true, error: '' }
+    }
+    return { handled: true, success: false, error: callbackError }
+  }
+
+  const startGithubAuth = async () => {
+    if (authSubmitting.value || githubAuthSubmitting.value) return
+    if (!isClientLoginEnabled.value) {
+      applyAuthError('login is disabled by admin')
+      return
+    }
+    githubAuthSubmitting.value = true
+    authError.value = ''
+    try {
+      const returnUrl = typeof window === 'undefined'
+        ? ''
+        : `${window.location.origin}${window.location.pathname}${window.location.search}`
+      const result = await api.getGithubAuthAuthorize({
+        clientId: api.getClientId(),
+        returnUrl
+      })
+      const authorizeUrl = String(result?.authorize_url || '').trim()
+      if (!authorizeUrl) {
+        throw new Error('github authorize url is empty')
+      }
+      window.location.href = authorizeUrl
+    } catch (error) {
+      applyAuthError(error)
+    } finally {
+      githubAuthSubmitting.value = false
+    }
+  }
+
+  const logoutCurrentUser = async () => {
+    try {
+      await api.logoutAccount()
+    } catch {
+      // ignore
+    } finally {
+      authUser.value = null
+      closeAuthModal()
+      showToast(t('auth.logoutSuccess'), 'success')
+      await refreshTasks()
+    }
+  }
+
 
 
 
@@ -1217,28 +1503,22 @@ export const useAppState = () => {
       await refreshTasks()
     }, 1500)
   }
-
-  const consumeDesktopTaskLocally = (taskId, message) => {
-    const task = tasks.value.find((item) => item.id === taskId)
-    if (!task || String(task.mode || '') !== 'desktop') return
-    task.output_filename = null
-    task.download_url = null
-    if (message) {
-      task.message = message
-    }
-  }
-
   const downloadTaskArtifact = async (taskId, artifactType = 'apk') => {
     const task = tasks.value.find((item) => item.id === taskId)
     const isDesktopArtifact = artifactType !== 'signed' && String(task?.mode || '') === 'desktop'
     const url = artifactType === 'signed' ? getKeystoreUrl(taskId) : getDownloadUrl(taskId)
     closeDownloadMenu()
     if (!url) return
+    if (isDesktopArtifact && task?.desktop_output_expires_at) {
+      const expiresAt = new Date(task.desktop_output_expires_at).getTime()
+      if (Number.isFinite(expiresAt) && expiresAt <= Date.now()) {
+        showToast('EXE 下载已过期（生成成功后仅保留 30 分钟）', 'error')
+        scheduleDesktopTaskRefresh()
+        return
+      }
+    }
 
     const triggerDownload = () => {
-      if (isDesktopArtifact) {
-        consumeDesktopTaskLocally(taskId, 'EXE 下载已开始，仅可下载一次，下载后服务器将自动删除该安装包')
-      }
       triggerTaskDownload(url)
       if (isDesktopArtifact) {
         scheduleDesktopTaskRefresh()
@@ -2523,12 +2803,16 @@ export const useAppState = () => {
       const result = await api.getAdminFeatures()
       featureFlags.value = {
         web_link_to_apk_enabled: Boolean(result?.web_link_to_apk_enabled),
-        zip_to_desktop_enabled: Boolean(result?.zip_to_desktop_enabled)
+        zip_to_desktop_enabled: Boolean(result?.zip_to_desktop_enabled),
+        client_login_enabled: result?.client_login_enabled === undefined ? true : Boolean(result?.client_login_enabled),
+        client_register_enabled: result?.client_register_enabled === undefined ? true : Boolean(result?.client_register_enabled),
       }
     } catch {
       featureFlags.value = {
         web_link_to_apk_enabled: false,
-        zip_to_desktop_enabled: false
+        zip_to_desktop_enabled: false,
+        client_login_enabled: true,
+        client_register_enabled: true,
       }
     }
     if (!isWebModeEnabled.value && mode.value === 'web') {
@@ -2536,6 +2820,18 @@ export const useAppState = () => {
     }
     if (!isDesktopModeEnabled.value && mode.value === 'desktop') {
       mode.value = 'convert'
+    }
+    if (!isAuthEntryEnabled.value) {
+      if (showAuthModal.value) {
+        closeAuthModal()
+      }
+      return
+    }
+    if (authMode.value === 'register' && !isClientRegisterEnabled.value && isClientLoginEnabled.value) {
+      authMode.value = 'login'
+    }
+    if (authMode.value === 'login' && !isClientLoginEnabled.value && isClientRegisterEnabled.value) {
+      authMode.value = 'register'
     }
   }
   const fetchAnnouncements = async () => {
@@ -2701,6 +2997,15 @@ export const useAppState = () => {
     window.addEventListener('pagehide', releaseDesktopOutputsOnPageExit)
     window.addEventListener('beforeunload', releaseDesktopOutputsOnPageExit)
     startDesktopOutputHeartbeat()
+    const githubCallbackResult = consumeGithubCallbackHash()
+    const authReady = await syncAuthUser({ silent: true })
+    if (githubCallbackResult.handled) {
+      if (githubCallbackResult.success && authReady) {
+        showToast(t('auth.githubLoginSuccess'), 'success')
+      } else if (githubCallbackResult.error) {
+        showToast(resolveAuthErrorMessage(githubCallbackResult.error), 'error')
+      }
+    }
     await fetchAdminFeatures()
     await refreshTasks()
     await fetchAnnouncements()
@@ -2737,6 +3042,10 @@ export const useAppState = () => {
     if (mobileSwipeAnimTimer) {
       clearTimeout(mobileSwipeAnimTimer)
       mobileSwipeAnimTimer = null
+    }
+    if (authShakeTimer) {
+      clearTimeout(authShakeTimer)
+      authShakeTimer = null
     }
     mobileSwipeTracking.value = false
     mobileSwipeDragging.value = false
@@ -2780,6 +3089,24 @@ export const useAppState = () => {
     toggleDownloadMenu,
     closeDownloadMenu,
     handleClickOutside,
+    showAuthModal,
+    authMode,
+    authSubmitting,
+    githubAuthSubmitting,
+    authSubmitButtonShake,
+    authError,
+    authForm,
+    isLoggedIn,
+    authDisplayName,
+    isAuthEntryEnabled,
+    isClientLoginEnabled,
+    isClientRegisterEnabled,
+    openAuthModal,
+    closeAuthModal,
+    switchAuthMode,
+    submitAuthForm,
+    startGithubAuth,
+    logoutCurrentUser,
     mode,
     isWebModeEnabled,
     isDesktopModeEnabled,

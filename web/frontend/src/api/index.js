@@ -5,7 +5,39 @@ const api = axios.create({
   timeout: 30000
 })
 
-// 生成或获取客户端ID（用于设备/浏览器隔离）
+const authTokenStorageKey = 'apk_builder_auth_token'
+
+export const getAuthToken = () => {
+  if (typeof window === 'undefined') return ''
+  return localStorage.getItem(authTokenStorageKey) || ''
+}
+
+export const setAuthToken = (token) => {
+  if (typeof window === 'undefined') return
+  const normalizedToken = String(token || '').trim()
+  if (!normalizedToken) {
+    localStorage.removeItem(authTokenStorageKey)
+    return
+  }
+  localStorage.setItem(authTokenStorageKey, normalizedToken)
+}
+
+export const clearAuthToken = () => {
+  if (typeof window === 'undefined') return
+  localStorage.removeItem(authTokenStorageKey)
+}
+
+api.interceptors.request.use((config) => {
+  const token = getAuthToken()
+  if (token) {
+    if (!config.headers) {
+      config.headers = {}
+    }
+    config.headers.Authorization = `Bearer ${token}`
+  }
+  return config
+})
+
 export const getClientId = () => {
   if (window.appClient?.clientId) {
     return window.appClient.clientId
@@ -18,7 +50,60 @@ export const getClientId = () => {
   return clientId
 }
 
-// 上传ZIP文件
+export const registerAccount = async ({ email, password, clientId } = {}) => {
+  const payload = {
+    email: String(email || '').trim(),
+    password: String(password || ''),
+    client_id: clientId || getClientId()
+  }
+  const response = await api.post('/auth/register', payload)
+  if (response?.data?.token) {
+    setAuthToken(response.data.token)
+  }
+  return response.data
+}
+
+export const loginAccount = async ({ email, password, clientId } = {}) => {
+  const payload = {
+    email: String(email || '').trim(),
+    password: String(password || ''),
+    client_id: clientId || getClientId()
+  }
+  const response = await api.post('/auth/login', payload)
+  if (response?.data?.token) {
+    setAuthToken(response.data.token)
+  }
+  return response.data
+}
+
+export const getAuthMe = async (clientId) => {
+  const response = await api.get('/auth/me', {
+    params: { client_id: clientId || getClientId() }
+  })
+  return response.data
+}
+
+export const logoutAccount = async () => {
+  try {
+    const response = await api.post('/auth/logout')
+    return response.data
+  } finally {
+    clearAuthToken()
+  }
+}
+
+export const getGithubAuthAuthorize = async ({ clientId, returnUrl } = {}) => {
+  const normalizedClientId = clientId || getClientId()
+  const normalizedReturnUrl = String(returnUrl || '').trim()
+  const response = await api.get('/auth/github/login', {
+    params: {
+      client_id: normalizedClientId,
+      return_url: normalizedReturnUrl || undefined
+    }
+  })
+  return response.data
+}
+
 export const uploadFile = async (file, onProgress) => {
   const formData = new FormData()
   formData.append('file', file)
@@ -37,7 +122,7 @@ export const uploadFile = async (file, onProgress) => {
   return response.data
 }
 
-// 上传应用图标
+// 濠电偞鍨堕幐鎼佹晝閿濆洦顫曢柤绋跨仛閸庣喖鏌￠崘銊モ偓褰掑汲韫囨稒鐓曢柕澹啩澹曢梺?
 export const uploadIcon = async (file) => {
   const formData = new FormData()
   formData.append('file', file)
@@ -50,7 +135,7 @@ export const uploadIcon = async (file) => {
   return response.data
 }
 
-// 上传HTML文件
+// 濠电偞鍨堕幐鎼佹晝閿濆洦顫曠紒鍌涚炕ML闂備礁鎼崐绋棵洪敐鍛瀻?
 export const uploadHtml = async (file, onProgress) => {
   const formData = new FormData()
   formData.append('file', file)
@@ -70,7 +155,7 @@ export const uploadHtml = async (file, onProgress) => {
 }
 
 
-// 上传签名文件（.jks / .keystore）
+// 濠电偞鍨堕幐鎼佹晝閿濆洦顫曢柛鎾茶兌妞规娊鏌熼鍡楀閳ь剚濞婇弻锟犲磼濮橆厾鐓戝┑鐐叉閸ㄤ粙寮?jks / .keystore闂?
 export const scanExternalLinks = async (payload) => {
   const response = await api.post('/external-links/scan', payload || {})
   return response.data
@@ -93,7 +178,7 @@ export const probeUrl = async (url) => {
   return response.data
 }
 
-// 创建构建任务
+// 闂備礁鎲＄敮妤冪矙閹寸姷纾介柟鎹愵嚙閸戠娀鏌涢弴銊ヤ簽缂佹唻绠戦湁闁绘ü璀﹂崵娆忊攽?
 // taskData: { filename, icon_filename, config, reuse_keystore_from }
 export const createTask = async (taskData) => {
   const clientId = getClientId()
@@ -101,21 +186,21 @@ export const createTask = async (taskData) => {
   return response.data
 }
 
-// 获取任务列表（按client_id筛选）
+// 闂備礁鍚嬮崕鎶藉床閼艰翰浜归柛銉ｅ妿椤╃兘鎮归崶銊ョ祷妞ゎ偁鍊濋弻娑㈠箳閹垮啯鐣介梺闈涙閸熸挳寮澶婇唶闁绘棃顥撳Ο鍝籰ient_id缂傚倷鐒︾粙鎺楁儎椤栫偛鐒垫い鎺嗗亾妞ぱ€鍋撶紓?
 export const getTasks = async () => {
   const clientId = getClientId()
   const response = await api.get('/tasks', { params: { client_id: clientId } })
   return response.data
 }
 
-// 获取任务详情
+// 闂備礁鍚嬮崕鎶藉床閼艰翰浜归柛銉ｅ妿椤╃兘鎮归崶銊ョ祷妞ゎ偁鍊濋幃褰掑炊閻戣姤顎嶉梺?
 export const getTask = async (taskId) => {
   const clientId = getClientId()
   const response = await api.get(`/tasks/${taskId}`, { params: { client_id: clientId } })
   return response.data
 }
 
-// 删除任务
+// 闂備礁鎲＄敮鐐寸箾閳ь剚绻涢崨顓烆劉缂佸倹甯為幏鐘诲箵閹烘繃鍖?
 export const deleteTask = async (taskId) => {
   const clientId = getClientId()
   const response = await api.delete(`/tasks/${taskId}`, { params: { client_id: clientId } })
@@ -128,42 +213,42 @@ export const cancelRunningTasks = async () => {
   return response.data
 }
 
-// 开始构建
+// 闁诲孩顔栭崰鎺楀磻閹炬枼鏀芥い鏃傗拡閸庢劙鏌ｆ惔顔肩仩妞?
 export const startTask = async (taskId) => {
   const clientId = getClientId()
   const response = await api.post(`/tasks/${taskId}/start`, null, { params: { client_id: clientId } })
   return response.data
 }
 
-// 重试任务
+// 闂傚倷鐒﹁ぐ鍐矓閻戣姤鍎婃い鏍ㄧ〒椤╃兘鎮归崶銊ョ祷妞?
 export const retryTask = async (taskId) => {
   const clientId = getClientId()
   const response = await api.post(`/tasks/${taskId}/retry`, null, { params: { client_id: clientId } })
   return response.data
 }
 
-// 取消指定任务
+// 闂備礁鎲￠悷锕傛偋濡ゅ啰鐭撻柣鎴ｆ缁犱即鏌涢妷鎴濇噺濮ｅ孩绻涚€电鞋妞ゆ泦鍕弿?
 export const cancelTask = async (taskId) => {
   const clientId = getClientId()
   const response = await api.post(`/tasks/${taskId}/cancel`, { client_id: clientId })
   return response.data
 }
 
-// 更新任务（发布新版本）
+// 闂備礁鎼ú銈夋偤閵娾晛钃熷┑鐘插暟椤╃兘鎮归崶銊ョ祷妞ゎ偁鍊濋弻銊モ槈濡厧顣洪悷婊勬緲閸婂寮鈧畷姗€鍩￠崒婊冨笌闂備胶绮〃鍛存偋婵犲偊鑰垮ù鐓庣摠閺?
 export const updateTask = async (taskId, updateData) => {
   const clientId = getClientId()
   const response = await api.put(`/tasks/${taskId}`, { ...updateData, client_id: clientId })
   return response.data
 }
 
-// 获取任务日志
+// 闂備礁鍚嬮崕鎶藉床閼艰翰浜归柛銉ｅ妿椤╃兘鎮归崶銊ョ祷妞ゎ偁鍊濋弻锟犲礃閿曗偓閸旀氨绱?
 export const getTaskLogs = async (taskId, lines = 100) => {
   const clientId = getClientId()
   const response = await api.get(`/tasks/${taskId}/logs`, { params: { lines, client_id: clientId } })
   return response.data
 }
 
-// 获取下载链接
+// 闂備礁鍚嬮崕鎶藉床閼艰翰浜归柛銉ｅ妿閳绘棃鎮楅敐搴″箺缂佷椒鍗冲娲礈瑜嶆禍楣冩偨?
 export const getDownloadUrl = (taskId) => {
   const clientId = getClientId()
   return `/api/download/${taskId}?client_id=${encodeURIComponent(clientId)}`
@@ -184,7 +269,7 @@ export const sendReleaseDesktopOutputsBeacon = () => {
     try {
       return navigator.sendBeacon(url, new Blob([], { type: 'text/plain;charset=UTF-8' }))
     } catch (error) {
-      // 忽略 beacon 失败并回退到 fetch
+      // 闂傚鍋勫ú銊╁疾椤愶箑姹?beacon 濠电姰鍨洪崕鑲╁垝閸撗勫枂闁挎洖鍊诲畵渚€鎮归搹鐟板妺缂佲偓閳ь剟姊绘笟鍥т簮闁稿鎹囬弻?fetch
     }
   }
   if (typeof fetch === 'function') {
@@ -207,13 +292,13 @@ export const getIconUrl = (taskId) => {
   return `/api/icon/${taskId}?client_id=${encodeURIComponent(clientId)}`
 }
 
-// 获取构建队列状态
+// 闂備礁鍚嬮崕鎶藉床閼艰翰浜归柛銉墮閸戠娀鏌涢弴銊ヤ簽缂佹唻绠撳濠氬礃椤忓嫭鐎婚梺鍓茬厛娴滎亪骞冮埡鍛殝缁剧増锚娴?
 export const getQueueStatus = async () => {
   const response = await api.get('/queue/status')
   return response.data
 }
 
-// 获取构建环境状态
+// 闂備礁鍚嬮崕鎶藉床閼艰翰浜归柛銉墮閸戠娀鏌涢弴銊ヤ簽缂佹唻绠撻弻锝咁煥鎼达紕浠╁銈忕祷閸旀垿骞冮埡鍛殝缁剧増锚娴?
 export const getEnvStatus = async () => {
   try {
     const response = await api.get('/env/status')
@@ -227,7 +312,7 @@ export const getEnvStatus = async () => {
   }
 }
 
-// 准备构建环境
+// 闂備礁鎲￠崹闈浳涘Δ鍚藉洭顢楅崟顐㈠殤闂佸憡娲﹂崑鍡欐閿曞倹鐓熸繝濠傞閻忕姵銇?
 export const prepareEnv = async (force = false) => {
   try {
     const response = await api.post('/env/prepare', { force })
@@ -252,7 +337,7 @@ export const prepareEnv = async (force = false) => {
   }
 }
 
-// 获取工具链配置
+// 闂備礁鍚嬮崕鎶藉床閼艰翰浜归柛銉戝苯鏅犻梺闈涱槶閸庡崬顕ラ弮鍫熲拺濡わ絽鍟伴悾娲煕濡鈧妲?
 export const getEnvConfig = async () => {
   try {
     const response = await api.get('/env/config')
@@ -266,7 +351,7 @@ export const getEnvConfig = async () => {
   }
 }
 
-// 设置工具链配置
+// 闂佽崵濮崇粈浣规櫠娴犲鍋柛鈩冾殢閸熷懘鏌曟径鍫濆姎鐎电増妫冨鐑樸偅閸愵亞鏆梺鍛娗滈崐妤冩?
 export const setEnvConfig = async (
   toolchainRoot,
   migrate = false,
@@ -303,7 +388,7 @@ export const setEnvConfig = async (
   }
 }
 
-// 管理后台公告
+// 缂傚倷鑳舵刊瀵告閺囥垹绠栧┑鐘叉搐鐟欙箓骞栫划鍏夊亾閹惰棄褰欓梻浣侯焾濞存岸宕滃▎鎾崇疅?
 export const getAdminAnnouncements = async () => {
   const response = await api.get('/adminhub/announcements')
   return response.data
@@ -314,25 +399,25 @@ export const getAdminFeatures = async () => {
   return response.data
 }
 
-// 更新检查
+// 闂備礁鎼ú銈夋偤閵娾晛钃熷┑鐘蹭迹濞戙垹鐒垫い鎺戝閽?
 export const checkUpdate = async (version) => {
   const response = await api.get('/adminhub/update-check', { params: { version } })
   return response.data
 }
 
-// 系统信息
+// 缂傚倷绶￠崹闈涚暦閻㈤潧鍨濋柣鎴烆焽閳瑰秹鏌嶉埡浣告殨缂?
 export const getSystemInfo = async () => {
   const response = await api.get('/system/info')
   return response.data
 }
 
-// 获取当前版本
+// 闂備礁鍚嬮崕鎶藉床閼艰翰浜归柛銉簵娴滃綊鏌熼幆褍鏆辨い銈呮嚇閺岋絽螖閳ь剟鎮ф繝鍌﹁€?
 export const getAppVersion = async () => {
   const response = await api.get('/app/version')
   return response.data
 }
 
-// 反馈提交
+// 闂備礁鎲￠悷銉х矓瑜版帇鈧懘顢橀姀鐘殿唽闂佸綊鍋婃禍婵嬪船?
 export const submitFeedback = async (payload) => {
   const formData = new FormData()
   formData.append('client_id', payload.client_id)

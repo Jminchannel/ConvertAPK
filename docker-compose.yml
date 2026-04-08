@@ -17,6 +17,11 @@ services:
       - ADMIN_API_URL=http://admin-backend:9001
       - ADMIN_CLIENT_TOKEN=client-secret
       - ADMIN_UPLOAD_TASK_INPUT_ASSETS=false
+      - AUTH_GITHUB_CLIENT_ID=${AUTH_GITHUB_CLIENT_ID:-}
+      - AUTH_GITHUB_CLIENT_SECRET=${AUTH_GITHUB_CLIENT_SECRET:-}
+      - AUTH_GITHUB_CALLBACK_URL=${AUTH_GITHUB_CALLBACK_URL:-}
+      - AUTH_DEFAULT_RETURN_URL=${AUTH_DEFAULT_RETURN_URL:-}
+      - AUTH_REDIRECT_ALLOWED_ORIGINS=${AUTH_REDIRECT_ALLOWED_ORIGINS:-}
     volumes:
       - convertapk-data:/data
       - /var/run/docker.sock:/var/run/docker.sock

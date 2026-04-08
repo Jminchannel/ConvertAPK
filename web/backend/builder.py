@@ -1,7 +1,7 @@
 """
-APK Builder 模块
-负责与 apk-worker Docker 容器交互
-支持任务队列，限制并发构建数量
+APK Builder 妯″潡
+璐熻矗涓?apk-worker Docker 瀹瑰櫒浜や簰
+鏀寔浠诲姟闃熷垪锛岄檺鍒跺苟鍙戞瀯寤烘暟閲?
 """
 import os
 import json
@@ -12,7 +12,7 @@ import threading
 import time
 import queue
 import zipfile
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path, PurePosixPath
 from typing import Callable, Optional, List, Tuple
 
@@ -20,17 +20,17 @@ from local_builder import run_local_build
 import env_setup
 from admin_client import report_task_logs, upload_task_assets, report_task_status, flush_task_assets_queue
 
-# 项目根目录
+# 椤圭洰鏍圭洰褰?
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 APK_WORKER_DIR = PROJECT_ROOT / "apk-worker"
 INPUT_DIR = APK_WORKER_DIR / "input"
 OUTPUT_DIR = APK_WORKER_DIR / "output"
 KEYSTORE_DIR = APK_WORKER_DIR / "keystore"
 
-# 后端目录
+# 鍚庣鐩綍
 BACKEND_DIR = Path(__file__).parent
 
-# 数据目录（可配置，方便云服务器/容器化部署时把数据落在数据卷里）
+# 鏁版嵁鐩綍锛堝彲閰嶇疆锛屾柟渚夸簯鏈嶅姟鍣?瀹瑰櫒鍖栭儴缃叉椂鎶婃暟鎹惤鍦ㄦ暟鎹嵎閲岋級
 _data_dir_raw = os.getenv("APK_BUILDER_DATA_DIR", "").strip()
 if not _data_dir_raw:
     try:
@@ -52,9 +52,15 @@ else:
     else:
         DATA_DIR = BACKEND_DIR
 
-# 云部署推荐：backend 使用同一个数据卷保存 uploads/tasks/outputs/logs，
-# 并在调用 apk-builder 容器时把该数据卷挂载进去（避免宿主路径映射问题）
+# 浜戦儴缃叉帹鑽愶細backend 浣跨敤鍚屼竴涓暟鎹嵎淇濆瓨 uploads/tasks/outputs/logs锛?
+# 骞跺湪璋冪敤 apk-builder 瀹瑰櫒鏃舵妸璇ユ暟鎹嵎鎸傝浇杩涘幓锛堥伩鍏嶅涓昏矾寰勬槧灏勯棶棰橈級
 DATA_VOLUME = os.getenv("APK_BUILDER_DATA_VOLUME", "").strip()
+
+try:
+    DESKTOP_OUTPUT_RETENTION_MINUTES = max(int(os.getenv("DESKTOP_OUTPUT_RETENTION_MINUTES", "30") or "30"), 1)
+except ValueError:
+    DESKTOP_OUTPUT_RETENTION_MINUTES = 30
+DESKTOP_OUTPUT_RETENTION_DELTA = timedelta(minutes=DESKTOP_OUTPUT_RETENTION_MINUTES)
 
 _templates_dir_raw = os.getenv("APK_BUILDER_TEMPLATES_DIR", "").strip()
 if _templates_dir_raw:
@@ -67,7 +73,7 @@ else:
 
 
 def _ensure_writable_data_dir(preferred_dir: Path) -> Path:
-    """确保运行数据目录可写，避免因环境权限问题导致后端无法启动。"""
+    """确保数据目录可写；若不可写则自动回退到本地可写目录。"""
     fallback_dirs = [BACKEND_DIR / ".runtime-data"]
     if os.name == "nt":
         appdata_root = os.getenv("APPDATA", "").strip()
@@ -102,20 +108,20 @@ DATA_DIR = _ensure_writable_data_dir(DATA_DIR)
 UPLOAD_DIR = DATA_DIR / "uploads"
 BACKEND_OUTPUT_DIR = DATA_DIR / "outputs"
 LOGS_DIR = DATA_DIR / "logs"
-TASKS_DIR = DATA_DIR / "tasks"  # 每个任务的独立目录
+TASKS_DIR = DATA_DIR / "tasks"  # 姣忎釜浠诲姟鐨勭嫭绔嬬洰褰?
 TASK_INPUT_ASSETS_DIR = DATA_DIR / "task-inputs"
-GRADLE_WRAPPER_CACHE = DATA_DIR / "gradle-wrapper-cache"  # 全局 Gradle wrapper 缓存
+GRADLE_WRAPPER_CACHE = DATA_DIR / "gradle-wrapper-cache"  # 鍏ㄥ眬 Gradle wrapper 缂撳瓨
 NPM_CACHE_DIR = DATA_DIR / "npm-cache"
 AUTO_CLEAN_BUILD_OUTPUTS = os.getenv("APK_BUILDER_AUTO_CLEAN_OUTPUTS", "").strip().lower() in {"1", "true", "yes", "on"}
 
-# Gradle 缓存策略（解决“开始构建反应慢/要等几分钟”的问题）
-# - volume: 使用 Docker volume 持久化 /root/.gradle（推荐，跨任务复用且不需要拷贝大缓存）
-# - task:   使用任务目录下的 gradle 缓存（旧行为，会在任务启动时复制全局 wrapper 缓存，可能很慢）
+# Gradle 缂撳瓨绛栫暐锛堣В鍐斥€滃紑濮嬫瀯寤哄弽搴旀參/瑕佺瓑鍑犲垎閽熲€濈殑闂锛?
+# - volume: 浣跨敤 Docker volume 鎸佷箙鍖?/root/.gradle锛堟帹鑽愶紝璺ㄤ换鍔″鐢ㄤ笖涓嶉渶瑕佹嫹璐濆ぇ缂撳瓨锛?
+# - task:   浣跨敤浠诲姟鐩綍涓嬬殑 gradle 缂撳瓨锛堟棫琛屼负锛屼細鍦ㄤ换鍔″惎鍔ㄦ椂澶嶅埗鍏ㄥ眬 wrapper 缂撳瓨锛屽彲鑳藉緢鎱級
 GRADLE_CACHE_MODE = os.getenv("APK_BUILDER_GRADLE_CACHE_MODE", "volume").strip().lower()
 if GRADLE_CACHE_MODE not in {"volume", "task"}:
     GRADLE_CACHE_MODE = "volume"
 
-# 后端容器化 + DATA_VOLUME 模式下，task 方式会产生宿主路径挂载问题；这里直接强制使用 volume
+# 鍚庣瀹瑰櫒鍖?+ DATA_VOLUME 妯″紡涓嬶紝task 鏂瑰紡浼氫骇鐢熷涓昏矾寰勬寕杞介棶棰橈紱杩欓噷鐩存帴寮哄埗浣跨敤 volume
 if DATA_VOLUME and GRADLE_CACHE_MODE == "task":
     GRADLE_CACHE_MODE = "volume"
 
@@ -123,7 +129,7 @@ GRADLE_CACHE_VOLUME = os.getenv("APK_BUILDER_GRADLE_CACHE_VOLUME", "convertapk-g
 APK_BUILDER_IMAGE = os.getenv("APK_BUILDER_IMAGE", "apk-builder:latest").strip() or "apk-builder:latest"
 DESKTOP_BUILDER_IMAGE = os.getenv("DESKTOP_BUILDER_IMAGE", "desktop-builder:latest").strip() or "desktop-builder:latest"
 
-# 确保目录存在
+# 纭繚鐩綍瀛樺湪
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 BACKEND_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -311,7 +317,7 @@ def _restore_html_task_input(task_input_dir: Path) -> None:
             entry_name = str(PurePosixPath(*parts))
             index_candidates.append((len(parts), len(entry_name), entry_name))
         if not index_candidates:
-            raise FileNotFoundError(f"HTML输入缺少 index.html: {zip_file}")
+            raise FileNotFoundError(f"HTML杈撳叆缂哄皯 index.html: {zip_file}")
 
         index_candidates.sort(key=lambda item: (item[0], item[1], item[2]))
         normalized_index = PurePosixPath(index_candidates[0][2])
@@ -333,7 +339,7 @@ def _restore_html_task_input(task_input_dir: Path) -> None:
 
     html_index = html_assets_dir / "index.html"
     if not html_index.exists():
-        raise FileNotFoundError(f"HTML输入缺少 index.html: {zip_file}")
+        raise FileNotFoundError(f"HTML杈撳叆缂哄皯 index.html: {zip_file}")
     shutil.copy2(str(html_index), str(task_input_dir / "index.html"))
 
 
@@ -522,11 +528,23 @@ def _silent_upload_task_assets(task_id: str, task) -> None:
 GRADLE_WRAPPER_CACHE.mkdir(parents=True, exist_ok=True)
 
 
+def _decode_subprocess_output(raw: bytes) -> str:
+    """优先按 UTF-8 解码，失败时回退到 GB18030，减少中文日志乱码。"""
+    if not raw:
+        return ""
+    for encoding in ("utf-8", "gb18030"):
+        try:
+            return raw.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("utf-8", errors="replace")
+
+
 class APKBuilder:
-    """APK 构建器"""
+    """APK build helper."""
     
     def __init__(self):
-        # 确保目录存在
+        # 纭繚鐩綍瀛樺湪
         INPUT_DIR.mkdir(parents=True, exist_ok=True)
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         KEYSTORE_DIR.mkdir(parents=True, exist_ok=True)
@@ -547,44 +565,44 @@ class APKBuilder:
     
     def _copy_gradle_wrapper_cache(self, task_gradle_dir: Path):
         """
-        复制全局 Gradle wrapper 缓存到任务目录
-        这样可以避免每次构建都重新下载 Gradle 发行版
+        将全局 Gradle wrapper 缓存复制到任务目录。
+        避免每次构建都重新下载 Gradle 发行包。
         """
         global_wrapper_dir = GRADLE_WRAPPER_CACHE / "wrapper" / "dists"
         task_wrapper_dir = task_gradle_dir / "wrapper" / "dists"
         
-        # 如果全局缓存存在且任务目录没有 wrapper
+        # 濡傛灉鍏ㄥ眬缂撳瓨瀛樺湪涓斾换鍔＄洰褰曟病鏈?wrapper
         if global_wrapper_dir.exists() and not task_wrapper_dir.exists():
-            print(f"[Gradle] 复制全局 Gradle wrapper 缓存到任务目录...")
+            print(f"[Gradle] 澶嶅埗鍏ㄥ眬 Gradle wrapper 缂撳瓨鍒颁换鍔＄洰褰?..")
             task_wrapper_dir.parent.mkdir(parents=True, exist_ok=True)
             shutil.copytree(global_wrapper_dir, task_wrapper_dir)
-            print(f"[Gradle] 缓存复制完成")
+            print(f"[Gradle] 缂撳瓨澶嶅埗瀹屾垚")
         elif task_wrapper_dir.exists():
-            print(f"[Gradle] 任务已有 Gradle wrapper 缓存，跳过复制")
+            print(f"[Gradle] 任务目录已存在 Gradle wrapper 缓存，跳过复制")
     
     def _save_gradle_wrapper_cache(self, task_gradle_dir: Path):
         """
-        将任务的 Gradle wrapper 缓存保存到全局目录
-        供后续任务复用
+        灏嗕换鍔＄殑 Gradle wrapper 缂撳瓨淇濆瓨鍒板叏灞€鐩綍
+        渚涘悗缁换鍔″鐢?
         """
         task_wrapper_dir = task_gradle_dir / "wrapper" / "dists"
         global_wrapper_dir = GRADLE_WRAPPER_CACHE / "wrapper" / "dists"
         
-        # 如果任务有 wrapper 且全局缓存不存在或为空
+        # 濡傛灉浠诲姟鏈?wrapper 涓斿叏灞€缂撳瓨涓嶅瓨鍦ㄦ垨涓虹┖
         if task_wrapper_dir.exists():
             try:
-                # 只获取目录，忽略文件（如 CACHEDIR.TAG）
+                # 鍙幏鍙栫洰褰曪紝蹇界暐鏂囦欢锛堝 CACHEDIR.TAG锛?
                 task_versions = [d for d in task_wrapper_dir.iterdir() if d.is_dir()]
                 
-                # 检查是否有新版本需要保存
+                # 妫€鏌ユ槸鍚︽湁鏂扮増鏈渶瑕佷繚瀛?
                 for version_dir in task_versions:
                     global_version_dir = global_wrapper_dir / version_dir.name
                     if not global_version_dir.exists():
-                        print(f"[Gradle] 保存新的 Gradle 版本到全局缓存: {version_dir.name}")
+                        print(f"[Gradle] 淇濆瓨鏂扮殑 Gradle 鐗堟湰鍒板叏灞€缂撳瓨: {version_dir.name}")
                         global_wrapper_dir.mkdir(parents=True, exist_ok=True)
                         shutil.copytree(version_dir, global_version_dir)
             except Exception as e:
-                print(f"[Gradle] 保存缓存时出错（不影响构建）: {e}")
+                print(f"[Gradle] 淇濆瓨缂撳瓨鏃跺嚭閿欙紙涓嶅奖鍝嶆瀯寤猴級: {e}")
     
     def prepare_build(
         self,
@@ -616,30 +634,30 @@ class APKBuilder:
         cdn_localize_preprocessed: bool = False,
     ) -> dict:
         """
-        准备构建环境
-        - 文件已在创建任务时放入任务目录
-        - 这里只需验证并清理output目录
-        - 为任务创建独立的Gradle缓存目录（避免并发冲突）
-        - 复用全局 Gradle wrapper 缓存（避免重复下载）
+        鍑嗗鏋勫缓鐜
+        - 鏂囦欢宸插湪鍒涘缓浠诲姟鏃舵斁鍏ヤ换鍔＄洰褰?
+        - 杩欓噷鍙渶楠岃瘉骞舵竻鐞唎utput鐩綍
+        - 涓轰换鍔″垱寤虹嫭绔嬬殑Gradle缂撳瓨鐩綍锛堥伩鍏嶅苟鍙戝啿绐侊級
+        - 澶嶇敤鍏ㄥ眬 Gradle wrapper 缂撳瓨锛堥伩鍏嶉噸澶嶄笅杞斤級
         """
-        # 任务目录（已在创建任务时创建）
+        # 浠诲姟鐩綍锛堝凡鍦ㄥ垱寤轰换鍔℃椂鍒涘缓锛?
         task_dir = TASKS_DIR / task_id
         task_input_dir = task_dir / "input"
         task_output_dir = task_dir / "output"
         task_keystore_dir = task_dir / "keystore"
-        task_gradle_dir = task_dir / "gradle"  # task 模式下的 Gradle 缓存
+        task_gradle_dir = task_dir / "gradle"  # task 妯″紡涓嬬殑 Gradle 缂撳瓨
         ensure_task_input_assets(task_id, task_input_dir)
         
-        # 验证任务目录存在
+        # 楠岃瘉浠诲姟鐩綍瀛樺湪
         if not task_dir.exists():
-            raise FileNotFoundError(f"任务目录不存在: {task_id}")
+            raise FileNotFoundError(f"浠诲姟鐩綍涓嶅瓨鍦? {task_id}")
         
-        # 验证输入文件存在
+        # 楠岃瘉杈撳叆鏂囦欢瀛樺湪
         task_mode_normalized = (task_mode or "convert").strip().lower()
         if task_mode_normalized in {"convert", "desktop"}:
             zip_file = task_input_dir / "project.zip"
             if not zip_file.exists():
-                raise FileNotFoundError(f"ZIP文件不存在: {zip_file}")
+                raise FileNotFoundError(f"ZIP鏂囦欢涓嶅瓨鍦? {zip_file}")
         elif task_mode_normalized == "html":
             if (
                 (task_input_dir / "project.zip").exists()
@@ -651,21 +669,21 @@ class APKBuilder:
                 _restore_html_task_input(task_input_dir)
             html_file = task_input_dir / "index.html"
             if not html_file.exists():
-                raise FileNotFoundError(f"HTML文件不存在: {html_file}")
+                raise FileNotFoundError(f"HTML鏂囦欢涓嶅瓨鍦? {html_file}")
         
-        # task 模式：创建 Gradle 缓存目录并复用全局 wrapper 缓存（避免重复下载 Gradle）
-        # volume 模式：Gradle 缓存由 Docker volume 持久化，不需要在这里做任何拷贝
+        # task 妯″紡锛氬垱寤?Gradle 缂撳瓨鐩綍骞跺鐢ㄥ叏灞€ wrapper 缂撳瓨锛堥伩鍏嶉噸澶嶄笅杞?Gradle锛?
+        # volume 妯″紡锛欸radle 缂撳瓨鐢?Docker volume 鎸佷箙鍖栵紝涓嶉渶瑕佸湪杩欓噷鍋氫换浣曟嫹璐?
         if GRADLE_CACHE_MODE == "task":
             task_gradle_dir.mkdir(parents=True, exist_ok=True)
             self._copy_gradle_wrapper_cache(task_gradle_dir)
         
-        # 清理output目录（重试时需要）
+        # 娓呯悊output鐩綍锛堥噸璇曟椂闇€瑕侊級
         if task_output_dir.exists():
             for f in task_output_dir.iterdir():
                 if f.is_file():
                     f.unlink()
         
-        # 检查是否复用签名
+        # 妫€鏌ユ槸鍚﹀鐢ㄧ鍚?
         keystore_reused = False
         keystore_file = task_keystore_dir / "release.keystore"
         if keystore_file.exists():
@@ -673,7 +691,7 @@ class APKBuilder:
         if reuse_keystore_from and keystore_file.exists():
             keystore_reused = True
         
-        # 构建环境变量（包含任务专属目录路径）
+        # 鏋勫缓鐜鍙橀噺锛堝寘鍚换鍔′笓灞炵洰褰曡矾寰勶級
         output_format_normalized = (output_format or "apk").strip().lower()
         if task_mode_normalized == "desktop":
             output_format_normalized = "exe"
@@ -757,7 +775,7 @@ class APKBuilder:
             # Comma-separated permissions (prefer full names, e.g. android.permission.CAMERA)
             "PERMISSIONS": ",".join([str(p).strip() for p in (permissions or []) if str(p).strip()]),
             "TASK_ID": task_id,
-            # 任务专属目录（相对于apk-worker的路径）
+            # 浠诲姟涓撳睘鐩綍锛堢浉瀵逛簬apk-worker鐨勮矾寰勶級
             "TASK_INPUT_DIR": str(task_input_dir.resolve()),
             "TASK_OUTPUT_DIR": str(task_output_dir.resolve()),
             "TASK_KEYSTORE_DIR": str(task_keystore_dir.resolve()),
@@ -765,8 +783,8 @@ class APKBuilder:
             "GRADLE_CACHE_VOLUME": GRADLE_CACHE_VOLUME,
             "DATA_DIR": str(DATA_DIR),
             "DATA_VOLUME": DATA_VOLUME,
-            "TASK_GRADLE_DIR": str(task_gradle_dir.resolve()),  # task 模式下使用
-            # 标记是否复用了keystore（如果复用则不允许重新生成）
+            "TASK_GRADLE_DIR": str(task_gradle_dir.resolve()),  # task 妯″紡涓嬩娇鐢?
+            # 鏍囪鏄惁澶嶇敤浜唊eystore锛堝鏋滃鐢ㄥ垯涓嶅厑璁搁噸鏂扮敓鎴愶級
             "KEYSTORE_REUSED": "true" if keystore_reused else "false",
             "GRADLE_USER_HOME": str(DATA_DIR / "gradle-user-home"),
             "NPM_CONFIG_CACHE": npm_cache_dir,
@@ -785,11 +803,11 @@ class APKBuilder:
         on_log: Optional[Callable[[str], None]] = None,
         on_complete: Optional[Callable[[bool, str, Optional[str]], None]] = None
     ):
-        """运行 Docker 构建。"""
+        """执行 Docker 构建并实时写入日志。"""
         log_file = LOGS_DIR / f"{task_id}.log"
 
         def log(message: str):
-            """写入日志。"""
+            """写入单行日志并触发回调。"""
             timestamp = datetime.now().strftime("%H:%M:%S")
             log_line = f"[{timestamp}] {message}"
             with open(log_file, "a", encoding="utf-8") as f:
@@ -803,33 +821,33 @@ class APKBuilder:
         docker_image = DESKTOP_BUILDER_IMAGE if is_desktop_task else APK_BUILDER_IMAGE
 
         try:
-            log("========== 构建任务开始 ==========")
-            log(f"任务ID: {task_id}")
-            log(f"应用名称: {env.get('APP_NAME', 'N/A')}")
-            log(f"包名: {env.get('PACKAGE_NAME', 'N/A')}")
-            log(f"版本: {env.get('VERSION_NAME', 'N/A')}")
-            log(f"构建模式: {'desktop' if is_desktop_task else 'android'}")
-            log(f"构建镜像: {docker_image}")
+            log("========== Build Task Started ==========")
+            log(f"Task ID: {task_id}")
+            log(f"App Name: {env.get('APP_NAME', 'N/A')}")
+            log(f"Package Name: {env.get('PACKAGE_NAME', 'N/A')}")
+            log(f"Version: {env.get('VERSION_NAME', 'N/A')}")
+            log(f"Build Mode: {'desktop' if is_desktop_task else 'android'}")
+            log(f"Build Image: {docker_image}")
             log("")
 
             if on_progress:
-                on_progress(5, "准备 Docker 环境...")
-            log("Step 0: 准备 Docker 环境...")
-            log(f"任务输入目录: {env.get('TASK_INPUT_DIR', 'N/A')}")
-            log(f"任务输出目录: {env.get('TASK_OUTPUT_DIR', 'N/A')}")
-            log(f"任务密钥目录: {env.get('TASK_KEYSTORE_DIR', 'N/A')}")
+                on_progress(5, "Preparing Docker environment...")
+            log("Step 0: Preparing Docker environment...")
+            log(f"Task Input Dir: {env.get('TASK_INPUT_DIR', 'N/A')}")
+            log(f"Task Output Dir: {env.get('TASK_OUTPUT_DIR', 'N/A')}")
+            log(f"Task Keystore Dir: {env.get('TASK_KEYSTORE_DIR', 'N/A')}")
 
             if env.get("GRADLE_CACHE_MODE") == "task":
                 gradle_mount = f"{env['TASK_GRADLE_DIR']}:/root/.gradle"
-                log(f"[Gradle] 缓存模式: task ({env.get('TASK_GRADLE_DIR', '')})")
+                log(f"[Gradle] Cache mode: task ({env.get('TASK_GRADLE_DIR', '')})")
             else:
                 volume_name = env.get("GRADLE_CACHE_VOLUME") or GRADLE_CACHE_VOLUME
                 gradle_mount = f"{volume_name}:/root/.gradle"
-                log(f"[Gradle] 缓存模式: volume ({volume_name})")
+                log(f"[Gradle] Cache mode: volume ({volume_name})")
 
             task_data_volume = env.get("DATA_VOLUME") or DATA_VOLUME
             if task_data_volume:
-                log(f"[Data] 挂载模式: volume ({task_data_volume})")
+                log(f"[Data] Mount mode: volume ({task_data_volume})")
                 task_mount_args = [
                     "-v",
                     f"{task_data_volume}:/data",
@@ -843,7 +861,7 @@ class APKBuilder:
                     f"KEYSTORE_DIR=/data/tasks/{task_id}/keystore",
                 ]
             else:
-                log("[Data] 挂载模式: bind")
+                log("[Data] Mount mode: bind")
                 task_mount_args = [
                     "-v",
                     f"{env['TASK_INPUT_DIR']}:/workspace/input",
@@ -919,10 +937,7 @@ class APKBuilder:
                     cmd += ["-e", "ELECTRON_CACHE=/data/electron-cache"]
                     cmd += ["-e", "ELECTRON_BUILDER_CACHE=/data/electron-builder-cache"]
                 else:
-                    cmd += [
-                        "-e",
-                        f"PROJECT_DIR=/data/tasks/{task_id}/project",
-                    ]
+                    cmd += ["-e", f"PROJECT_DIR=/data/tasks/{task_id}/project"]
 
             gradle_dist_mirrors = os.environ.get("GRADLE_DIST_MIRRORS", "").strip()
             if gradle_dist_mirrors and not is_desktop_task:
@@ -934,15 +949,14 @@ class APKBuilder:
             process_env = os.environ.copy()
             process_env.update(env)
             process_env.update(env_setup.get_npm_config())
-
-            if on_progress:
-                on_progress(10, "启动 Docker 容器构建...")
-            log("启动 Docker 容器...")
-            log(f"工作目录: {APK_WORKER_DIR}")
-            log("")
-
             process_env["PYTHONIOENCODING"] = "utf-8"
             process_env["LANG"] = "en_US.UTF-8"
+
+            if on_progress:
+                on_progress(10, "Starting Docker container...")
+            log("Starting Docker container...")
+            log(f"Working Directory: {APK_WORKER_DIR}")
+            log("")
 
             process = subprocess.Popen(
                 cmd,
@@ -956,66 +970,59 @@ class APKBuilder:
 
             if is_desktop_task:
                 progress_map = {
-                    "Step 0": (15, "准备工作..."),
-                    "Step 1": (25, "解压 ZIP 项目..."),
-                    "Step 2": (40, "准备前端产物..."),
-                    "Step 3": (55, "生成 Electron 桌面壳..."),
-                    "Step 4": (70, "安装 Electron 依赖..."),
-                    "Step 5": (85, "打包桌面应用..."),
-                    "Electron 桌面应用构建成功": (95, "桌面应用构建完成，正在处理输出..."),
-                    "[DesktopBuilder] output:": (95, "桌面应用构建完成，正在处理输出..."),
+                    "Step 0": (15, "Preparing build environment..."),
+                    "Step 1": (25, "Unzipping project..."),
+                    "Step 2": (40, "Installing dependencies..."),
+                    "Step 3": (55, "Building desktop assets..."),
+                    "Step 4": (70, "Packaging Electron app..."),
+                    "Step 5": (85, "Signing and organizing output..."),
                 }
-                success_markers = ("Electron 桌面应用构建成功", "[DesktopBuilder] output:")
+                success_markers = ("[DesktopBuilder] output:",)
             else:
                 progress_map = {
-                    "Step 0": (15, "准备工作..."),
-                    "Step 1": (25, "构建 Web 项目..."),
-                    "Step 2": (35, "初始化 Capacitor..."),
-                    "Step 3": (45, "添加 Android 平台..."),
-                    "Step 4": (55, "设置应用图标..."),
-                    "Step 5": (60, "同步项目代码..."),
-                    "Step 6": (65, "配置 Android 项目..."),
-                    "Step 7": (70, "构建 Release 产物..."),
-                    "Step 8": (80, "准备签名密钥..."),
-                    "Step 9": (85, "处理构建产物..."),
-                    "Step 10": (90, "签名构建产物..."),
-                    "APK 构建完成": (95, "构建完成，正在处理输出..."),
-                    "AAB 构建完成": (95, "构建完成，正在处理输出..."),
+                    "Step 0": (15, "Preparing build environment..."),
+                    "Step 1": (25, "Building web project..."),
+                    "Step 2": (35, "Syncing Capacitor..."),
+                    "Step 3": (45, "Applying Android config..."),
+                    "Step 4": (55, "Processing app icon..."),
+                    "Step 5": (60, "Processing splash icon..."),
+                    "Step 6": (65, "Patching Android code..."),
+                    "Step 7": (70, "Building release package..."),
+                    "Step 8": (80, "Preparing signing keys..."),
+                    "Step 9": (85, "Aligning APK / preparing AAB..."),
+                    "Step 10": (90, "Signing APK / AAB..."),
                 }
-                success_markers = ("APK 构建完成", "AAB 构建完成")
+                success_markers = ("APK ", "AAB ")
 
             build_completed = False
+            stdout_iter = process.stdout if process and process.stdout is not None else []
 
-            for raw_line in process.stdout:
-                try:
-                    line = raw_line.decode("utf-8", errors="replace").strip()
-                except Exception:
-                    line = raw_line.decode("latin-1", errors="replace").strip()
+            for raw_line in stdout_iter:
+                line = _decode_subprocess_output(raw_line).strip()
+                if not line:
+                    continue
+                if "Error response from daemon" in line or "dead or marked for removal" in line:
+                    continue
 
-                if line:
-                    if "Error response from daemon" in line or "dead or marked for removal" in line:
-                        continue
+                log(line)
+                safe_line = line.encode("ascii", errors="replace").decode("ascii")
+                print(f"[Docker] {safe_line}")
 
-                    log(line)
-                    safe_line = line.encode("ascii", errors="replace").decode("ascii")
-                    print(f"[Docker] {safe_line}")
+                if any(marker in line for marker in success_markers):
+                    build_completed = True
 
-                    if any(marker in line for marker in success_markers):
-                        build_completed = True
-
-                    for key, (prog, msg) in progress_map.items():
-                        if key in line:
-                            if on_progress:
-                                on_progress(prog, msg)
-                            break
+                for key, (prog, msg) in progress_map.items():
+                    if key in line:
+                        if on_progress:
+                            on_progress(prog, msg)
+                        break
 
                 if build_completed and process.poll() is not None:
                     break
 
             return_code = process.wait()
-
             log("")
-            log(f"Docker 进程退出，退出码: {return_code}")
+            log(f"Docker process exit code: {return_code}")
 
             if return_code == 0:
                 if env.get("GRADLE_CACHE_MODE") == "task":
@@ -1045,50 +1052,47 @@ class APKBuilder:
                     final_filename = f"{task_id}_{output_file.name}"
                     dst_file = BACKEND_OUTPUT_DIR / final_filename
                     shutil.copy2(output_file, dst_file)
-
-                    log(f"{artifact_label} 文件已生成: {output_file.name}")
-                    log(f"最终文件名: {final_filename}")
-                    log("========== 构建成功 ==========")
-
+                    log(f"{artifact_label} build succeeded: {output_file.name}")
+                    log(f"Copied to backend output dir: {final_filename}")
+                    log("========== Build Succeeded ==========")
                     if on_progress:
-                        on_progress(100, "构建成功")
+                        on_progress(100, "Build finished")
                     if on_complete:
-                        on_complete(True, f"{artifact_label} 构建成功", final_filename)
+                        on_complete(True, f"{artifact_label} build succeeded", final_filename)
                 else:
-                    log(f"错误: 构建完成但未找到 {artifact_label} 文件")
-                    log(f"检查目录: {task_output_dir}")
-                    log("========== 构建失败 ==========")
+                    log(f"Error: output {artifact_label} file not found")
+                    log(f"Output directory: {task_output_dir}")
+                    log("========== Build Failed ==========")
                     if on_complete:
-                        on_complete(False, f"构建完成但未找到{artifact_label}文件", None)
+                        on_complete(False, f"output {artifact_label} file not found", None)
             else:
-                log(f"错误: Docker 构建失败，退出码: {return_code}")
-                log("========== 构建失败 ==========")
+                log(f"Error: Docker build failed, exit code: {return_code}")
+                log("========== Build Failed ==========")
                 if on_complete:
-                    on_complete(False, f"Docker构建失败，退出码: {return_code}", None)
+                    on_complete(False, f"Docker build failed, exit code: {return_code}", None)
 
         except FileNotFoundError as e:
             if getattr(e, "filename", "") == "docker":
                 error_msg = (
-                    "构建异常: 未找到 docker 命令（后端需要 Docker CLI 才能调用宿主 Docker；"
-                    "容器化部署请重建 backend 镜像，或在宿主机安装 docker 客户端）"
+                    "Docker command not found. Install Docker Desktop and make sure Docker CLI works, "
+                    "then restart backend and try again."
                 )
             else:
-                error_msg = f"构建异常: {str(e)}"
-            log(f"错误: {error_msg}")
-            log("========== 构建异常 ==========")
+                error_msg = f"File not found: {str(e)}"
+            log(f"Error: {error_msg}")
+            log("========== Build Failed ==========")
             if on_complete:
                 on_complete(False, error_msg, None)
 
         except Exception as e:
-            error_msg = f"构建异常: {str(e)}"
-            log(f"错误: {error_msg}")
-            log("========== 构建异常 ==========")
+            error_msg = f"Build exception: {str(e)}"
+            log(f"Error: {error_msg}")
+            log("========== Build Failed ==========")
             if on_complete:
                 on_complete(False, error_msg, None)
         finally:
             if process is not None:
                 self.running_processes.pop(task_id, None)
-
 
     def run_local_build(
         self,
@@ -1099,6 +1103,7 @@ class APKBuilder:
         on_log: Optional[Callable[[str], None]] = None,
         on_complete: Optional[Callable[[bool, str, Optional[str]], None]] = None
     ):
+        """执行本地构建模式。"""
         log_file = LOGS_DIR / f"{task_id}.log"
 
         def log(message: str):
@@ -1110,16 +1115,16 @@ class APKBuilder:
                 on_log(log_line)
 
         try:
-            log("========== 构建任务开始 ==========")
-            log(f"任务ID: {task_id}")
-            log(f"应用名称: {env.get('APP_NAME', 'N/A')}")
-            log(f"包名: {env.get('PACKAGE_NAME', 'N/A')}")
-            log(f"版本: {env.get('VERSION_NAME', 'N/A')}")
-            log(f"输出格式: {env.get('OUTPUT_FORMAT', 'N/A')}")
+            log("========== Local Build Started ==========")
+            log(f"Task ID: {task_id}")
+            log(f"App Name: {env.get('APP_NAME', 'N/A')}")
+            log(f"Package Name: {env.get('PACKAGE_NAME', 'N/A')}")
+            log(f"Version: {env.get('VERSION_NAME', 'N/A')}")
+            log(f"Output Format: {env.get('OUTPUT_FORMAT', 'N/A')}")
             log("")
 
             if on_progress:
-                on_progress(5, "准备本地构建环境...")
+                on_progress(5, "Running local build...")
 
             result = run_local_build(
                 env=env,
@@ -1143,23 +1148,23 @@ class APKBuilder:
                 final_filename = f"{task_id}_{Path(output_file).name}"
                 dst_file = BACKEND_OUTPUT_DIR / final_filename
                 shutil.copy2(output_file, dst_file)
-                log(f"{artifact_label} 文件已生成: {Path(output_file).name}")
-                log(f"最终文件名: {final_filename}")
-                log("========== 构建成功 ==========")
+                log(f"{artifact_label} build succeeded: {Path(output_file).name}")
+                log(f"Copied to backend output dir: {final_filename}")
+                log("========== Local Build Succeeded ==========")
                 if on_progress:
-                    on_progress(100, "构建成功")
+                    on_progress(100, "Build finished")
                 if on_complete:
-                    on_complete(True, f"{artifact_label} 构建成功", final_filename)
+                    on_complete(True, f"{artifact_label} build succeeded", final_filename)
             else:
-                log(f"错误: 构建完成但未找到 {artifact_label} 文件")
-                log("========== 构建失败 ==========")
+                log(f"Error: output {artifact_label} file not found")
+                log("========== Local Build Failed ==========")
                 if on_complete:
-                    on_complete(False, f"构建完成但未找到{artifact_label}文件", None)
+                    on_complete(False, f"output {artifact_label} file not found", None)
 
         except Exception as e:
-            error_msg = f"构建异常: {str(e)}"
-            log(f"错误: {error_msg}")
-            log("========== 构建异常 ==========")
+            error_msg = f"Local build exception: {str(e)}"
+            log(f"Error: {error_msg}")
+            log("========== Local Build Failed ==========")
             if on_complete:
                 on_complete(False, error_msg, None)
 
@@ -1193,25 +1198,25 @@ class APKBuilder:
 
 class BuildTaskRunner:
     """
-    构建任务运行器
-    使用任务队列限制并发数，避免资源冲突
+    鏋勫缓浠诲姟杩愯鍣?
+    浣跨敤浠诲姟闃熷垪闄愬埗骞跺彂鏁帮紝閬垮厤璧勬簮鍐茬獊
     """
     
-    # 最大并发构建数（建议设为1，避免Gradle缓存冲突）
+    # 鏈€澶у苟鍙戞瀯寤烘暟锛堝缓璁涓?锛岄伩鍏岹radle缂撳瓨鍐茬獊锛?
     MAX_CONCURRENT_BUILDS = 1
     
     def __init__(self, tasks_db: dict, on_state_change: Optional[Callable[[bool], None]] = None):
         self.tasks_db = tasks_db
         self.builder = APKBuilder()
-        self.running_tasks = {}  # 正在运行的任务
+        self.running_tasks = {}  # 姝ｅ湪杩愯鐨勪换鍔?
         self.canceled_tasks = set()
-        self.task_queue = queue.Queue()  # 等待队列
+        self.task_queue = queue.Queue()  # 绛夊緟闃熷垪
         self.queue_lock = threading.Lock()
         self.on_state_change = on_state_change
         self._last_persist = 0.0
         self._persist_interval = 1.0
         
-        # 启动工作线程（数量等于最大并发数）
+        # 鍚姩宸ヤ綔绾跨▼锛堟暟閲忕瓑浜庢渶澶у苟鍙戞暟锛?
         self.workers = []
         for i in range(self.MAX_CONCURRENT_BUILDS):
             worker = threading.Thread(
@@ -1237,80 +1242,80 @@ class BuildTaskRunner:
     
     def start_build(self, task_id: str):
         """
-        添加任务到构建队列
-        任务会按顺序执行，同时运行的任务数不超过 MAX_CONCURRENT_BUILDS
+        娣诲姞浠诲姟鍒版瀯寤洪槦鍒?
+        浠诲姟浼氭寜椤哄簭鎵ц锛屽悓鏃惰繍琛岀殑浠诲姟鏁颁笉瓒呰繃 MAX_CONCURRENT_BUILDS
         """
         if task_id not in self.tasks_db:
-            raise ValueError(f"任务不存在: {task_id}")
+            raise ValueError(f"浠诲姟涓嶅瓨鍦? {task_id}")
         
         task = self.tasks_db[task_id]
         
-        # 检查任务是否已在队列或运行中
+        # 妫€鏌ヤ换鍔℃槸鍚﹀凡鍦ㄩ槦鍒楁垨杩愯涓?
         with self.queue_lock:
             if task_id in self.running_tasks:
-                raise ValueError(f"任务已在运行中: {task_id}")
+                raise ValueError(f"浠诲姟宸插湪杩愯涓? {task_id}")
         
-        # 计算队列位置
+        # 璁＄畻闃熷垪浣嶇疆
         queue_size = self.task_queue.qsize()
         running_count = len(self.running_tasks)
         
         if running_count >= self.MAX_CONCURRENT_BUILDS:
-            task.message = f"排队中（前方有 {queue_size} 个任务）"
+            task.message = f"鎺掗槦涓紙鍓嶆柟鏈?{queue_size} 涓换鍔★級"
         else:
-            task.message = "准备开始构建..."
+            task.message = "鍑嗗寮€濮嬫瀯寤?.."
         self._notify_state_change(force=True)
         
-        # 添加到队列
+        # 娣诲姞鍒伴槦鍒?
         self.task_queue.put(task_id)
-        print(f"[BuildTaskRunner] 任务 {task_id} 已加入队列，当前队列长度: {self.task_queue.qsize()}")
+        print(f"[BuildTaskRunner] 浠诲姟 {task_id} 宸插姞鍏ラ槦鍒楋紝褰撳墠闃熷垪闀垮害: {self.task_queue.qsize()}")
     
     def _worker_loop(self):
-        """工作线程主循环，从队列取任务并执行"""
+        """工作线程循环：持续从队列取任务并执行。"""
         worker_name = threading.current_thread().name
         print(f"[{worker_name}] 工作线程已启动")
         
         while True:
             try:
-                # 阻塞等待任务
+                # 闃诲绛夊緟浠诲姟
                 task_id = self.task_queue.get(block=True)
                 
-                # 检查任务是否仍然有效
+                # 妫€鏌ヤ换鍔℃槸鍚︿粛鐒舵湁鏁?
                 if task_id not in self.tasks_db:
-                    print(f"[{worker_name}] 任务 {task_id} 已被删除，跳过")
+                    print(f"[{worker_name}] 任务 {task_id} 已被删除，跳过处理")
                     self.task_queue.task_done()
                     continue
                 
                 task = self.tasks_db[task_id]
                 
-                # 检查任务状态（可能被取消）
+                # 妫€鏌ヤ换鍔＄姸鎬侊紙鍙兘琚彇娑堬級
                 if task.status not in ["pending", "processing"]:
-                    print(f"[{worker_name}] 任务 {task_id} 状态为 {task.status}，跳过")
+                    print(f"[{worker_name}] 任务 {task_id} 状态为 {task.status}，跳过处理")
                     self.task_queue.task_done()
                     continue
                 
-                # 标记为运行中
+                # 鏍囪涓鸿繍琛屼腑
                 with self.queue_lock:
                     self.running_tasks[task_id] = threading.current_thread()
                 
-                print(f"[{worker_name}] 开始处理任务 {task_id}")
+                print(f"[{worker_name}] 寮€濮嬪鐞嗕换鍔?{task_id}")
                 
                 try:
-                    # 执行构建
+                    # 鎵ц鏋勫缓
                     self._run_build(task_id)
                 finally:
-                    # 移除运行标记
+                    # 绉婚櫎杩愯鏍囪
                     with self.queue_lock:
                         if task_id in self.running_tasks:
                             del self.running_tasks[task_id]
                     
                     self.task_queue.task_done()
-                    print(f"[{worker_name}] 任务 {task_id} 完成")
+                    print(f"[{worker_name}] 浠诲姟 {task_id} 瀹屾垚")
                     
             except Exception as e:
-                print(f"[{worker_name}] 工作线程异常: {e}")
+                print(f"[{worker_name}] 宸ヤ綔绾跨▼寮傚父: {e}")
     
     def get_queue_status(self) -> dict:
-        """获取队列状态"""
+        """返回当前任务队列状态。"""
         return {
             "queue_size": self.task_queue.qsize(),
             "running_count": len(self.running_tasks),
@@ -1319,7 +1324,7 @@ class BuildTaskRunner:
         }
 
     def cancel_running_tasks(self, client_id: str = "") -> list[str]:
-        """取消正在运行或排队的任务"""
+        """鍙栨秷姝ｅ湪杩愯鎴栨帓闃熺殑浠诲姟"""
         canceled: list[str] = []
         for task_id, task in list(self.tasks_db.items()):
             if client_id and task.client_id and task.client_id != client_id:
@@ -1341,7 +1346,7 @@ class BuildTaskRunner:
         return canceled
 
     def cancel_task(self, task_id: str, client_id: str = "") -> bool:
-        """取消指定任务"""
+        """鍙栨秷鎸囧畾浠诲姟"""
         task = self.tasks_db.get(task_id)
         if not task:
             return False
@@ -1362,9 +1367,9 @@ class BuildTaskRunner:
         return True
     
     def _run_build(self, task_id: str):
-        """执行构建（在后台线程中运行）"""
+        """鎵ц鏋勫缓锛堝湪鍚庡彴绾跨▼涓繍琛岋級"""
         task = self.tasks_db[task_id]
-        # 保留创建/更新阶段日志，避免覆盖外链预处理结果
+        # 淇濈暀鍒涘缓/鏇存柊闃舵鏃ュ織锛岄伩鍏嶈鐩栧閾鹃澶勭悊缁撴灉
         if not isinstance(getattr(task, "logs", None), list):
             task.logs = []
         elif len(task.logs) > 500:
@@ -1378,9 +1383,9 @@ class BuildTaskRunner:
                     taskKeystoreDir.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(str(sharedKeystorePath), str(taskKeystorePath))
                 except Exception as e:
-                    print(f"[WARN] quickGenerate 签名同步失败: {e}")
+                    print(f"[WARN] quickGenerate 绛惧悕鍚屾澶辫触: {e}")
         
-        # 调试日志：输出任务配置中的 output_format
+        # 璋冭瘯鏃ュ織锛氳緭鍑轰换鍔￠厤缃腑鐨?output_format
         output_format_from_config = getattr(task.config, "output_format", "apk")
         print(f"[DEBUG] task.config.output_format = {output_format_from_config}")
         
@@ -1391,11 +1396,11 @@ class BuildTaskRunner:
             self._notify_state_change()
         
         def on_log(log_line: str):
-            """添加日志"""
+            """娣诲姞鏃ュ織"""
             if not hasattr(task, 'logs') or task.logs is None:
                 task.logs = []
             task.logs.append(log_line)
-            # 只保留最近500行日志
+            # 鍙繚鐣欐渶杩?00琛屾棩蹇?
             if len(task.logs) > 500:
                 task.logs = task.logs[-500:]
             self._notify_state_change()
@@ -1425,22 +1430,29 @@ class BuildTaskRunner:
                 task.status = "success"
                 task.progress = 100
                 if auto_clean_output:
-                    task.message = f"{message}（本地产物已自动清理）"
+                    task.message = f"{message} (local artifact cleaned)"
+                    task.desktop_output_expires_at = None
                 elif defer_desktop_output_cleanup:
-                    task.message = f"{message}（请及时下载，安装包仅支持下载一次，离开网站后会自动清理）"
+                    desktop_output_expires_at = datetime.now() + DESKTOP_OUTPUT_RETENTION_DELTA
+                    task.desktop_output_expires_at = desktop_output_expires_at
+                    expires_at_text = desktop_output_expires_at.strftime("%Y-%m-%d %H:%M:%S")
+                    task.message = (
+                        f"Build completed (desktop EXE can be downloaded repeatedly within {DESKTOP_OUTPUT_RETENTION_MINUTES} minutes, "
+                        f"until {expires_at_text}; server will auto-delete after expiry)"
+                    )
                 else:
                     task.message = message
-                if defer_desktop_output_cleanup:
-                    task.message = "构建完成（desktop 模式仅提供一次 EXE 下载机会；下载成功或离开网站后将自动删除安装包，以降低服务器占用）"
+                    task.desktop_output_expires_at = None
                 task.output_filename = None if auto_clean_output else output_file
                 task.download_url = None if auto_clean_output else f"/api/download/{task_id}"
             else:
                 task.status = "failed"
                 task.message = message
+                task.desktop_output_expires_at = None
             task.updated_at = datetime.now()
             self._notify_state_change(force=True)
             
-            # 从运行任务中移除
+            # 浠庤繍琛屼换鍔′腑绉婚櫎
             if task_id in self.running_tasks:
                 del self.running_tasks[task_id]
 
@@ -1500,14 +1512,14 @@ class BuildTaskRunner:
                 report_task_logs(task_id, task.client_id or "", "BUILD_FAILED", last_lines or [])
         
         try:
-            # 更新任务状态
+            # 鏇存柊浠诲姟鐘舵€?
             task.status = "processing"
             task.progress = 5
-            task.message = "开始构建..."
+            task.message = "寮€濮嬫瀯寤?.."
             task.updated_at = datetime.now()
             self._notify_state_change(force=True)
             
-            # 准备构建环境
+            # 鍑嗗鏋勫缓鐜
             env, task_output_dir = self.builder.prepare_build(
                 task_id=task_id,
                 app_name=task.config.app_name,
@@ -1537,7 +1549,7 @@ class BuildTaskRunner:
                 cdn_localize_preprocessed=getattr(task, "cdn_localize_preprocessed", False),
             )
             
-            # 运行Docker构建
+            # 杩愯Docker鏋勫缓
             self.builder.run_build(
                 task_id=task_id,
                 env=env,
@@ -1548,23 +1560,23 @@ class BuildTaskRunner:
             )
             
         except Exception as e:
-            on_log(f"[ERROR] 构建失败: {str(e)}")
-            on_complete(False, f"构建失败: {str(e)}", None)
+            on_log(f"[ERROR] 鏋勫缓澶辫触: {str(e)}")
+            on_complete(False, f"鏋勫缓澶辫触: {str(e)}", None)
 
 
-# 全局构建任务运行器（将在main.py中初始化）
+# 鍏ㄥ眬鏋勫缓浠诲姟杩愯鍣紙灏嗗湪main.py涓垵濮嬪寲锛?
 task_runner: Optional[BuildTaskRunner] = None
 
 
 def init_task_runner(tasks_db: dict, on_state_change: Optional[Callable[[bool], None]] = None):
-    """初始化任务运行器"""
+    """初始化并返回任务运行器。"""
     global task_runner
     task_runner = BuildTaskRunner(tasks_db, on_state_change=on_state_change)
     return task_runner
 
 
 def get_task_runner() -> BuildTaskRunner:
-    """获取任务运行器"""
+    """获取已初始化的任务运行器。"""
     if task_runner is None:
-        raise RuntimeError("任务运行器未初始化")
+        raise RuntimeError("任务运行器尚未初始化")
     return task_runner

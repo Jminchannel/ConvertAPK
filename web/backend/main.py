@@ -4,10 +4,10 @@ patch_typing_eval_type()
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, Body, Request, Form
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from starlette.background import BackgroundTask
 from typing import List
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path, PurePosixPath
 import uuid
 import sys
@@ -20,16 +20,18 @@ import binascii
 import struct
 import zlib
 import threading
-import threading
 import time
 import urllib.request
 import urllib.error
 import urllib.parse
 import zipfile
+import hashlib
+import secrets
 
 from models import (
     BuildTask, BuildTaskCreate, BuildTaskListItemResponse, BuildTaskResponse,
-    BuildStatus, AppConfig, UpdateTaskRequest
+    BuildStatus, AppConfig, UpdateTaskRequest,
+    AuthRegisterRequest, AuthLoginRequest, AuthSessionResponse, AuthMeResponse, AuthUserProfile
 )
 from builder import (
     init_task_runner,
@@ -89,6 +91,8 @@ def _load_client_feature_flags() -> dict:
     flags = {
         "web_link_to_apk_enabled": False,
         "zip_to_desktop_enabled": False,
+        "client_login_enabled": True,
+        "client_register_enabled": True,
     }
     try:
         data = fetch_feature_flags()
@@ -97,6 +101,10 @@ def _load_client_feature_flags() -> dict:
     if isinstance(data, dict):
         flags["web_link_to_apk_enabled"] = bool(data.get("web_link_to_apk_enabled"))
         flags["zip_to_desktop_enabled"] = bool(data.get("zip_to_desktop_enabled"))
+        if "client_login_enabled" in data:
+            flags["client_login_enabled"] = bool(data.get("client_login_enabled"))
+        if "client_register_enabled" in data:
+            flags["client_register_enabled"] = bool(data.get("client_register_enabled"))
     return flags
 
 
@@ -108,6 +116,16 @@ def _is_web_link_mode_enabled() -> bool:
 def _is_desktop_mode_enabled() -> bool:
     flags = _load_client_feature_flags()
     return bool(flags.get("zip_to_desktop_enabled"))
+
+
+def _is_client_login_enabled() -> bool:
+    flags = _load_client_feature_flags()
+    return bool(flags.get("client_login_enabled", True))
+
+
+def _is_client_register_enabled() -> bool:
+    flags = _load_client_feature_flags()
+    return bool(flags.get("client_register_enabled", True))
 
 
 def _fetch_github_repo_stats() -> dict:
@@ -178,6 +196,586 @@ def _require_client_id(value: str | None) -> str:
 def _assert_task_owner(task: BuildTask, client_id: str) -> None:
     if not task.client_id or task.client_id != client_id:
         raise HTTPException(status_code=403, detail="无权操作此任务")
+
+AUTH_PASSWORD_MIN_LENGTH = 6
+AUTH_PASSWORD_MAX_LENGTH = 128
+AUTH_PASSWORD_ITERATIONS = 240000
+AUTH_SESSION_TTL_DAYS = 30
+try:
+    AUTH_PASSWORD_ITERATIONS = max(int(os.getenv("AUTH_PASSWORD_ITERATIONS", "240000") or "240000"), 120000)
+except ValueError:
+    AUTH_PASSWORD_ITERATIONS = 240000
+try:
+    AUTH_SESSION_TTL_DAYS = max(int(os.getenv("AUTH_SESSION_TTL_DAYS", "30") or "30"), 1)
+except ValueError:
+    AUTH_SESSION_TTL_DAYS = 30
+AUTH_SESSION_TTL = timedelta(days=AUTH_SESSION_TTL_DAYS)
+AUTH_USERS_STATE_PATH = TASKS_DIR / "users.json"
+AUTH_USERS_STATE_LOCK = threading.Lock()
+AUTH_SESSIONS_LOCK = threading.Lock()
+AUTH_EMAIL_PATTERN = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
+users_db: dict[str, dict] = {}
+email_to_user_id: dict[str, str] = {}
+client_to_user_id: dict[str, str] = {}
+github_id_to_user_id: dict[str, str] = {}
+sessions_db: dict[str, dict] = {}
+github_oauth_states_db: dict[str, dict] = {}
+AUTH_GITHUB_STATE_LOCK = threading.Lock()
+
+AUTH_GITHUB_CLIENT_ID = str(os.getenv("AUTH_GITHUB_CLIENT_ID") or "").strip()
+AUTH_GITHUB_CLIENT_SECRET = str(os.getenv("AUTH_GITHUB_CLIENT_SECRET") or "").strip()
+AUTH_GITHUB_SCOPE = str(os.getenv("AUTH_GITHUB_SCOPE") or "read:user user:email").strip() or "read:user user:email"
+AUTH_GITHUB_AUTHORIZE_URL = str(os.getenv("AUTH_GITHUB_AUTHORIZE_URL") or "https://github.com/login/oauth/authorize").strip() or "https://github.com/login/oauth/authorize"
+AUTH_GITHUB_TOKEN_URL = str(os.getenv("AUTH_GITHUB_TOKEN_URL") or "https://github.com/login/oauth/access_token").strip() or "https://github.com/login/oauth/access_token"
+AUTH_GITHUB_USER_URL = str(os.getenv("AUTH_GITHUB_USER_URL") or "https://api.github.com/user").strip() or "https://api.github.com/user"
+AUTH_GITHUB_EMAILS_URL = str(os.getenv("AUTH_GITHUB_EMAILS_URL") or "https://api.github.com/user/emails").strip() or "https://api.github.com/user/emails"
+AUTH_GITHUB_CALLBACK_URL = str(os.getenv("AUTH_GITHUB_CALLBACK_URL") or "").strip()
+AUTH_GITHUB_STATE_TTL_SECONDS = 600
+try:
+    AUTH_GITHUB_STATE_TTL_SECONDS = max(int(os.getenv("AUTH_GITHUB_STATE_TTL_SECONDS", "600") or "600"), 120)
+except ValueError:
+    AUTH_GITHUB_STATE_TTL_SECONDS = 600
+AUTH_DEFAULT_RETURN_URL = str(os.getenv("AUTH_DEFAULT_RETURN_URL") or "http://localhost:8080/").strip() or "http://localhost:8080/"
+AUTH_REDIRECT_ALLOWED_ORIGINS_RAW = str(
+    os.getenv(
+        "AUTH_REDIRECT_ALLOWED_ORIGINS")
+    or "http://localhost:8080,http://127.0.0.1:8080,http://localhost:3000,http://127.0.0.1:3000"
+).strip()
+AUTH_REDIRECT_ALLOWED_ORIGINS = {
+    str(item or "").strip().lower().rstrip("/")
+    for item in AUTH_REDIRECT_ALLOWED_ORIGINS_RAW.split(",")
+    if str(item or "").strip()
+}
+
+
+def _normalize_email(value: str | None) -> str:
+    return str(value or "").strip().lower()
+
+
+def _validate_email_or_raise(value: str | None) -> str:
+    email = _normalize_email(value)
+    if not email:
+        raise HTTPException(status_code=400, detail="email is required")
+    if len(email) > 254:
+        raise HTTPException(status_code=400, detail="email is too long")
+    if not AUTH_EMAIL_PATTERN.fullmatch(email):
+        raise HTTPException(status_code=400, detail="email format is invalid")
+    return email
+
+
+def _validate_password_or_raise(value: str | None) -> str:
+    password = str(value or "")
+    if len(password) < AUTH_PASSWORD_MIN_LENGTH:
+        raise HTTPException(status_code=400, detail=f"password must be at least {AUTH_PASSWORD_MIN_LENGTH} characters")
+    if len(password) > AUTH_PASSWORD_MAX_LENGTH:
+        raise HTTPException(status_code=400, detail=f"password must be at most {AUTH_PASSWORD_MAX_LENGTH} characters")
+    return password
+
+
+def _hash_password(password: str, salt_hex: str) -> str:
+    salt = bytes.fromhex(salt_hex)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, AUTH_PASSWORD_ITERATIONS, dklen=32)
+    return digest.hex()
+
+
+def _verify_password(password: str, salt_hex: str, expected_hash: str) -> bool:
+    actual_hash = _hash_password(password, salt_hex)
+    return secrets.compare_digest(actual_hash, str(expected_hash or ""))
+
+
+def _is_github_oauth_enabled() -> bool:
+    return bool(AUTH_GITHUB_CLIENT_ID and AUTH_GITHUB_CLIENT_SECRET)
+
+
+def _normalize_github_id(value: str | int | None) -> str:
+    return str(value or "").strip()
+
+
+def _normalize_auth_provider(value: str | None) -> str:
+    provider = str(value or "").strip().lower()
+    if provider in {"github", "local"}:
+        return provider
+    return "local"
+
+
+def _normalize_return_url(value: str | None) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    try:
+        parsed = urllib.parse.urlsplit(raw)
+    except Exception:
+        return ""
+    scheme = str(parsed.scheme or "").strip().lower()
+    netloc = str(parsed.netloc or "").strip()
+    if scheme not in {"http", "https"} or not netloc:
+        return ""
+    origin = f"{scheme}://{netloc}".rstrip("/").lower()
+    if AUTH_REDIRECT_ALLOWED_ORIGINS and origin not in AUTH_REDIRECT_ALLOWED_ORIGINS:
+        return ""
+    path = parsed.path or "/"
+    return urllib.parse.urlunsplit((scheme, netloc, path, parsed.query, parsed.fragment))
+
+
+def _build_fragment_redirect_url(base_url: str, fragment_values: dict[str, str]) -> str:
+    fallback_url = _normalize_return_url(AUTH_DEFAULT_RETURN_URL) or "http://localhost:8080/"
+    target_url = _normalize_return_url(base_url) or fallback_url
+    parsed = urllib.parse.urlsplit(target_url)
+    fragment_pairs = urllib.parse.parse_qsl(parsed.fragment, keep_blank_values=True)
+    fragment_map = {str(key): str(value) for key, value in fragment_pairs}
+    for key, value in fragment_values.items():
+        normalized_key = str(key or "").strip()
+        if not normalized_key:
+            continue
+        normalized_value = str(value or "").strip()
+        if not normalized_value:
+            continue
+        fragment_map[normalized_key] = normalized_value
+    fragment = urllib.parse.urlencode(fragment_map)
+    return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, parsed.path, parsed.query, fragment))
+
+
+def _build_github_callback_redirect(return_url: str, token: str | None = None, error: str | None = None) -> str:
+    values = {"auth_provider": "github"}
+    if token:
+        values["auth_token"] = str(token or "").strip()
+    if error:
+        values["auth_error"] = str(error or "").strip()
+    return _build_fragment_redirect_url(return_url, values)
+
+
+def _prune_github_oauth_states_locked() -> None:
+    now = time.time()
+    expired = [
+        state
+        for state, item in github_oauth_states_db.items()
+        if (now - float(item.get("created_at") or 0.0)) > AUTH_GITHUB_STATE_TTL_SECONDS
+    ]
+    for state in expired:
+        github_oauth_states_db.pop(state, None)
+
+
+def _save_github_oauth_state(client_id: str, return_url: str) -> str:
+    state = secrets.token_urlsafe(32)
+    with AUTH_GITHUB_STATE_LOCK:
+        _prune_github_oauth_states_locked()
+        github_oauth_states_db[state] = {
+            "client_id": _require_client_id(client_id),
+            "return_url": _normalize_return_url(return_url) or _normalize_return_url(AUTH_DEFAULT_RETURN_URL),
+            "created_at": time.time(),
+        }
+    return state
+
+
+def _pop_github_oauth_state(state: str | None) -> dict | None:
+    normalized_state = str(state or "").strip()
+    if not normalized_state:
+        return None
+    with AUTH_GITHUB_STATE_LOCK:
+        _prune_github_oauth_states_locked()
+        return github_oauth_states_db.pop(normalized_state, None)
+
+
+def _build_github_oauth_headers(access_token: str | None = None) -> dict:
+    headers = {
+        "Accept": "application/json",
+        "User-Agent": "ConvertAPK-Desktop",
+    }
+    normalized_access_token = str(access_token or "").strip()
+    if normalized_access_token:
+        headers["Authorization"] = f"Bearer {normalized_access_token}"
+    return headers
+
+
+def _http_json_request(url: str, method: str = "GET", headers: dict | None = None, body: bytes | None = None):
+    request = urllib.request.Request(url=url, data=body, headers=headers or {}, method=method)
+    with urllib.request.urlopen(request, timeout=12) as response:
+        payload = response.read().decode("utf-8", errors="ignore")
+    try:
+        data = json.loads(payload or "{}")
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"github response parse failed: {str(exc)}")
+    return data
+
+
+def _exchange_github_oauth_code(code: str, state: str) -> str:
+    if not _is_github_oauth_enabled():
+        raise HTTPException(status_code=503, detail="github oauth is not configured")
+    payload = {
+        "client_id": AUTH_GITHUB_CLIENT_ID,
+        "client_secret": AUTH_GITHUB_CLIENT_SECRET,
+        "code": str(code or "").strip(),
+        "state": str(state or "").strip(),
+    }
+    if AUTH_GITHUB_CALLBACK_URL:
+        payload["redirect_uri"] = AUTH_GITHUB_CALLBACK_URL
+    body = urllib.parse.urlencode(payload).encode("utf-8")
+    try:
+        raw_data = _http_json_request(
+            url=AUTH_GITHUB_TOKEN_URL,
+            method="POST",
+            headers=_build_github_oauth_headers(),
+            body=body,
+        )
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="ignore")
+        raise HTTPException(status_code=502, detail=f"github token exchange failed: {detail or str(exc)}")
+    if not isinstance(raw_data, dict):
+        raise HTTPException(status_code=502, detail="github token response is invalid")
+    token = str(raw_data.get("access_token") or "").strip()
+    if not token:
+        error_message = str(raw_data.get("error_description") or raw_data.get("error") or "").strip()
+        raise HTTPException(status_code=502, detail=f"github token exchange failed: {error_message or 'empty token'}")
+    return token
+
+
+def _pick_github_email(emails_payload) -> str:
+    if not isinstance(emails_payload, list):
+        return ""
+    verified_primary = ""
+    verified_backup = ""
+    fallback = ""
+    for item in emails_payload:
+        if not isinstance(item, dict):
+            continue
+        email = _normalize_email(item.get("email"))
+        if not email:
+            continue
+        verified = bool(item.get("verified"))
+        primary = bool(item.get("primary"))
+        if verified and primary:
+            verified_primary = email
+            break
+        if verified and not verified_backup:
+            verified_backup = email
+        if primary and not fallback:
+            fallback = email
+        if not fallback:
+            fallback = email
+    if verified_primary:
+        return verified_primary
+    if verified_backup:
+        return verified_backup
+    return fallback
+
+
+def _fetch_github_identity(access_token: str) -> dict:
+    token = str(access_token or "").strip()
+    if not token:
+        raise HTTPException(status_code=400, detail="github access token is required")
+    try:
+        raw_user_data = _http_json_request(
+            url=AUTH_GITHUB_USER_URL,
+            method="GET",
+            headers=_build_github_oauth_headers(token),
+        )
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="ignore")
+        raise HTTPException(status_code=502, detail=f"github user fetch failed: {detail or str(exc)}")
+    if not isinstance(raw_user_data, dict):
+        raise HTTPException(status_code=502, detail="github user response is invalid")
+    github_id = _normalize_github_id(raw_user_data.get("id"))
+    github_login = str(raw_user_data.get("login") or "").strip()
+    email = _normalize_email(raw_user_data.get("email"))
+    if not github_id:
+        raise HTTPException(status_code=502, detail="github user id is missing")
+    if not email:
+        try:
+            emails_data = _http_json_request(
+                url=AUTH_GITHUB_EMAILS_URL,
+                method="GET",
+                headers=_build_github_oauth_headers(token),
+            )
+            email = _pick_github_email(emails_data if isinstance(emails_data, list) else [])
+        except HTTPException:
+            email = ""
+        except urllib.error.HTTPError:
+            email = ""
+    if not email:
+        email = f"github_{github_id}@users.noreply.github.local"
+    return {
+        "github_id": github_id,
+        "github_login": github_login,
+        "email": email,
+    }
+
+
+def _upsert_user_by_github_identity(identity: dict) -> tuple[str, dict]:
+    github_id = _normalize_github_id(identity.get("github_id"))
+    github_login = str(identity.get("github_login") or "").strip()
+    email = _normalize_email(identity.get("email"))
+    if not github_id:
+        raise HTTPException(status_code=400, detail="github_id is required")
+    if not email:
+        raise HTTPException(status_code=400, detail="email is required")
+
+    user_id = github_id_to_user_id.get(github_id)
+    user = users_db.get(user_id) if user_id else None
+    if not user:
+        user_id_by_email = email_to_user_id.get(email)
+        if user_id_by_email:
+            user = users_db.get(user_id_by_email)
+            user_id = user_id_by_email
+    if not user:
+        user_id = f"user_{uuid.uuid4().hex}"
+        now_iso = datetime.now().isoformat()
+        random_password = secrets.token_urlsafe(32)
+        salt_hex = secrets.token_hex(16)
+        user = {
+            "id": user_id,
+            "email": email,
+            "password_salt": salt_hex,
+            "password_hash": _hash_password(random_password, salt_hex),
+            "client_ids": [],
+            "created_at": now_iso,
+            "updated_at": now_iso,
+            "last_login_at": now_iso,
+            "auth_provider": "github",
+            "github_id": github_id,
+            "github_login": github_login,
+        }
+    existing_github_id = _normalize_github_id(user.get("github_id"))
+    if existing_github_id and existing_github_id != github_id:
+        raise HTTPException(status_code=409, detail="github account conflict")
+    now_iso = datetime.now().isoformat()
+    user["email"] = email
+    user["github_id"] = github_id
+    user["github_login"] = github_login
+    user["updated_at"] = now_iso
+    user["last_login_at"] = now_iso
+    user["auth_provider"] = "github"
+    users_db[user_id] = user
+    _rebuild_auth_indexes()
+    return user_id, user
+
+
+def _parse_iso_datetime(value, default_value: datetime | None = None) -> datetime:
+    if isinstance(value, datetime):
+        return value
+    raw = str(value or "").strip()
+    if raw:
+        try:
+            return datetime.fromisoformat(raw)
+        except Exception:
+            pass
+    return default_value or datetime.now()
+
+
+def _serialize_auth_user(user: dict) -> dict:
+    return {
+        "id": str(user.get("id") or "").strip(),
+        "email": _normalize_email(user.get("email")),
+        "auth_provider": _normalize_auth_provider(user.get("auth_provider")),
+        "github_id": _normalize_github_id(user.get("github_id")),
+        "github_login": str(user.get("github_login") or "").strip(),
+        "password_salt": str(user.get("password_salt") or "").strip(),
+        "password_hash": str(user.get("password_hash") or "").strip(),
+        "client_ids": [str(item).strip() for item in list(user.get("client_ids") or []) if str(item or "").strip()],
+        "created_at": _parse_iso_datetime(user.get("created_at")).isoformat(),
+        "updated_at": _parse_iso_datetime(user.get("updated_at")).isoformat(),
+        "last_login_at": _parse_iso_datetime(user.get("last_login_at")).isoformat() if user.get("last_login_at") else None,
+    }
+
+
+def _user_to_profile(user: dict) -> AuthUserProfile:
+    return AuthUserProfile(
+        id=str(user.get("id") or "").strip(),
+        email=_normalize_email(user.get("email")),
+        auth_provider=_normalize_auth_provider(user.get("auth_provider")),
+        github_id=_normalize_github_id(user.get("github_id")) or None,
+        github_login=str(user.get("github_login") or "").strip() or None,
+        client_ids=[str(item).strip() for item in list(user.get("client_ids") or []) if str(item or "").strip()],
+        created_at=_parse_iso_datetime(user.get("created_at")),
+        updated_at=_parse_iso_datetime(user.get("updated_at")),
+        last_login_at=_parse_iso_datetime(user.get("last_login_at")) if user.get("last_login_at") else None,
+    )
+
+
+def _rebuild_auth_indexes() -> None:
+    email_to_user_id.clear()
+    client_to_user_id.clear()
+    github_id_to_user_id.clear()
+    for user_id, user in users_db.items():
+        normalized_user_id = str(user_id or "").strip()
+        if not normalized_user_id:
+            continue
+        user["auth_provider"] = _normalize_auth_provider(user.get("auth_provider"))
+        email = _normalize_email(user.get("email"))
+        if email and email not in email_to_user_id:
+            email_to_user_id[email] = normalized_user_id
+        github_id = _normalize_github_id(user.get("github_id"))
+        user["github_id"] = github_id
+        user["github_login"] = str(user.get("github_login") or "").strip()
+        if github_id and github_id not in github_id_to_user_id:
+            github_id_to_user_id[github_id] = normalized_user_id
+        client_ids = [str(item).strip() for item in list(user.get("client_ids") or []) if str(item or "").strip()]
+        user["client_ids"] = client_ids
+        for client_id in client_ids:
+            if client_id not in client_to_user_id:
+                client_to_user_id[client_id] = normalized_user_id
+
+
+def _persist_auth_users_db() -> None:
+    AUTH_USERS_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with AUTH_USERS_STATE_LOCK:
+        payload = [_serialize_auth_user(user) for user in users_db.values()]
+        tmp_path = AUTH_USERS_STATE_PATH.with_suffix(".json.tmp")
+        tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp_path.replace(AUTH_USERS_STATE_PATH)
+
+
+def _load_auth_users_db() -> None:
+    if not AUTH_USERS_STATE_PATH.exists():
+        return
+    try:
+        data = json.loads(AUTH_USERS_STATE_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return
+    if not isinstance(data, list):
+        return
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        user_id = str(item.get("id") or "").strip()
+        email = _normalize_email(item.get("email"))
+        auth_provider = _normalize_auth_provider(item.get("auth_provider"))
+        github_id = _normalize_github_id(item.get("github_id"))
+        github_login = str(item.get("github_login") or "").strip()
+        password_salt = str(item.get("password_salt") or "").strip()
+        password_hash = str(item.get("password_hash") or "").strip()
+        if not user_id or not email:
+            continue
+        users_db[user_id] = {
+            "id": user_id,
+            "email": email,
+            "auth_provider": auth_provider,
+            "github_id": github_id,
+            "github_login": github_login,
+            "password_salt": password_salt,
+            "password_hash": password_hash,
+            "client_ids": [str(client).strip() for client in list(item.get("client_ids") or []) if str(client or "").strip()],
+            "created_at": _parse_iso_datetime(item.get("created_at")).isoformat(),
+            "updated_at": _parse_iso_datetime(item.get("updated_at")).isoformat(),
+            "last_login_at": _parse_iso_datetime(item.get("last_login_at")).isoformat() if item.get("last_login_at") else None,
+        }
+    _rebuild_auth_indexes()
+
+
+def _bind_client_to_user(user_id: str, client_id: str) -> None:
+    normalized_user_id = str(user_id or "").strip()
+    normalized_client_id = _require_client_id(client_id)
+    user = users_db.get(normalized_user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="user not found")
+    owner_user_id = client_to_user_id.get(normalized_client_id)
+    if owner_user_id and owner_user_id != normalized_user_id:
+        raise HTTPException(status_code=409, detail="client_id has been bound to another account")
+    client_ids = [str(item).strip() for item in list(user.get("client_ids") or []) if str(item or "").strip()]
+    if normalized_client_id not in client_ids:
+        client_ids.append(normalized_client_id)
+    user["client_ids"] = sorted(set(client_ids))
+    user["updated_at"] = datetime.now().isoformat()
+    users_db[normalized_user_id] = user
+    _rebuild_auth_indexes()
+
+
+def _get_user_id_by_client_id(client_id: str | None) -> str | None:
+    normalized_client_id = _normalize_client_id(client_id)
+    if not normalized_client_id:
+        return None
+    return client_to_user_id.get(normalized_client_id)
+
+
+def _get_user_client_ids(user_id: str | None) -> set[str]:
+    normalized_user_id = str(user_id or "").strip()
+    if not normalized_user_id:
+        return set()
+    user = users_db.get(normalized_user_id)
+    if not user:
+        return set()
+    return {str(item).strip() for item in list(user.get("client_ids") or []) if str(item or "").strip()}
+
+
+def _assert_task_owner(task: BuildTask, client_id: str) -> None:
+    normalized_client_id = _require_client_id(client_id)
+    task_client_id = _normalize_client_id(task.client_id)
+    if task_client_id and task_client_id == normalized_client_id:
+        return
+    task_user_id = _get_user_id_by_client_id(task_client_id)
+    request_user_id = _get_user_id_by_client_id(normalized_client_id)
+    if task_user_id and request_user_id and task_user_id == request_user_id:
+        return
+    raise HTTPException(status_code=403, detail="无权操作此任务")
+
+
+def _extract_auth_token(request: Request) -> str:
+    auth_header = str(request.headers.get("Authorization") or "").strip()
+    if not auth_header:
+        return ""
+    if auth_header.lower().startswith("bearer "):
+        return auth_header[7:].strip()
+    return ""
+
+
+def _prune_expired_sessions() -> None:
+    now = datetime.now()
+    expired_tokens = [token for token, session in sessions_db.items() if _parse_iso_datetime(session.get("expires_at")) <= now]
+    for token in expired_tokens:
+        sessions_db.pop(token, None)
+
+
+def _create_auth_session(user_id: str, client_id: str) -> tuple[str, datetime]:
+    expires_at = datetime.now() + AUTH_SESSION_TTL
+    token = secrets.token_urlsafe(48)
+    with AUTH_SESSIONS_LOCK:
+        _prune_expired_sessions()
+        sessions_db[token] = {
+            "user_id": str(user_id or "").strip(),
+            "client_id": _normalize_client_id(client_id),
+            "issued_at": datetime.now().isoformat(),
+            "expires_at": expires_at.isoformat(),
+        }
+    return token, expires_at
+
+
+def _resolve_user_by_request(request: Request) -> tuple[dict | None, str]:
+    token = _extract_auth_token(request)
+    if not token:
+        return None, ""
+    with AUTH_SESSIONS_LOCK:
+        _prune_expired_sessions()
+        session = sessions_db.get(token)
+    if not session:
+        return None, token
+    expires_at = _parse_iso_datetime(session.get("expires_at"))
+    if expires_at <= datetime.now():
+        with AUTH_SESSIONS_LOCK:
+            sessions_db.pop(token, None)
+        return None, token
+    user_id = str(session.get("user_id") or "").strip()
+    user = users_db.get(user_id)
+    if not user:
+        with AUTH_SESSIONS_LOCK:
+            sessions_db.pop(token, None)
+        return None, token
+    return user, token
+
+
+def _require_auth_user(request: Request) -> tuple[dict, str]:
+    user, token = _resolve_user_by_request(request)
+    if not user or not token:
+        raise HTTPException(status_code=401, detail="authentication required")
+    return user, token
+
+
+def _build_auth_session_response(user: dict, token: str, expires_at: datetime) -> AuthSessionResponse:
+    return AuthSessionResponse(
+        token=token,
+        token_type="Bearer",
+        expires_at=expires_at,
+        user=_user_to_profile(user),
+    )
+
 
 def _safe_filename(value: str, fallback: str = "app") -> str:
     raw = (value or "").strip()
@@ -1285,6 +1883,7 @@ BACKEND_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 BACKEND_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 load_tasks_db()
+_load_auth_users_db()
 
 @app.get("/")
 async def root():
@@ -1308,6 +1907,173 @@ async def assets(path: str):
     if not asset_file.exists():
         raise HTTPException(status_code=404, detail="Not Found")
     return FileResponse(str(asset_file))
+
+
+@app.post("/api/auth/register", response_model=AuthSessionResponse)
+async def auth_register(payload: AuthRegisterRequest):
+    """用户注册并绑定当前客户端"""
+    if not _is_client_register_enabled():
+        raise HTTPException(status_code=403, detail="register is disabled by admin")
+    email = _validate_email_or_raise(payload.email)
+    password = _validate_password_or_raise(payload.password)
+    client_id = _require_client_id(payload.client_id)
+    if email in email_to_user_id:
+        raise HTTPException(status_code=409, detail="email already exists")
+
+    user_id = f"user_{uuid.uuid4().hex}"
+    now_iso = datetime.now().isoformat()
+    salt_hex = secrets.token_hex(16)
+    users_db[user_id] = {
+        "id": user_id,
+        "email": email,
+        "auth_provider": "local",
+        "github_id": "",
+        "github_login": "",
+        "password_salt": salt_hex,
+        "password_hash": _hash_password(password, salt_hex),
+        "client_ids": [],
+        "created_at": now_iso,
+        "updated_at": now_iso,
+        "last_login_at": now_iso,
+    }
+    _bind_client_to_user(user_id, client_id)
+    _persist_auth_users_db()
+    user = users_db[user_id]
+    token, expires_at = _create_auth_session(user_id, client_id)
+    return _build_auth_session_response(user, token, expires_at)
+
+
+@app.post("/api/auth/login", response_model=AuthSessionResponse)
+async def auth_login(payload: AuthLoginRequest):
+    """用户登录并绑定当前客户端"""
+    if not _is_client_login_enabled():
+        raise HTTPException(status_code=403, detail="login is disabled by admin")
+    email = _validate_email_or_raise(payload.email)
+    password = _validate_password_or_raise(payload.password)
+    client_id = _require_client_id(payload.client_id)
+    user_id = email_to_user_id.get(email)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="email or password is incorrect")
+    user = users_db.get(user_id)
+    if not user:
+        raise HTTPException(status_code=401, detail="email or password is incorrect")
+    if not _verify_password(password, str(user.get("password_salt") or ""), str(user.get("password_hash") or "")):
+        raise HTTPException(status_code=401, detail="email or password is incorrect")
+
+    _bind_client_to_user(user_id, client_id)
+    now_iso = datetime.now().isoformat()
+    user["last_login_at"] = now_iso
+    user["updated_at"] = now_iso
+    users_db[user_id] = user
+    _persist_auth_users_db()
+    token, expires_at = _create_auth_session(user_id, client_id)
+    return _build_auth_session_response(user, token, expires_at)
+
+
+@app.get("/api/auth/me", response_model=AuthMeResponse)
+async def auth_me(request: Request, client_id: str | None = None):
+    """获取当前会话用户，并可选绑定新的客户端ID"""
+    user, _ = _resolve_user_by_request(request)
+    if not user:
+        return AuthMeResponse(authenticated=False, user=None)
+
+    normalized_client_id = _normalize_client_id(client_id)
+    if normalized_client_id:
+        user_id = str(user.get("id") or "").strip()
+        before = _get_user_client_ids(user_id)
+        _bind_client_to_user(user_id, normalized_client_id)
+        after = _get_user_client_ids(user_id)
+        if before != after:
+            _persist_auth_users_db()
+        user = users_db.get(user_id, user)
+    return AuthMeResponse(authenticated=True, user=_user_to_profile(user))
+
+
+@app.post("/api/auth/logout")
+async def auth_logout(request: Request):
+    """退出当前会话"""
+    token = _extract_auth_token(request)
+    if token:
+        with AUTH_SESSIONS_LOCK:
+            sessions_db.pop(token, None)
+    return {"ok": True}
+
+
+@app.get("/api/auth/github/login")
+async def auth_github_login(client_id: str, return_url: str | None = None):
+    """鐢熸垚 GitHub OAuth 鎺堟潈鍦板潃"""
+    if not _is_client_login_enabled():
+        raise HTTPException(status_code=403, detail="login is disabled by admin")
+    if not _is_github_oauth_enabled():
+        raise HTTPException(status_code=503, detail="github oauth is not configured")
+    normalized_client_id = _require_client_id(client_id)
+    normalized_return_url = _normalize_return_url(return_url) or _normalize_return_url(AUTH_DEFAULT_RETURN_URL)
+    state = _save_github_oauth_state(normalized_client_id, normalized_return_url or "")
+    query = {
+        "client_id": AUTH_GITHUB_CLIENT_ID,
+        "scope": AUTH_GITHUB_SCOPE,
+        "state": state,
+    }
+    if AUTH_GITHUB_CALLBACK_URL:
+        query["redirect_uri"] = AUTH_GITHUB_CALLBACK_URL
+    authorize_url = f"{AUTH_GITHUB_AUTHORIZE_URL}?{urllib.parse.urlencode(query)}"
+    return {
+        "oauth_enabled": True,
+        "authorize_url": authorize_url,
+    }
+
+
+@app.get("/api/auth/github/callback")
+async def auth_github_callback(
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+    error_description: str | None = None,
+):
+    """澶勭悊 GitHub OAuth 鍥炶皟"""
+    state_payload = _pop_github_oauth_state(state)
+    fallback_return_url = _normalize_return_url(AUTH_DEFAULT_RETURN_URL) or "http://localhost:8080/"
+    return_url = fallback_return_url
+    if isinstance(state_payload, dict):
+        return_url = _normalize_return_url(state_payload.get("return_url")) or fallback_return_url
+    if not _is_client_login_enabled():
+        redirect_url = _build_github_callback_redirect(return_url, error="login_disabled")
+        return RedirectResponse(url=redirect_url, status_code=302)
+    if not state_payload:
+        redirect_url = _build_github_callback_redirect(return_url, error="invalid_state")
+        return RedirectResponse(url=redirect_url, status_code=302)
+
+    oauth_error = str(error_description or error or "").strip()
+    if oauth_error:
+        redirect_url = _build_github_callback_redirect(return_url, error=oauth_error)
+        return RedirectResponse(url=redirect_url, status_code=302)
+
+    normalized_code = str(code or "").strip()
+    if not normalized_code:
+        redirect_url = _build_github_callback_redirect(return_url, error="missing_code")
+        return RedirectResponse(url=redirect_url, status_code=302)
+
+    client_id = _normalize_client_id(state_payload.get("client_id"))
+    if not client_id:
+        redirect_url = _build_github_callback_redirect(return_url, error="missing_client_id")
+        return RedirectResponse(url=redirect_url, status_code=302)
+
+    try:
+        access_token = _exchange_github_oauth_code(normalized_code, str(state or ""))
+        identity = _fetch_github_identity(access_token)
+        user_id, user = _upsert_user_by_github_identity(identity)
+        _bind_client_to_user(user_id, client_id)
+        _persist_auth_users_db()
+        token, _ = _create_auth_session(user_id, client_id)
+    except HTTPException as exc:
+        redirect_url = _build_github_callback_redirect(return_url, error=str(exc.detail or "github_login_failed"))
+        return RedirectResponse(url=redirect_url, status_code=302)
+    except Exception:
+        redirect_url = _build_github_callback_redirect(return_url, error="github_login_failed")
+        return RedirectResponse(url=redirect_url, status_code=302)
+
+    redirect_url = _build_github_callback_redirect(return_url, token=token)
+    return RedirectResponse(url=redirect_url, status_code=302)
 
 
 @app.post("/api/upload")
@@ -1518,8 +2284,7 @@ async def create_task(task_data: BuildTaskCreate):
         reuse_task = tasks_db.get(reuse_from)
         if not reuse_task:
             raise HTTPException(status_code=400, detail="要复用签名的任务不存在")
-        if reuse_task.client_id != client_id:
-            raise HTTPException(status_code=403, detail="无权复用其他任务的签名")
+        _assert_task_owner(reuse_task, client_id)
     
     # 创建任务专属目录
     task_dir = TASKS_DIR / task_id
@@ -1725,7 +2490,12 @@ async def create_task(task_data: BuildTaskCreate):
 async def list_tasks(client_id: str = None):
     """获取任务列表，按client_id筛选"""
     client_id = _require_client_id(client_id)
-    task_list = [task for task in tasks_db.values() if task.client_id == client_id]
+    current_user_id = _get_user_id_by_client_id(client_id)
+    if current_user_id:
+        allowed_client_ids = _get_user_client_ids(current_user_id)
+        task_list = [task for task in tasks_db.values() if _normalize_client_id(task.client_id) in allowed_client_ids]
+    else:
+        task_list = [task for task in tasks_db.values() if task.client_id == client_id]
     task_list.sort(key=lambda task: (task.updated_at, task.created_at, task.id), reverse=True)
     return task_list
 
@@ -1792,8 +2562,17 @@ async def delete_task(task_id: str, client_id: str = None):
 async def cancel_running_tasks(payload: dict):
     client_id = _require_client_id(payload.get("client_id"))
     runner = get_task_runner()
-    canceled = runner.cancel_running_tasks(client_id)
-    return {"canceled": canceled}
+    current_user_id = _get_user_id_by_client_id(client_id)
+    if current_user_id:
+        target_client_ids = _get_user_client_ids(current_user_id) or {client_id}
+    else:
+        target_client_ids = {client_id}
+    canceled_set: set[str] = set()
+    for current_client_id in target_client_ids:
+        canceled_items = runner.cancel_running_tasks(current_client_id)
+        for task_id in canceled_items:
+            canceled_set.add(str(task_id))
+    return {"canceled": sorted(canceled_set)}
 
 
 @app.post("/api/tasks/{task_id}/start", response_model=BuildTaskResponse)
@@ -1884,7 +2663,7 @@ async def cancel_task(task_id: str, payload: dict = Body(...)):
     client_id = _require_client_id(payload.get("client_id"))
     _assert_task_owner(task, client_id)
     runner = get_task_runner()
-    ok = runner.cancel_task(task_id, client_id)
+    ok = runner.cancel_task(task_id, _normalize_client_id(task.client_id))
     if not ok:
         raise HTTPException(status_code=400, detail="任务无法取消")
     try:
@@ -1994,10 +2773,15 @@ async def download_file(task_id: str, client_id: str = None):
 @app.post("/api/tasks/desktop-output/release")
 async def release_desktop_outputs(client_id: str = None):
     client_id = _require_client_id(client_id)
+    current_user_id = _get_user_id_by_client_id(client_id)
+    if current_user_id:
+        allowed_client_ids = _get_user_client_ids(current_user_id) or {client_id}
+    else:
+        allowed_client_ids = {client_id}
 
     released = 0
     for task in list(tasks_db.values()):
-        if str(getattr(task, "client_id", "") or "") != client_id:
+        if _normalize_client_id(getattr(task, "client_id", "")) not in allowed_client_ids:
             continue
         if str(getattr(task, "mode", "") or "").strip().lower() != "desktop":
             continue

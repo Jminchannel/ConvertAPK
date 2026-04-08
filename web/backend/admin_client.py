@@ -13,6 +13,8 @@ _FEATURE_FLAGS_CACHE: dict = {
     "data": {
         "web_link_to_apk_enabled": False,
         "zip_to_desktop_enabled": False,
+        "client_login_enabled": True,
+        "client_register_enabled": True,
     },
     "checked_at": 0.0,
 }
@@ -249,10 +251,16 @@ def fetch_feature_flags(force: bool = False) -> Dict[str, Any]:
     result = {
         "web_link_to_apk_enabled": False,
         "zip_to_desktop_enabled": False,
+        "client_login_enabled": True,
+        "client_register_enabled": True,
     }
     if isinstance(data, dict):
         result["web_link_to_apk_enabled"] = bool(data.get("web_link_to_apk_enabled"))
         result["zip_to_desktop_enabled"] = bool(data.get("zip_to_desktop_enabled"))
+        if "client_login_enabled" in data:
+            result["client_login_enabled"] = bool(data.get("client_login_enabled"))
+        if "client_register_enabled" in data:
+            result["client_register_enabled"] = bool(data.get("client_register_enabled"))
     cached["data"] = result
     cached["checked_at"] = now
     return dict(result)

@@ -225,6 +225,7 @@ class BuildTask(BaseModel):
     message: str = ""
     download_url: Optional[str] = None
     output_filename: Optional[str] = None
+    desktop_output_expires_at: Optional[datetime] = None
     logs: List[str] = []
     cdn_localize_enabled: bool = False
     cdn_localize_urls: List[str] = []
@@ -270,6 +271,7 @@ class BuildTaskResponse(BaseModel):
     message: str
     download_url: Optional[str] = None
     output_filename: Optional[str] = None
+    desktop_output_expires_at: Optional[datetime] = None
     logs: List[str] = []
     reuse_keystore_from: Optional[str] = None
     cdn_localize_enabled: bool = False
@@ -298,6 +300,7 @@ class BuildTaskListItemResponse(BaseModel):
     message: str
     download_url: Optional[str] = None
     output_filename: Optional[str] = None
+    desktop_output_expires_at: Optional[datetime] = None
     reuse_keystore_from: Optional[str] = None
     cdn_localize_enabled: bool = False
     cdn_localize_urls: List[str] = []
@@ -329,3 +332,44 @@ class UpdateTaskRequest(BaseModel):
     cdn_localize_enabled: Optional[bool] = None
     cdn_localize_urls: Optional[List[str]] = None
     cdn_localize_select_all: Optional[bool] = None
+
+
+class AuthRegisterRequest(BaseModel):
+    """用户注册请求"""
+    email: str
+    password: str
+    client_id: str
+
+
+class AuthLoginRequest(BaseModel):
+    """用户登录请求"""
+    email: str
+    password: str
+    client_id: str
+
+
+class AuthUserProfile(BaseModel):
+    """用户资料"""
+    id: str
+    email: str
+    auth_provider: str = "local"
+    github_id: Optional[str] = None
+    github_login: Optional[str] = None
+    client_ids: List[str] = []
+    created_at: datetime
+    updated_at: datetime
+    last_login_at: Optional[datetime] = None
+
+
+class AuthSessionResponse(BaseModel):
+    """认证会话响应"""
+    token: str
+    token_type: str = "Bearer"
+    expires_at: datetime
+    user: AuthUserProfile
+
+
+class AuthMeResponse(BaseModel):
+    """当前登录用户信息"""
+    authenticated: bool
+    user: Optional[AuthUserProfile] = None

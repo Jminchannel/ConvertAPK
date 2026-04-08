@@ -112,7 +112,6 @@
             <span class="action-icon">&#x1F41B;</span>
             <span class="action-label">{{ t('settings.title') }}</span>
           </button>
-
           <div class="window-controls no-drag" v-if="windowControlsAvailable">
             <button class="window-btn" @click="minimizeWindow" aria-label="Minimize">-</button>
             <button class="window-btn window-maximize" @click="toggleMaximizeWindow" aria-label="Maximize">
@@ -120,6 +119,22 @@
             </button>
             <button class="window-btn window-close" @click="closeWindow" aria-label="Close">✕</button>
           </div>
+        </div>
+      </div>
+      <div v-if="!isMobileShell && (isLoggedIn || isAuthEntryEnabled)" class="header-auth-edge no-drag">
+        <button
+          v-if="!isLoggedIn && isAuthEntryEnabled"
+          class="btn btn-ghost btn-sm no-drag auth-entry-btn"
+          @click="openAuthModal('login')"
+        >
+          <span class="action-icon">&#x1F464;</span>
+          <span class="action-label">{{ t('auth.entry') }}</span>
+        </button>
+        <div v-else class="auth-user-chip no-drag">
+          <button class="auth-user-main" @click="openAuthModal('login')">
+            <span class="auth-user-email">{{ authDisplayName }}</span>
+          </button>
+          <button class="auth-user-logout" @click="logoutCurrentUser">{{ t('auth.logout') }}</button>
         </div>
       </div>
     </header>
@@ -1069,6 +1084,17 @@
                 <span class="mobile-action-arrow">&#x203A;</span>
               </button>
 
+              <button v-if="!isLoggedIn && isAuthEntryEnabled" class="mobile-action-item" @click="openAuthModal('login')">
+                <span class="mobile-action-icon">&#x1F464;</span>
+                <span class="mobile-action-text">{{ t('auth.entry') }}</span>
+                <span class="mobile-action-arrow">&#x203A;</span>
+              </button>
+              <button v-else class="mobile-action-item" @click="logoutCurrentUser">
+                <span class="mobile-action-icon">&#x1F513;</span>
+                <span class="mobile-action-text">{{ t('auth.logout') }}</span>
+                <span class="mobile-action-arrow">&#x203A;</span>
+              </button>
+
               <button class="mobile-action-item" @click="openDonation(false)">
                 <span class="mobile-action-icon">&#x1F496;</span>
                 <span class="mobile-action-text">{{ t('donation.button') }}</span>
@@ -1340,6 +1366,108 @@
           <div class="cdn-localize-dialog-footer">
             <div class="cdn-localize-tip">{{ t('cdnLocalize.tip') }}</div>
             <button class="btn btn-primary btn-sm" @click="closeCdnLocalizeModal">{{ t('cdnLocalize.done') }}</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- Auth dialog -->
+    <Teleport to="body">
+      <div v-if="showAuthModal" class="auth-overlay" @click.self="closeAuthModal">
+        <div class="auth-dialog">
+          <div class="auth-dialog-header">
+            <div class="auth-dialog-title">
+              {{ authMode === 'register' ? t('auth.registerTitle') : t('auth.loginTitle') }}
+            </div>
+            <button class="auth-close-btn" @click="closeAuthModal">x</button>
+          </div>
+
+          <div v-if="isAuthEntryEnabled" class="auth-tabs">
+            <button
+              v-if="isClientLoginEnabled"
+              class="auth-tab"
+              :class="{ active: authMode === 'login' }"
+              @click="switchAuthMode('login')"
+            >
+              {{ t('auth.loginTab') }}
+            </button>
+            <button
+              v-if="isClientRegisterEnabled"
+              class="auth-tab"
+              :class="{ active: authMode === 'register' }"
+              @click="switchAuthMode('register')"
+            >
+              {{ t('auth.registerTab') }}
+            </button>
+          </div>
+
+          <div class="auth-dialog-body">
+            <div class="form-group">
+              <label class="form-label">{{ t('auth.email') }}</label>
+              <input
+                v-model.trim="authForm.email"
+                type="email"
+                class="form-input auth-input"
+                :placeholder="t('auth.emailPlaceholder')"
+                autocomplete="username"
+                @keyup.enter="submitAuthForm"
+              />
+            </div>
+            <div class="form-group">
+              <label class="form-label">{{ t('auth.password') }}</label>
+              <input
+                v-model="authForm.password"
+                type="password"
+                class="form-input auth-input"
+                :placeholder="t('auth.passwordPlaceholder')"
+                autocomplete="current-password"
+                @keyup.enter="submitAuthForm"
+              />
+            </div>
+            <div v-if="authMode === 'register'" class="form-group">
+              <label class="form-label">{{ t('auth.confirmPassword') }}</label>
+              <input
+                v-model="authForm.confirmPassword"
+                type="password"
+                class="form-input auth-input"
+                :placeholder="t('auth.confirmPasswordPlaceholder')"
+                autocomplete="new-password"
+                @keyup.enter="submitAuthForm"
+              />
+            </div>
+            <div v-if="authError" class="form-error auth-error">{{ authError }}</div>
+          </div>
+
+          <div v-if="isClientLoginEnabled" class="auth-oauth-wrap">
+            <div class="auth-oauth-divider">
+              <span>{{ t('auth.orDivider') }}</span>
+            </div>
+            <button
+              class="auth-github-btn"
+              :disabled="authSubmitting || githubAuthSubmitting"
+              @click="startGithubAuth"
+            >
+              <span class="auth-github-mark" aria-hidden="true">GH</span>
+              <span>{{ githubAuthSubmitting ? t('auth.githubRedirecting') : t('auth.githubSubmit') }}</span>
+            </button>
+          </div>
+
+          <div class="auth-dialog-footer">
+            <button class="btn btn-secondary btn-sm" @click="closeAuthModal">
+              {{ t('auth.cancel') }}
+            </button>
+            <button
+              class="btn btn-primary btn-sm auth-submit-btn"
+              :class="{ 'auth-submit-shake': authSubmitButtonShake }"
+              :disabled="authSubmitting || githubAuthSubmitting || (authMode === 'login' ? !isClientLoginEnabled : !isClientRegisterEnabled)"
+              @click="submitAuthForm"
+            >
+              {{
+                authSubmitting
+                  ? t('auth.submitting')
+                  : (authMode === 'register' ? t('auth.registerSubmit') : t('auth.loginSubmit'))
+              }}
+            </button>
           </div>
         </div>
       </div>
@@ -2076,6 +2204,249 @@ export default defineComponent({
   display: none;
 }
 
+.header {
+  position: relative;
+}
+
+.header-auth-edge {
+  position: absolute;
+  top: 50%;
+  right: max(14px, env(safe-area-inset-right));
+  transform: translateY(-50%);
+  z-index: 6;
+  display: inline-flex;
+  align-items: center;
+}
+
+.auth-entry-btn {
+  border-color: rgba(129, 140, 248, 0.45);
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.14), rgba(14, 165, 233, 0.08));
+}
+
+.auth-user-chip {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgba(129, 140, 248, 0.36);
+  background: linear-gradient(135deg, rgba(30, 41, 59, 0.72), rgba(15, 23, 42, 0.52));
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.auth-user-main,
+.auth-user-logout {
+  border: none;
+  background: transparent;
+  color: var(--text-main);
+  cursor: pointer;
+  padding: 7px 12px;
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.auth-user-main {
+  max-width: 190px;
+}
+
+.auth-user-email {
+  display: inline-block;
+  max-width: 166px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+}
+
+.auth-user-logout {
+  border-left: 1px solid rgba(148, 163, 184, 0.28);
+  color: #fda4af;
+}
+
+.auth-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: radial-gradient(circle at 20% 10%, rgba(99, 102, 241, 0.22), transparent 42%), rgba(2, 6, 23, 0.72);
+  backdrop-filter: blur(8px);
+}
+
+.auth-dialog {
+  width: min(460px, calc(100vw - 32px));
+  border-radius: 20px;
+  border: 1px solid rgba(129, 140, 248, 0.3);
+  background:
+    radial-gradient(circle at 100% 0%, rgba(56, 189, 248, 0.18), transparent 40%),
+    radial-gradient(circle at 0% 100%, rgba(129, 140, 248, 0.14), transparent 38%),
+    var(--bg-card);
+  box-shadow: 0 24px 56px rgba(2, 6, 23, 0.55);
+  overflow: hidden;
+}
+
+.auth-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px 8px;
+}
+
+.auth-dialog-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.auth-close-btn {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 18px;
+}
+
+.auth-tabs {
+  display: flex;
+  margin: 0 20px 14px;
+  padding: 4px;
+  border-radius: 999px;
+  border: 1px solid var(--border-color);
+  background: rgba(148, 163, 184, 0.08);
+}
+
+.auth-tab {
+  flex: 1;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-sub);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 12px;
+  transition: all 0.2s ease;
+}
+
+.auth-tab.active {
+  color: #fff;
+  background: var(--primary-gradient);
+}
+
+.auth-dialog-body {
+  padding: 0 20px 8px;
+}
+
+.auth-input {
+  height: 42px;
+}
+
+.auth-error {
+  margin-top: 4px;
+}
+
+.auth-oauth-wrap {
+  padding: 0 20px 8px;
+}
+
+.auth-oauth-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-muted);
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+
+.auth-oauth-divider::before,
+.auth-oauth-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(148, 163, 184, 0.4), transparent);
+}
+
+.auth-github-btn {
+  width: 100%;
+  border: 1px solid rgba(148, 163, 184, 0.36);
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.88), rgba(30, 41, 59, 0.78));
+  color: var(--text-main);
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+}
+
+.auth-github-btn:hover {
+  transform: translateY(-1px);
+  border-color: rgba(129, 140, 248, 0.45);
+  background: linear-gradient(135deg, rgba(30, 41, 59, 0.92), rgba(51, 65, 85, 0.84));
+}
+
+.auth-github-btn:disabled {
+  opacity: 0.66;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.auth-github-mark {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(99, 102, 241, 0.22);
+  border: 1px solid rgba(129, 140, 248, 0.36);
+  font-size: 10px;
+  letter-spacing: 0.3px;
+}
+
+.auth-dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 20px 20px;
+}
+
+.auth-submit-btn {
+  transform-origin: center;
+}
+
+.auth-submit-shake {
+  animation: authSubmitShake 0.48s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes authSubmitShake {
+  0% {
+    transform: translate3d(0, 0, 0) rotate(0deg);
+  }
+  15% {
+    transform: translate3d(-6px, 0, 0) rotate(-2.5deg);
+  }
+  30% {
+    transform: translate3d(6px, 0, 0) rotate(2.5deg);
+  }
+  45% {
+    transform: translate3d(-5px, 0, 0) rotate(-1.8deg);
+  }
+  60% {
+    transform: translate3d(5px, 0, 0) rotate(1.8deg);
+  }
+  75% {
+    transform: translate3d(-3px, 0, 0) rotate(-1deg);
+  }
+  100% {
+    transform: translate3d(0, 0, 0) rotate(0deg);
+  }
+}
+
 .mobile-swipe-stage {
   width: 100%;
 }
@@ -2461,6 +2832,7 @@ export default defineComponent({
   .mobile-shell-active .logs-overlay,
   .mobile-shell-active .settings-overlay,
   .mobile-shell-active .donation-overlay,
+  .mobile-shell-active .auth-overlay,
   .mobile-shell-active .html-editor-overlay,
   .mobile-shell-active .html-preview-overlay {
     align-items: flex-end;
@@ -2472,6 +2844,7 @@ export default defineComponent({
   .mobile-shell-active .logs-dialog,
   .mobile-shell-active .settings-dialog,
   .mobile-shell-active .donation-dialog,
+  .mobile-shell-active .auth-dialog,
   .mobile-shell-active .html-editor-dialog,
   .mobile-shell-active .html-preview-dialog {
     width: 100vw;
@@ -2489,6 +2862,7 @@ export default defineComponent({
   .mobile-shell-active .logs-dialog-body,
   .mobile-shell-active .settings-dialog-body,
   .mobile-shell-active .donation-dialog-body,
+  .mobile-shell-active .auth-dialog-body,
   .mobile-shell-active .html-editor-dialog-body,
   .mobile-shell-active .html-preview-dialog-body {
     flex: 1;
