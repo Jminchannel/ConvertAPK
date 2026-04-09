@@ -211,6 +211,37 @@ function toRelativeAssetPath(ownerFile, targetFile) {
   return rel;
 }
 
+function isPathInsideRoot(candidatePath) {
+  const resolved = path.resolve(candidatePath);
+  if (resolved === rootDir) return true;
+  const prefix = rootDir.endsWith(path.sep) ? rootDir : `${rootDir}${path.sep}`;
+  return resolved.startsWith(prefix);
+}
+
+function localFileFromRemoteUrl(remoteUrl) {
+  try {
+    const remote = new URL(remoteUrl);
+    const pathname = String(remote.pathname || "");
+    if (!pathname) return "";
+    let decodedPathname = pathname;
+    try {
+      decodedPathname = decodeURIComponent(pathname);
+    } catch {
+      decodedPathname = pathname;
+    }
+    const relativePath = decodedPathname.replace(/^\/+/, "");
+    if (!relativePath) return "";
+    const candidate = path.resolve(rootDir, relativePath);
+    if (!isPathInsideRoot(candidate)) return "";
+    if (!fs.existsSync(candidate)) return "";
+    const stat = fs.statSync(candidate);
+    if (!stat.isFile()) return "";
+    return candidate;
+  } catch {
+    return "";
+  }
+}
+
 async function fetchWithRetry(url, retries = 2) {
   let lastError = null;
   for (let attempt = 0; attempt <= retries; attempt += 1) {
@@ -299,6 +330,20 @@ async function localizeUrl(rawUrl, ownerFile, baseUrl = "") {
     if (!allowCanonicalUrls.has(canonical) && !hasRemoteBase) {
       return rawUrl;
     }
+  }
+
+  const localFromRemote = localFileFromRemoteUrl(canonical);
+  if (localFromRemote) {
+    const localized = toRelativeAssetPath(ownerFile, localFromRemote);
+    if (localized !== rawUrl) {
+      replaceCount += 1;
+    }
+    console.log(
+      `[offlineize] reused local: ${canonical} -> ${path
+        .relative(rootDir, localFromRemote)
+        .replace(/\\/g, "/")}`
+    );
+    return localized;
   }
 
   try {

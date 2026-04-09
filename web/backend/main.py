@@ -85,6 +85,22 @@ _github_repo_stats_cache = {
     "stars": None,
     "fetched_at": 0.0,
 }
+UPLOAD_MAX_SIZE_MB_DEFAULT = 200
+UPLOAD_MAX_SIZE_MB_MIN = 1
+UPLOAD_MAX_SIZE_MB_MAX = 10240
+UPLOAD_STREAM_CHUNK_SIZE = 1024 * 1024
+
+
+def _normalize_upload_max_size_mb(value) -> int:
+    try:
+        size_mb = int(value)
+    except Exception:
+        return UPLOAD_MAX_SIZE_MB_DEFAULT
+    if size_mb < UPLOAD_MAX_SIZE_MB_MIN:
+        return UPLOAD_MAX_SIZE_MB_MIN
+    if size_mb > UPLOAD_MAX_SIZE_MB_MAX:
+        return UPLOAD_MAX_SIZE_MB_MAX
+    return size_mb
 
 
 def _load_client_feature_flags() -> dict:
@@ -93,6 +109,7 @@ def _load_client_feature_flags() -> dict:
         "zip_to_desktop_enabled": False,
         "client_login_enabled": True,
         "client_register_enabled": True,
+        "upload_max_size_mb": UPLOAD_MAX_SIZE_MB_DEFAULT,
     }
     try:
         data = fetch_feature_flags()
@@ -105,6 +122,8 @@ def _load_client_feature_flags() -> dict:
             flags["client_login_enabled"] = bool(data.get("client_login_enabled"))
         if "client_register_enabled" in data:
             flags["client_register_enabled"] = bool(data.get("client_register_enabled"))
+        if "upload_max_size_mb" in data:
+            flags["upload_max_size_mb"] = _normalize_upload_max_size_mb(data.get("upload_max_size_mb"))
     return flags
 
 
@@ -126,6 +145,11 @@ def _is_client_login_enabled() -> bool:
 def _is_client_register_enabled() -> bool:
     flags = _load_client_feature_flags()
     return bool(flags.get("client_register_enabled", True))
+
+
+def _get_upload_max_size_mb() -> int:
+    flags = _load_client_feature_flags()
+    return _normalize_upload_max_size_mb(flags.get("upload_max_size_mb"))
 
 
 def _fetch_github_repo_stats() -> dict:
@@ -2079,25 +2103,46 @@ async def auth_github_callback(
 @app.post("/api/upload")
 async def upload_file(file: UploadFile = File(...)):
     """上传ZIP文件"""
-    if not file.filename.endswith('.zip'):
+    normalized_name = str(file.filename or "").strip()
+    if not normalized_name.lower().endswith('.zip'):
         raise HTTPException(status_code=400, detail="只支持ZIP文件")
     
+    max_size_mb = _get_upload_max_size_mb()
+    max_size_bytes = max_size_mb * 1024 * 1024
     file_id = str(uuid.uuid4())
-    filename = f"{file_id}_{file.filename}"
+    filename = f"{file_id}_{normalized_name}"
     file_path = BACKEND_UPLOAD_DIR / filename
+    total_size = 0
     
     try:
         with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+            while True:
+                chunk = await file.read(UPLOAD_STREAM_CHUNK_SIZE)
+                if not chunk:
+                    break
+                total_size += len(chunk)
+                if total_size > max_size_bytes:
+                    raise HTTPException(status_code=413, detail=f"upload file exceeds limit: {max_size_mb}MB")
+                buffer.write(chunk)
+    except HTTPException:
+        if file_path.exists():
+            file_path.unlink(missing_ok=True)
+        raise
     except Exception as e:
+        if file_path.exists():
+            file_path.unlink(missing_ok=True)
         raise HTTPException(status_code=500, detail=f"文件保存失败: {str(e)}")
     
-    file_size = file_path.stat().st_size
+    finally:
+        try:
+            await file.close()
+        except Exception:
+            pass
     
     return {
         "filename": filename,
-        "original_name": file.filename,
-        "size": file_size,
+        "original_name": normalized_name,
+        "size": total_size,
         "message": "上传成功"
     }
 
@@ -2105,26 +2150,47 @@ async def upload_file(file: UploadFile = File(...)):
 @app.post("/api/upload-html")
 async def upload_html(file: UploadFile = File(...)):
     """上传HTML文件"""
-    filename_lower = (file.filename or "").lower()
+    normalized_name = str(file.filename or "").strip()
+    filename_lower = normalized_name.lower()
     if not (filename_lower.endswith(".html") or filename_lower.endswith(".htm")):
         raise HTTPException(status_code=400, detail="只支持HTML文件")
 
+    max_size_mb = _get_upload_max_size_mb()
+    max_size_bytes = max_size_mb * 1024 * 1024
     file_id = str(uuid.uuid4())
-    filename = f"{file_id}_{file.filename}"
+    filename = f"{file_id}_{normalized_name}"
     file_path = BACKEND_UPLOAD_DIR / filename
+    total_size = 0
 
     try:
         with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+            while True:
+                chunk = await file.read(UPLOAD_STREAM_CHUNK_SIZE)
+                if not chunk:
+                    break
+                total_size += len(chunk)
+                if total_size > max_size_bytes:
+                    raise HTTPException(status_code=413, detail=f"upload file exceeds limit: {max_size_mb}MB")
+                buffer.write(chunk)
+    except HTTPException:
+        if file_path.exists():
+            file_path.unlink(missing_ok=True)
+        raise
     except Exception as e:
+        if file_path.exists():
+            file_path.unlink(missing_ok=True)
         raise HTTPException(status_code=500, detail=f"文件保存失败: {str(e)}")
 
-    file_size = file_path.stat().st_size
+    finally:
+        try:
+            await file.close()
+        except Exception:
+            pass
 
     return {
         "filename": filename,
-        "original_name": file.filename,
-        "size": file_size,
+        "original_name": normalized_name,
+        "size": total_size,
         "message": "上传成功"
     }
 

@@ -15,6 +15,7 @@ _FEATURE_FLAGS_CACHE: dict = {
         "zip_to_desktop_enabled": False,
         "client_login_enabled": True,
         "client_register_enabled": True,
+        "upload_max_size_mb": 200,
     },
     "checked_at": 0.0,
 }
@@ -253,6 +254,7 @@ def fetch_feature_flags(force: bool = False) -> Dict[str, Any]:
         "zip_to_desktop_enabled": False,
         "client_login_enabled": True,
         "client_register_enabled": True,
+        "upload_max_size_mb": 200,
     }
     if isinstance(data, dict):
         result["web_link_to_apk_enabled"] = bool(data.get("web_link_to_apk_enabled"))
@@ -261,6 +263,13 @@ def fetch_feature_flags(force: bool = False) -> Dict[str, Any]:
             result["client_login_enabled"] = bool(data.get("client_login_enabled"))
         if "client_register_enabled" in data:
             result["client_register_enabled"] = bool(data.get("client_register_enabled"))
+        if "upload_max_size_mb" in data:
+            try:
+                parsed_size = int(data.get("upload_max_size_mb") or 0)
+                if parsed_size > 0:
+                    result["upload_max_size_mb"] = parsed_size
+            except Exception:
+                pass
     cached["data"] = result
     cached["checked_at"] = now
     return dict(result)

@@ -4,6 +4,7 @@ const api = axios.create({
   baseURL: '/api',
   timeout: 30000
 })
+const uploadRequestTimeoutMs = 0
 
 const authTokenStorageKey = 'apk_builder_auth_token'
 
@@ -112,6 +113,7 @@ export const uploadFile = async (file, onProgress) => {
     headers: {
       'Content-Type': 'multipart/form-data'
     },
+    timeout: uploadRequestTimeoutMs,
     onUploadProgress: (progressEvent) => {
       if (onProgress) {
         const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total)
@@ -144,6 +146,7 @@ export const uploadHtml = async (file, onProgress) => {
     headers: {
       'Content-Type': 'multipart/form-data'
     },
+    timeout: uploadRequestTimeoutMs,
     onUploadProgress: (progressEvent) => {
       if (onProgress) {
         const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total)
