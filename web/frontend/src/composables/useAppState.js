@@ -489,128 +489,193 @@ export const useAppState = () => {
 
   const complianceNoticeByLang = {
     en: {
-      title: 'User Compliance Notice and Disclaimer',
+      title: 'User Service Agreement',
       effectiveDateLabel: 'Effective date',
-      effectiveDate: '2026-03-01',
+      effectiveDate: '2026-04-10',
       intro:
-        'This platform only provides web packaging and app build services. You must read and agree before using it.',
+        'Please read this agreement carefully before using the client and related services. By clicking "Agree and Continue", you confirm that you have read, understood, and accepted all terms.',
       sections: [
         {
-          title: 'Prohibited Uses',
+          title: '1. Scope and Acceptance',
           lines: [
-            'Do not create or distribute illegal information.',
-            'Do not create or distribute obscene, pornographic, vulgar, violent, or terror-related content.',
-            'Do not engage in phishing, fraud, impersonation, or social-engineering scams.',
-            'Do not use this platform for gambling or betting promotion.',
-            'Do not infringe copyright, trademark, patent, privacy, portrait, or reputation rights.',
-            'Do not create, spread, or host malware, trojans, backdoors, ransomware, or attack scripts.'
+            'This agreement applies to all features provided by this client, including upload, packaging, build, download, and log viewing.',
+            'If you do not agree with any term, please stop using the service immediately.'
           ]
         },
         {
-          title: 'User Responsibility',
+          title: '2. Account and Security',
           lines: [
-            'You are solely responsible for all uploaded, generated, and distributed content.',
-            'You must ensure you have lawful rights and authorization for all materials you use.'
+            'You are responsible for your account, verification code, device, and operation security.',
+            'You must not lend, rent, sell, or share your account with others.'
           ]
         },
         {
-          title: 'Platform Rights',
+          title: '3. Service Rules',
           lines: [
-            'For suspected violations, the platform may block tasks, remove content, suspend service, and preserve evidence.',
-            'The platform may report and cooperate with regulators or law-enforcement agencies as required by law.'
+            'Services are provided on an "as is" basis and may be interrupted due to maintenance, upgrades, or force majeure.',
+            'We may adjust features, usage limits, or service availability when necessary for compliance and security.'
           ]
         },
         {
-          title: 'Compensation',
+          title: '4. User Conduct',
           lines: [
-            'If your actions cause claims, penalties, or losses to the platform, you shall bear full liability and compensation.'
+            'Do not publish illegal, infringing, fraudulent, malicious, or harmful content.',
+            'You must ensure you have lawful rights or authorization for all uploaded materials.',
+            'Do not attack, reverse-engineer, or abuse the platform in any way.'
+          ]
+        },
+        {
+          title: '5. Intellectual Property',
+          lines: [
+            'The software, interface, and related technical materials of this client are protected by law.',
+            'You remain responsible for the legality and ownership of the content you upload or generate.'
+          ]
+        },
+        {
+          title: '6. Liability and Remedies',
+          lines: [
+            'If your violation causes claims, penalties, or losses, you shall bear corresponding legal liability.',
+            'For suspected violations, we may suspend tasks, restrict features, or terminate service according to law.'
+          ]
+        },
+        {
+          title: '7. Updates and Disputes',
+          lines: [
+            'We may update this agreement and notify you by announcement, dialog, or system notice.',
+            'Continued use after update means you accept the revised terms.'
           ]
         }
       ],
       legalReferences:
-        'Applicable laws include the Cybersecurity Law of the PRC and the Anti-Telecom and Online Fraud Law of the PRC.',
+        'Contact email: 2952299066@qq.com. If you have any questions about this agreement, please contact us by email.',
       acceptButton: 'Agree and Continue',
       rejectButton: 'Decline and Exit'
     },
     'zh-CN': {
-      title: '用户合规使用与免责告知',
+      title: '用户使用协议',
       effectiveDateLabel: '生效日期',
-      effectiveDate: '2026-03-01',
-      intro: '本平台仅提供网页打包与应用构建技术服务。您须阅读并同意本告知后方可继续使用。',
+      effectiveDate: '2026-04-10',
+      intro:
+        '请你在使用本客户端及相关服务前，认真阅读并充分理解本协议全部条款。点击“同意并继续”即视为你已阅读、理解并接受本协议。',
       sections: [
         {
-          title: '禁止用途',
+          title: '一、协议适用与接受',
           lines: [
-            '禁止制作、发布、传播违法信息。',
-            '禁止制作、发布、传播低俗、色情、暴力、恐怖相关内容。',
-            '禁止实施诈骗、钓鱼、仿冒或社会工程攻击行为。',
-            '禁止用于赌博、博彩或相关引流推广。',
-            '禁止侵犯著作权、商标权、专利权、隐私权、肖像权、名誉权等合法权益。',
-            '禁止制作、传播、托管恶意软件、木马、后门、勒索程序、攻击脚本等。'
+            '本协议适用于本客户端提供的上传、打包、构建、下载、日志查看等全部功能和相关服务。',
+            '如你不同意本协议任一条款，请立即停止使用本服务并退出客户端。'
           ]
         },
         {
-          title: '用户责任',
+          title: '二、账号与安全',
           lines: [
-            '您对上传、生成、分发、传播的全部内容承担完整法律责任。',
-            '您应保证对所使用素材享有合法权利或已获得有效授权。'
+            '你应妥善保管账号、验证码及设备信息，并对账号下的全部操作行为承担责任。',
+            '未经许可，不得出借、出租、转让、出售或共享账号。'
           ]
         },
         {
-          title: '平台处置权',
+          title: '三、服务内容与使用规则',
           lines: [
-            '对疑似违规行为，平台有权拦截任务、下架内容、限制服务并保全证据。',
-            '平台可依法向监管与司法机关报告并配合调查。'
+            '本服务按“现状”提供，可能因系统维护、版本升级、网络异常或不可抗力而中断或变更。',
+            '为保障合规与安全，平台有权根据实际情况调整功能、频率限制或服务范围。'
           ]
         },
         {
-          title: '赔偿责任',
-          lines: ['如因您的行为导致平台遭受索赔、处罚或损失，您应承担全部责任并赔偿。']
+          title: '四、用户行为规范',
+          lines: [
+            '禁止制作、上传、传播违法违规、侵权、诈骗、恶意程序或其他有害内容。',
+            '你应确保上传与使用的素材具备合法来源及有效授权。',
+            '不得以任何方式攻击、破解、逆向、干扰或滥用平台能力。'
+          ]
+        },
+        {
+          title: '五、知识产权与内容责任',
+          lines: [
+            '本客户端的软件、界面、文档及相关技术资料受法律保护，权利归权利人所有。',
+            '你对自己上传、生成、发布内容的合法性、真实性及完整性承担全部责任。'
+          ]
+        },
+        {
+          title: '六、责任限制与违约处理',
+          lines: [
+            '因你违反本协议导致平台或第三方损失的，你应依法承担赔偿责任。',
+            '对疑似违规行为，平台有权采取暂停任务、限制功能、封禁账号并保留证据等措施。'
+          ]
+        },
+        {
+          title: '七、协议更新与争议处理',
+          lines: [
+            '平台可根据业务和法规变化更新本协议，并通过公告、弹窗或系统通知提示。',
+            '协议更新后你继续使用本服务的，视为接受更新后的条款。'
+          ]
         }
       ],
-      legalReferences: '相关法律包括《中华人民共和国网络安全法》《中华人民共和国反电信网络诈骗法》等。',
+      legalReferences:
+        '联系方式：2952299066@qq.com。若你对本协议有任何疑问，可通过邮箱联系。争议应优先友好协商处理。',
       acceptButton: '同意并继续',
-      rejectButton: '拒绝并退出'
+      rejectButton: '不同意并退出'
     },
     'zh-TW': {
-      title: '使用者合規與免責告知',
+      title: '使用者服務協議',
       effectiveDateLabel: '生效日期',
-      effectiveDate: '2026-03-01',
-      intro: '本平台僅提供網頁封裝與應用建置技術服務。您須閱讀並同意本告知後方可繼續使用。',
+      effectiveDate: '2026-04-10',
+      intro:
+        '請你在使用本客戶端及相關服務前，仔細閱讀並充分理解本協議全部條款。點擊「同意並繼續」即視為你已閱讀、理解並接受本協議。',
       sections: [
         {
-          title: '禁止用途',
+          title: '一、協議適用與接受',
           lines: [
-            '禁止製作、發布、傳播違法資訊。',
-            '禁止製作、發布、傳播低俗、色情、暴力、恐怖相關內容。',
-            '禁止從事詐騙、釣魚、仿冒或社交工程攻擊行為。',
-            '禁止用於賭博、博彩或相關導流推廣。',
-            '禁止侵犯著作權、商標權、專利權、隱私權、肖像權、名譽權等合法權益。',
-            '禁止製作、傳播、託管惡意軟體、木馬、後門、勒索程式、攻擊腳本等。'
+            '本協議適用於本客戶端提供的上傳、打包、建置、下載、日誌查看等全部功能與相關服務。',
+            '如你不同意本協議任一條款，請立即停止使用本服務並退出客戶端。'
           ]
         },
         {
-          title: '使用者責任',
+          title: '二、帳號與安全',
           lines: [
-            '您對上傳、生成、散布、傳播的全部內容承擔完整法律責任。',
-            '您應確保對使用素材享有合法權利或已取得有效授權。'
+            '你應妥善保管帳號、驗證碼與設備資訊，並對帳號下的全部操作行為承擔責任。',
+            '未經許可，不得出借、出租、轉讓、出售或共享帳號。'
           ]
         },
         {
-          title: '平台處置權',
+          title: '三、服務內容與使用規則',
           lines: [
-            '對疑似違規行為，平台有權攔截任務、下架內容、限制服務並保全證據。',
-            '平台可依法向監管與司法機關通報並配合調查。'
+            '本服務按「現狀」提供，可能因系統維護、版本升級、網路異常或不可抗力而中斷或變更。',
+            '為保障合規與安全，平台有權依實際情況調整功能、頻率限制或服務範圍。'
           ]
         },
         {
-          title: '賠償責任',
-          lines: ['如因您的行為導致平台遭受索賠、處罰或損失，您應承擔全部責任並賠償。']
+          title: '四、使用者行為規範',
+          lines: [
+            '禁止製作、上傳、傳播違法違規、侵權、詐騙、惡意程式或其他有害內容。',
+            '你應確保上傳與使用的素材具備合法來源及有效授權。',
+            '不得以任何方式攻擊、破解、逆向、干擾或濫用平台能力。'
+          ]
+        },
+        {
+          title: '五、智慧財產權與內容責任',
+          lines: [
+            '本客戶端的軟體、介面、文件及相關技術資料受法律保護，權利歸權利人所有。',
+            '你對自己上傳、生成、發布內容的合法性、真實性與完整性承擔全部責任。'
+          ]
+        },
+        {
+          title: '六、責任限制與違約處理',
+          lines: [
+            '因你違反本協議導致平台或第三方損失的，你應依法承擔賠償責任。',
+            '對疑似違規行為，平台有權採取暫停任務、限制功能、封禁帳號並保留證據等措施。'
+          ]
+        },
+        {
+          title: '七、協議更新與爭議處理',
+          lines: [
+            '平台可依業務與法規變化更新本協議，並透過公告、彈窗或系統通知提示。',
+            '協議更新後你繼續使用本服務的，視為接受更新後條款。'
+          ]
         }
       ],
-      legalReferences: '相關法律包括《中華人民共和國網路安全法》《中華人民共和國反電信網路詐騙法》等。',
+      legalReferences:
+        '聯絡方式：2952299066@qq.com。若你對本協議有任何疑問，可透過電子郵件聯絡。',
       acceptButton: '同意並繼續',
-      rejectButton: '拒絕並離開'
+      rejectButton: '不同意並退出'
     }
   }
   const complianceNotice = computed(() => {
