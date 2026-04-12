@@ -106,10 +106,12 @@ export const getGithubAuthAuthorize = async ({ clientId, returnUrl } = {}) => {
 }
 
 export const uploadFile = async (file, onProgress) => {
+  const clientId = getClientId()
   const formData = new FormData()
   formData.append('file', file)
   
   const response = await api.post('/upload', formData, {
+    params: { client_id: clientId },
     headers: {
       'Content-Type': 'multipart/form-data'
     },
@@ -139,10 +141,12 @@ export const uploadIcon = async (file) => {
 
 // 濠电偞鍨堕幐鎼佹晝閿濆洦顫曠紒鍌涚炕ML闂備礁鎼崐绋棵洪敐鍛瀻?
 export const uploadHtml = async (file, onProgress) => {
+  const clientId = getClientId()
   const formData = new FormData()
   formData.append('file', file)
 
   const response = await api.post('/upload-html', formData, {
+    params: { client_id: clientId },
     headers: {
       'Content-Type': 'multipart/form-data'
     },
@@ -177,7 +181,7 @@ export const uploadKeystore = async (file) => {
 }
 
 export const probeUrl = async (url) => {
-  const response = await api.post('/url-probe', { url })
+  const response = await api.post('/url-probe', { url, client_id: getClientId() })
   return response.data
 }
 
@@ -398,7 +402,9 @@ export const getAdminAnnouncements = async () => {
 }
 
 export const getAdminFeatures = async () => {
-  const response = await api.get('/adminhub/features')
+  const response = await api.get('/adminhub/features', {
+    params: { client_id: getClientId() }
+  })
   return response.data
 }
 

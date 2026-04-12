@@ -103,7 +103,7 @@ def _normalize_upload_max_size_mb(value) -> int:
     return size_mb
 
 
-def _load_client_feature_flags() -> dict:
+def _load_client_feature_flags(client_id: str | None = None) -> dict:
     flags = {
         "web_link_to_apk_enabled": False,
         "zip_to_desktop_enabled": False,
@@ -112,7 +112,7 @@ def _load_client_feature_flags() -> dict:
         "upload_max_size_mb": UPLOAD_MAX_SIZE_MB_DEFAULT,
     }
     try:
-        data = fetch_feature_flags()
+        data = fetch_feature_flags(client_id=_normalize_client_id(client_id))
     except Exception:
         data = None
     if isinstance(data, dict):
@@ -127,28 +127,28 @@ def _load_client_feature_flags() -> dict:
     return flags
 
 
-def _is_web_link_mode_enabled() -> bool:
-    flags = _load_client_feature_flags()
+def _is_web_link_mode_enabled(client_id: str | None = None) -> bool:
+    flags = _load_client_feature_flags(client_id=client_id)
     return bool(flags.get("web_link_to_apk_enabled"))
 
 
-def _is_desktop_mode_enabled() -> bool:
-    flags = _load_client_feature_flags()
+def _is_desktop_mode_enabled(client_id: str | None = None) -> bool:
+    flags = _load_client_feature_flags(client_id=client_id)
     return bool(flags.get("zip_to_desktop_enabled"))
 
 
-def _is_client_login_enabled() -> bool:
-    flags = _load_client_feature_flags()
+def _is_client_login_enabled(client_id: str | None = None) -> bool:
+    flags = _load_client_feature_flags(client_id=client_id)
     return bool(flags.get("client_login_enabled", True))
 
 
-def _is_client_register_enabled() -> bool:
-    flags = _load_client_feature_flags()
+def _is_client_register_enabled(client_id: str | None = None) -> bool:
+    flags = _load_client_feature_flags(client_id=client_id)
     return bool(flags.get("client_register_enabled", True))
 
 
-def _get_upload_max_size_mb() -> int:
-    flags = _load_client_feature_flags()
+def _get_upload_max_size_mb(client_id: str | None = None) -> int:
+    flags = _load_client_feature_flags(client_id=client_id)
     return _normalize_upload_max_size_mb(flags.get("upload_max_size_mb"))
 
 
@@ -1936,11 +1936,11 @@ async def assets(path: str):
 @app.post("/api/auth/register", response_model=AuthSessionResponse)
 async def auth_register(payload: AuthRegisterRequest):
     """用户注册并绑定当前客户端"""
-    if not _is_client_register_enabled():
-        raise HTTPException(status_code=403, detail="register is disabled by admin")
+    client_id = _require_client_id(payload.client_id)
+    if not _is_client_register_enabled(client_id):
+        raise HTTPException(status_code=403, detail="register is disabled by admin for current client")
     email = _validate_email_or_raise(payload.email)
     password = _validate_password_or_raise(payload.password)
-    client_id = _require_client_id(payload.client_id)
     if email in email_to_user_id:
         raise HTTPException(status_code=409, detail="email already exists")
 
@@ -1970,11 +1970,11 @@ async def auth_register(payload: AuthRegisterRequest):
 @app.post("/api/auth/login", response_model=AuthSessionResponse)
 async def auth_login(payload: AuthLoginRequest):
     """用户登录并绑定当前客户端"""
-    if not _is_client_login_enabled():
-        raise HTTPException(status_code=403, detail="login is disabled by admin")
+    client_id = _require_client_id(payload.client_id)
+    if not _is_client_login_enabled(client_id):
+        raise HTTPException(status_code=403, detail="login is disabled by admin for current client")
     email = _validate_email_or_raise(payload.email)
     password = _validate_password_or_raise(payload.password)
-    client_id = _require_client_id(payload.client_id)
     user_id = email_to_user_id.get(email)
     if not user_id:
         raise HTTPException(status_code=401, detail="email or password is incorrect")
@@ -2026,11 +2026,11 @@ async def auth_logout(request: Request):
 @app.get("/api/auth/github/login")
 async def auth_github_login(client_id: str, return_url: str | None = None):
     """鐢熸垚 GitHub OAuth 鎺堟潈鍦板潃"""
-    if not _is_client_login_enabled():
-        raise HTTPException(status_code=403, detail="login is disabled by admin")
+    normalized_client_id = _require_client_id(client_id)
+    if not _is_client_login_enabled(normalized_client_id):
+        raise HTTPException(status_code=403, detail="login is disabled by admin for current client")
     if not _is_github_oauth_enabled():
         raise HTTPException(status_code=503, detail="github oauth is not configured")
-    normalized_client_id = _require_client_id(client_id)
     normalized_return_url = _normalize_return_url(return_url) or _normalize_return_url(AUTH_DEFAULT_RETURN_URL)
     state = _save_github_oauth_state(normalized_client_id, normalized_return_url or "")
     query = {
@@ -2060,9 +2060,6 @@ async def auth_github_callback(
     return_url = fallback_return_url
     if isinstance(state_payload, dict):
         return_url = _normalize_return_url(state_payload.get("return_url")) or fallback_return_url
-    if not _is_client_login_enabled():
-        redirect_url = _build_github_callback_redirect(return_url, error="login_disabled")
-        return RedirectResponse(url=redirect_url, status_code=302)
     if not state_payload:
         redirect_url = _build_github_callback_redirect(return_url, error="invalid_state")
         return RedirectResponse(url=redirect_url, status_code=302)
@@ -2080,6 +2077,9 @@ async def auth_github_callback(
     client_id = _normalize_client_id(state_payload.get("client_id"))
     if not client_id:
         redirect_url = _build_github_callback_redirect(return_url, error="missing_client_id")
+        return RedirectResponse(url=redirect_url, status_code=302)
+    if not _is_client_login_enabled(client_id):
+        redirect_url = _build_github_callback_redirect(return_url, error="login_disabled")
         return RedirectResponse(url=redirect_url, status_code=302)
 
     try:
@@ -2101,13 +2101,13 @@ async def auth_github_callback(
 
 
 @app.post("/api/upload")
-async def upload_file(file: UploadFile = File(...)):
+async def upload_file(client_id: str | None = None, file: UploadFile = File(...)):
     """上传ZIP文件"""
     normalized_name = str(file.filename or "").strip()
     if not normalized_name.lower().endswith('.zip'):
         raise HTTPException(status_code=400, detail="只支持ZIP文件")
     
-    max_size_mb = _get_upload_max_size_mb()
+    max_size_mb = _get_upload_max_size_mb(client_id)
     max_size_bytes = max_size_mb * 1024 * 1024
     file_id = str(uuid.uuid4())
     filename = f"{file_id}_{normalized_name}"
@@ -2148,14 +2148,14 @@ async def upload_file(file: UploadFile = File(...)):
 
 
 @app.post("/api/upload-html")
-async def upload_html(file: UploadFile = File(...)):
+async def upload_html(client_id: str | None = None, file: UploadFile = File(...)):
     """上传HTML文件"""
     normalized_name = str(file.filename or "").strip()
     filename_lower = normalized_name.lower()
     if not (filename_lower.endswith(".html") or filename_lower.endswith(".htm")):
         raise HTTPException(status_code=400, detail="只支持HTML文件")
 
-    max_size_mb = _get_upload_max_size_mb()
+    max_size_mb = _get_upload_max_size_mb(client_id)
     max_size_bytes = max_size_mb * 1024 * 1024
     file_id = str(uuid.uuid4())
     filename = f"{file_id}_{normalized_name}"
@@ -2321,13 +2321,13 @@ async def create_task(task_data: BuildTaskCreate):
         raise HTTPException(status_code=400, detail="mode must be convert, web, html, or desktop")
     web_url = None
     if mode == "web":
-        if not _is_web_link_mode_enabled():
+        if not _is_web_link_mode_enabled(client_id):
             raise HTTPException(status_code=403, detail="web mode is disabled by admin")
         web_url = str(task_data.web_url or "").strip()
         if not web_url:
             raise HTTPException(status_code=400, detail="web_url is required for web mode")
     if mode == "desktop":
-        if not _is_desktop_mode_enabled():
+        if not _is_desktop_mode_enabled(client_id):
             raise HTTPException(status_code=403, detail="desktop mode is disabled by admin")
     html_filename = None
     if mode == "html":
@@ -3271,8 +3271,9 @@ def _probe_url(url: str, timeout: float = 5.0) -> tuple[bool, int | None, str]:
 
 
 @app.post("/api/url-probe")
-async def url_probe(payload: dict = Body(...)):
-    if not _is_web_link_mode_enabled():
+async def url_probe(payload: dict = Body(...), client_id: str | None = None):
+    probe_client_id = _normalize_client_id(client_id or payload.get("client_id"))
+    if not _is_web_link_mode_enabled(probe_client_id):
         raise HTTPException(status_code=403, detail="web mode is disabled by admin")
     url = str(payload.get("url") or "").strip()
     if not url:
@@ -3289,8 +3290,8 @@ async def adminhub_announcements():
 
 
 @app.get("/api/adminhub/features")
-async def adminhub_features():
-    return _load_client_feature_flags()
+async def adminhub_features(client_id: str | None = None):
+    return _load_client_feature_flags(client_id=client_id)
 
 
 @app.get("/api/adminhub/update-check")

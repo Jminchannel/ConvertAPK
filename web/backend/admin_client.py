@@ -9,17 +9,11 @@ from typing import Any, Dict, List, Optional
 _QUEUE_FILENAME = "upload-queue.json"
 _ADMIN_STATUS_CACHE: dict = {"ok": True, "reason": "", "checked_at": 0.0}
 _ADMIN_STATUS_TTL = 15.0
-_FEATURE_FLAGS_CACHE: dict = {
-    "data": {
-        "web_link_to_apk_enabled": False,
-        "zip_to_desktop_enabled": False,
-        "client_login_enabled": True,
-        "client_register_enabled": True,
-        "upload_max_size_mb": 200,
-    },
-    "checked_at": 0.0,
-}
-_FEATURE_FLAGS_TTL = 30.0
+_FEATURE_FLAGS_CACHE: dict = {}
+try:
+    _FEATURE_FLAGS_TTL = max(0.0, float(os.getenv("ADMIN_FEATURE_FLAGS_CACHE_TTL", "5")))
+except Exception:
+    _FEATURE_FLAGS_TTL = 5.0
 
 
 def _safe_path_segment(value: str, fallback: str) -> str:
@@ -240,15 +234,18 @@ def check_update(version: str) -> Dict[str, Any]:
     return data
 
 
-def fetch_feature_flags(force: bool = False) -> Dict[str, Any]:
+def fetch_feature_flags(client_id: str = "", force: bool = False) -> Dict[str, Any]:
     now = time.monotonic()
-    cached = _FEATURE_FLAGS_CACHE
+    normalized_client_id = str(client_id or "").strip()
+    cache_key = normalized_client_id or "__global__"
+    cached = _FEATURE_FLAGS_CACHE.get(cache_key, {})
     if not force and now - float(cached.get("checked_at", 0.0)) < _FEATURE_FLAGS_TTL:
         data = cached.get("data")
         if isinstance(data, dict):
             return dict(data)
 
-    data = _request_json("GET", "/api/client/features")
+    params = {"client_id": normalized_client_id} if normalized_client_id else None
+    data = _request_json("GET", "/api/client/features", params=params)
     result = {
         "web_link_to_apk_enabled": False,
         "zip_to_desktop_enabled": False,
@@ -270,8 +267,10 @@ def fetch_feature_flags(force: bool = False) -> Dict[str, Any]:
                     result["upload_max_size_mb"] = parsed_size
             except Exception:
                 pass
-    cached["data"] = result
-    cached["checked_at"] = now
+    _FEATURE_FLAGS_CACHE[cache_key] = {
+        "data": result,
+        "checked_at": now,
+    }
     return dict(result)
 
 
