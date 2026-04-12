@@ -4,6 +4,5 @@
     <mapping directory="" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/admin" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/templates/Endless_Boundary" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/tmp_audioforge2_check_20260329_005514/audioFORGE2" vcs="Git" />
   </component>
 </project>
