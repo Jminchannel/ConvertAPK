@@ -870,6 +870,202 @@ def _find_web_build_dir(project_root: Path) -> Path:
     raise RuntimeError("未找到 Web 构建产物目录（dist/build/out）")
 
 
+_WEB_ASSET_TEXT_EXTENSIONS = {
+    ".html",
+    ".htm",
+    ".js",
+    ".mjs",
+    ".cjs",
+    ".css",
+    ".json",
+    ".map",
+    ".txt",
+    ".xml",
+    ".svg",
+    ".webmanifest",
+}
+_WEB_ASSET_TEXT_SCAN_MAX_BYTES = 20 * 1024 * 1024
+
+
+def _web_asset_rank(web_dir: Path, file_path: Path) -> Tuple[int, int, int, str]:
+    relative_path = file_path.relative_to(web_dir)
+    normalized = str(relative_path).replace("\\", "/")
+    parts = relative_path.parts
+    first_part = parts[0].lower() if parts else ""
+    return (1 if first_part == "assets" else 0, len(parts), len(normalized), normalized)
+
+
+def _iter_web_text_files(web_dir: Path):
+    for file_path in web_dir.rglob("*"):
+        if not file_path.is_file():
+            continue
+        if file_path.suffix.lower() not in _WEB_ASSET_TEXT_EXTENSIONS:
+            continue
+        try:
+            file_size = int(file_path.stat().st_size or 0)
+        except Exception:
+            continue
+        if file_size <= 0 or file_size > _WEB_ASSET_TEXT_SCAN_MAX_BYTES:
+            continue
+        yield file_path
+
+
+def _read_utf8_text(path: Path) -> Optional[str]:
+    try:
+        raw = path.read_bytes()
+    except Exception:
+        return None
+    if not raw or b"\x00" in raw:
+        return None
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+
+def _build_asset_reference_pairs(source_relative: str, target_relative: str) -> Dict[str, str]:
+    source = str(source_relative or "").replace("\\", "/").lstrip("/")
+    target = str(target_relative or "").replace("\\", "/").lstrip("/")
+    if not source or not target:
+        return {}
+    pairs = {}
+    variants = (
+        (f"/{source}", f"/{target}"),
+        (f"./{source}", f"./{target}"),
+        (source, target),
+    )
+    for from_ref, to_ref in variants:
+        if from_ref != to_ref:
+            pairs[from_ref] = to_ref
+    return pairs
+
+
+def _replace_text_batch(content: str, replacements: list[Tuple[str, str]]) -> Tuple[str, int]:
+    replaced_count = 0
+    updated = content
+    for source, target in replacements:
+        if source == target:
+            continue
+        current_count = updated.count(source)
+        if current_count <= 0:
+            continue
+        updated = updated.replace(source, target)
+        replaced_count += current_count
+    return updated, replaced_count
+
+
+def _dedupe_web_build_assets(web_dir: Path, on_log=None) -> None:
+    if not web_dir.exists():
+        return
+    file_groups: Dict[Tuple[int, str], list[Path]] = {}
+    for file_path in web_dir.rglob("*"):
+        if not file_path.is_file():
+            continue
+        try:
+            file_size = int(file_path.stat().st_size or 0)
+        except Exception:
+            continue
+        if file_size <= 0:
+            continue
+        digest = hashlib.sha256()
+        try:
+            with file_path.open("rb") as handle:
+                while True:
+                    chunk = handle.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    digest.update(chunk)
+        except Exception:
+            continue
+        key = (file_size, digest.hexdigest())
+        file_groups.setdefault(key, []).append(file_path)
+
+    dedupe_jobs = []
+    all_old_refs: set[str] = set()
+    for _, candidates in file_groups.items():
+        if len(candidates) < 2:
+            continue
+        ordered = sorted(candidates, key=lambda item: _web_asset_rank(web_dir, item))
+        canonical = ordered[0]
+        canonical_relative = str(canonical.relative_to(web_dir)).replace("\\", "/")
+        for duplicate in ordered[1:]:
+            duplicate_relative = str(duplicate.relative_to(web_dir)).replace("\\", "/")
+            if duplicate_relative == canonical_relative:
+                continue
+            reference_pairs = _build_asset_reference_pairs(duplicate_relative, canonical_relative)
+            dedupe_jobs.append(
+                {
+                    "duplicate_path": duplicate,
+                    "reference_pairs": reference_pairs,
+                }
+            )
+            all_old_refs.update(reference_pairs.keys())
+
+    if not dedupe_jobs:
+        return
+
+    replacement_map: Dict[str, str] = {}
+    for job in dedupe_jobs:
+        for source, target in job["reference_pairs"].items():
+            replacement_map[source] = target
+    replacements = sorted(replacement_map.items(), key=lambda item: len(item[0]), reverse=True)
+
+    replaced_files = 0
+    replaced_refs = 0
+    if replacements:
+        for text_file in _iter_web_text_files(web_dir):
+            content = _read_utf8_text(text_file)
+            if content is None:
+                continue
+            updated, current_replaced = _replace_text_batch(content, replacements)
+            if current_replaced <= 0:
+                continue
+            text_file.write_text(updated, encoding="utf-8")
+            replaced_files += 1
+            replaced_refs += current_replaced
+
+    remaining_refs: set[str] = set()
+    if all_old_refs:
+        needles = sorted(all_old_refs, key=len, reverse=True)
+        for text_file in _iter_web_text_files(web_dir):
+            content = _read_utf8_text(text_file)
+            if content is None:
+                continue
+            for needle in needles:
+                if needle in content:
+                    remaining_refs.add(needle)
+            if len(remaining_refs) == len(all_old_refs):
+                break
+
+    removed_files = 0
+    removed_bytes = 0
+    skipped_files = 0
+    for job in dedupe_jobs:
+        duplicate_path = job["duplicate_path"]
+        reference_pairs = job["reference_pairs"]
+        if any(old_ref in remaining_refs for old_ref in reference_pairs.keys()):
+            skipped_files += 1
+            continue
+        try:
+            removed_bytes += int(duplicate_path.stat().st_size or 0)
+            duplicate_path.unlink()
+            removed_files += 1
+        except Exception:
+            skipped_files += 1
+            continue
+
+    if removed_files > 0:
+        saved_mb = removed_bytes / (1024 * 1024)
+        _log(
+            on_log,
+            f"[Web] 静态资源去重完成：删除 {removed_files} 个重复文件，约节省 {saved_mb:.2f} MB，替换引用 {replaced_refs} 处",
+        )
+    if skipped_files > 0:
+        _log(on_log, f"[Web] 有 {skipped_files} 个重复文件仍存在引用，已跳过删除以确保兼容")
+    if replaced_files > 0 and removed_files <= 0:
+        _log(on_log, f"[Web] 已更新 {replaced_files} 个文件中的资源引用，但未删除重复文件")
+
+
 def _is_next_project(pkg: Dict) -> bool:
     return _has_dep(pkg, "next")
 
@@ -2797,6 +2993,7 @@ def run_local_build(
         progress(35, "Step 2: 准备 Capacitor...")
         _log(on_log, "Step 2: 准备 Capacitor...")
         _offlineize_html_assets(web_dir / "index.html", process_env, on_log=on_log)
+        _dedupe_web_build_assets(web_dir, on_log=on_log)
         _ensure_dep(pkg, process_env, "@capacitor/core", dev=False, on_log=on_log, force_major=8)
         _ensure_dep(pkg, process_env, "@capacitor/cli", dev=True, on_log=on_log, force_major=8)
 
