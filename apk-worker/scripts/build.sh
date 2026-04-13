@@ -310,6 +310,270 @@ if (patchedFiles > 0) {
 NODE
 }
 
+dedupeWebBuildAssets() {
+    local webDir="$1"
+    if [ -z "$webDir" ] || [ ! -d "$webDir" ]; then
+        return 0
+    fi
+
+    log_info "Step 1.7: 去重重复静态资源..."
+    WEB_DIR="$webDir" node <<'NODE'
+const fs = require("fs");
+const path = require("path");
+const crypto = require("crypto");
+const { TextDecoder } = require("util");
+
+const webDir = process.env.WEB_DIR ? path.resolve(process.cwd(), process.env.WEB_DIR) : "";
+if (!webDir || !fs.existsSync(webDir)) {
+  process.exit(0);
+}
+
+const textExts = new Set([
+  ".html",
+  ".htm",
+  ".js",
+  ".mjs",
+  ".cjs",
+  ".css",
+  ".json",
+  ".txt",
+  ".xml",
+  ".svg",
+  ".webmanifest",
+]);
+const maxTextBytes = 20 * 1024 * 1024;
+const utf8Decoder = new TextDecoder("utf-8", { fatal: true });
+
+function walkFiles(dir, out) {
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      walkFiles(fullPath, out);
+      continue;
+    }
+    if (entry.isFile()) {
+      out.push(fullPath);
+    }
+  }
+}
+
+function relPath(filePath) {
+  return path.relative(webDir, filePath).split(path.sep).join("/");
+}
+
+function rankPath(relativePath) {
+  const parts = relativePath.split("/").filter(Boolean);
+  const firstPart = (parts[0] || "").toLowerCase();
+  return {
+    firstPartRank: firstPart === "assets" ? 1 : 0,
+    depth: parts.length,
+    length: relativePath.length,
+    relativePath,
+  };
+}
+
+function compareRank(leftPath, rightPath) {
+  const left = rankPath(leftPath);
+  const right = rankPath(rightPath);
+  if (left.firstPartRank !== right.firstPartRank) return left.firstPartRank - right.firstPartRank;
+  if (left.depth !== right.depth) return left.depth - right.depth;
+  if (left.length !== right.length) return left.length - right.length;
+  return left.relativePath.localeCompare(right.relativePath);
+}
+
+function hashFileSha256(filePath) {
+  const fd = fs.openSync(filePath, "r");
+  const hash = crypto.createHash("sha256");
+  const buffer = Buffer.allocUnsafe(1024 * 1024);
+  try {
+    while (true) {
+      const readBytes = fs.readSync(fd, buffer, 0, buffer.length, null);
+      if (readBytes <= 0) break;
+      hash.update(buffer.subarray(0, readBytes));
+    }
+  } finally {
+    fs.closeSync(fd);
+  }
+  return hash.digest("hex");
+}
+
+function isTextCandidate(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  if (!textExts.has(ext)) return false;
+  try {
+    const st = fs.statSync(filePath);
+    if (!st.isFile()) return false;
+    return st.size > 0 && st.size <= maxTextBytes;
+  } catch {
+    return false;
+  }
+}
+
+function readUtf8Strict(filePath) {
+  try {
+    const raw = fs.readFileSync(filePath);
+    if (!raw || raw.length <= 0) return null;
+    if (raw.includes(0x00)) return null;
+    return utf8Decoder.decode(raw);
+  } catch {
+    return null;
+  }
+}
+
+function buildReferencePairs(sourceRelative, targetRelative) {
+  const source = String(sourceRelative || "").replace(/\\/g, "/").replace(/^\/+/, "");
+  const target = String(targetRelative || "").replace(/\\/g, "/").replace(/^\/+/, "");
+  const pairs = new Map();
+  if (!source || !target || source === target) {
+    return pairs;
+  }
+  const addPair = (from, to) => {
+    if (!from || !to || from === to) return;
+    pairs.set(from, to);
+  };
+  addPair(`/${source}`, `/${target}`);
+  addPair(`./${source}`, `./${target}`);
+  addPair(source, target);
+  addPair(`\\/${source}`, `\\/${target}`);
+  return pairs;
+}
+
+const allFiles = [];
+walkFiles(webDir, allFiles);
+
+const groupedByDigest = new Map();
+for (const filePath of allFiles) {
+  let st;
+  try {
+    st = fs.statSync(filePath);
+  } catch {
+    continue;
+  }
+  if (!st.isFile() || st.size <= 0) continue;
+  let digest = "";
+  try {
+    digest = hashFileSha256(filePath);
+  } catch {
+    continue;
+  }
+  if (!digest) continue;
+  const key = `${st.size}:${digest}`;
+  const list = groupedByDigest.get(key) || [];
+  list.push(filePath);
+  groupedByDigest.set(key, list);
+}
+
+const dedupeJobs = [];
+const oldReferences = new Set();
+for (const files of groupedByDigest.values()) {
+  if (!Array.isArray(files) || files.length < 2) continue;
+  const ordered = [...files].sort((left, right) => compareRank(relPath(left), relPath(right)));
+  const canonical = ordered[0];
+  const canonicalRelative = relPath(canonical);
+  for (const duplicatePath of ordered.slice(1)) {
+    const duplicateRelative = relPath(duplicatePath);
+    if (!duplicateRelative || duplicateRelative === canonicalRelative) continue;
+    const refPairs = buildReferencePairs(duplicateRelative, canonicalRelative);
+    if (refPairs.size <= 0) continue;
+    dedupeJobs.push({
+      duplicatePath,
+      refPairs,
+    });
+    for (const oldRef of refPairs.keys()) {
+      oldReferences.add(oldRef);
+    }
+  }
+}
+
+if (dedupeJobs.length <= 0) {
+  console.log("[WebDedupe] no duplicated assets found");
+  process.exit(0);
+}
+
+const replacementMap = new Map();
+for (const job of dedupeJobs) {
+  for (const [oldRef, newRef] of job.refPairs.entries()) {
+    replacementMap.set(oldRef, newRef);
+  }
+}
+const replacements = [...replacementMap.entries()].sort((a, b) => b[0].length - a[0].length);
+
+let replacedFiles = 0;
+let replacedRefs = 0;
+for (const filePath of allFiles) {
+  if (!isTextCandidate(filePath)) continue;
+  const content = readUtf8Strict(filePath);
+  if (content === null) continue;
+  let updated = content;
+  let localCount = 0;
+  for (const [oldRef, newRef] of replacements) {
+    if (oldRef === newRef || !updated.includes(oldRef)) continue;
+    const parts = updated.split(oldRef);
+    const hitCount = parts.length - 1;
+    if (hitCount <= 0) continue;
+    updated = parts.join(newRef);
+    localCount += hitCount;
+  }
+  if (localCount > 0 && updated !== content) {
+    fs.writeFileSync(filePath, updated, "utf8");
+    replacedFiles += 1;
+    replacedRefs += localCount;
+  }
+}
+
+const remainingRefs = new Set();
+const needles = [...oldReferences].sort((a, b) => b.length - a.length);
+for (const filePath of allFiles) {
+  if (!isTextCandidate(filePath)) continue;
+  const content = readUtf8Strict(filePath);
+  if (content === null) continue;
+  for (const needle of needles) {
+    if (!remainingRefs.has(needle) && content.includes(needle)) {
+      remainingRefs.add(needle);
+    }
+  }
+  if (remainingRefs.size >= oldReferences.size) {
+    break;
+  }
+}
+
+let removedFiles = 0;
+let removedBytes = 0;
+let skippedFiles = 0;
+for (const job of dedupeJobs) {
+  const stillReferenced = [...job.refPairs.keys()].some((oldRef) => remainingRefs.has(oldRef));
+  if (stillReferenced) {
+    skippedFiles += 1;
+    continue;
+  }
+  try {
+    const st = fs.statSync(job.duplicatePath);
+    if (st.isFile()) {
+      removedBytes += st.size;
+    }
+    fs.unlinkSync(job.duplicatePath);
+    removedFiles += 1;
+  } catch {
+    skippedFiles += 1;
+  }
+}
+
+if (removedFiles > 0) {
+  const savedMb = (removedBytes / (1024 * 1024)).toFixed(2);
+  console.log(`[WebDedupe] removed ${removedFiles} duplicated files, saved ~${savedMb} MB, replaced ${replacedRefs} refs`);
+} else {
+  console.log("[WebDedupe] duplicated files detected but none removed");
+}
+if (skippedFiles > 0) {
+  console.log(`[WebDedupe] skipped ${skippedFiles} files because old references still exist`);
+}
+if (replacedFiles > 0 && removedFiles <= 0) {
+  console.log(`[WebDedupe] updated ${replacedFiles} text files but did not remove duplicates`);
+}
+NODE
+}
+
 normalizeProjectRootForBuild() {
     local projectRoot="$1"
     if [ -z "$projectRoot" ] || [ ! -d "$projectRoot" ]; then
@@ -1389,6 +1653,8 @@ normalizeWebCssForLegacyWebView "$WEB_DIR"
 if [ "$TASK_MODE" = "convert" ]; then
     runOfflineizeAssets "$WEB_DIR/index.html" "Step 1.5"
 fi
+
+dedupeWebBuildAssets "$WEB_DIR"
 
 # 注入前端下载处理脚本（换行修复默认关闭，避免影响页面布局）
 log_info "注入前端下载处理脚本..."

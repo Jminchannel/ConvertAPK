@@ -878,7 +878,6 @@ _WEB_ASSET_TEXT_EXTENSIONS = {
     ".cjs",
     ".css",
     ".json",
-    ".map",
     ".txt",
     ".xml",
     ".svg",
@@ -933,6 +932,7 @@ def _build_asset_reference_pairs(source_relative: str, target_relative: str) -> 
         (f"/{source}", f"/{target}"),
         (f"./{source}", f"./{target}"),
         (source, target),
+        (f"\\/{source}", f"\\/{target}"),
     )
     for from_ref, to_ref in variants:
         if from_ref != to_ref:
