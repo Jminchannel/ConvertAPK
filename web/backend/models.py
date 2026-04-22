@@ -6,7 +6,7 @@ import re
 import random
 
 from pydantic import BaseModel, ConfigDict, field_validator, Field
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from enum import Enum
 from datetime import datetime
 
@@ -227,6 +227,7 @@ class BuildTask(BaseModel):
     output_filename: Optional[str] = None
     desktop_output_expires_at: Optional[datetime] = None
     logs: List[str] = []
+    failure_diagnosis: Dict[str, Any] = Field(default_factory=dict)
     cdn_localize_enabled: bool = False
     cdn_localize_urls: List[str] = []
     cdn_localize_select_all: bool = False
@@ -273,6 +274,7 @@ class BuildTaskResponse(BaseModel):
     output_filename: Optional[str] = None
     desktop_output_expires_at: Optional[datetime] = None
     logs: List[str] = []
+    failure_diagnosis: Dict[str, Any] = Field(default_factory=dict)
     reuse_keystore_from: Optional[str] = None
     cdn_localize_enabled: bool = False
     cdn_localize_urls: List[str] = []
@@ -301,6 +303,7 @@ class BuildTaskListItemResponse(BaseModel):
     download_url: Optional[str] = None
     output_filename: Optional[str] = None
     desktop_output_expires_at: Optional[datetime] = None
+    failure_diagnosis: Dict[str, Any] = Field(default_factory=dict)
     reuse_keystore_from: Optional[str] = None
     cdn_localize_enabled: bool = False
     cdn_localize_urls: List[str] = []

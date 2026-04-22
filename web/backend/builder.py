@@ -1,7 +1,7 @@
 """
-APK Builder 妯″潡
-璐熻矗涓?apk-worker Docker 瀹瑰櫒浜や簰
-鏀寔浠诲姟闃熷垪锛岄檺鍒跺苟鍙戞瀯寤烘暟閲?
+APK Builder 模块
+负责与 `apk-worker` 构建器交互。
+支持任务队列调度与并发控制。
 """
 import os
 import json
@@ -19,18 +19,26 @@ from typing import Callable, Optional, List, Tuple
 from local_builder import run_local_build
 import env_setup
 from admin_client import report_task_logs, upload_task_assets, report_task_status, flush_task_assets_queue
+from build_failure_diagnosis import (
+    OPENROUTER_DIAG_ENABLED,
+    OPENROUTER_MODEL,
+    create_failed_diagnosis,
+    create_idle_diagnosis,
+    create_running_diagnosis,
+    diagnose_build_failure,
+)
 
-# 椤圭洰鏍圭洰褰?
+# 项目根目录
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 APK_WORKER_DIR = PROJECT_ROOT / "apk-worker"
 INPUT_DIR = APK_WORKER_DIR / "input"
 OUTPUT_DIR = APK_WORKER_DIR / "output"
 KEYSTORE_DIR = APK_WORKER_DIR / "keystore"
 
-# 鍚庣鐩綍
+# 后端目录
 BACKEND_DIR = Path(__file__).parent
 
-# 鏁版嵁鐩綍锛堝彲閰嶇疆锛屾柟渚夸簯鏈嶅姟鍣?瀹瑰櫒鍖栭儴缃叉椂鎶婃暟鎹惤鍦ㄦ暟鎹嵎閲岋級
+# 数据目录（支持配置，便于容器化或云部署场景落盘持久化）
 _data_dir_raw = os.getenv("APK_BUILDER_DATA_DIR", "").strip()
 if not _data_dir_raw:
     try:
@@ -52,8 +60,8 @@ else:
     else:
         DATA_DIR = BACKEND_DIR
 
-# 浜戦儴缃叉帹鑽愶細backend 浣跨敤鍚屼竴涓暟鎹嵎淇濆瓨 uploads/tasks/outputs/logs锛?
-# 骞跺湪璋冪敤 apk-builder 瀹瑰櫒鏃舵妸璇ユ暟鎹嵎鎸傝浇杩涘幓锛堥伩鍏嶅涓昏矾寰勬槧灏勯棶棰橈級
+# 云部署建议：backend 使用同一数据卷保存 uploads/tasks/outputs/logs，
+# 并在调用 apk-builder 容器时挂载同一数据卷，避免宿主路径映射差异。
 DATA_VOLUME = os.getenv("APK_BUILDER_DATA_VOLUME", "").strip()
 
 try:
@@ -108,20 +116,20 @@ DATA_DIR = _ensure_writable_data_dir(DATA_DIR)
 UPLOAD_DIR = DATA_DIR / "uploads"
 BACKEND_OUTPUT_DIR = DATA_DIR / "outputs"
 LOGS_DIR = DATA_DIR / "logs"
-TASKS_DIR = DATA_DIR / "tasks"  # 姣忎釜浠诲姟鐨勭嫭绔嬬洰褰?
+TASKS_DIR = DATA_DIR / "tasks"  # 每个任务的独立目录
 TASK_INPUT_ASSETS_DIR = DATA_DIR / "task-inputs"
-GRADLE_WRAPPER_CACHE = DATA_DIR / "gradle-wrapper-cache"  # 鍏ㄥ眬 Gradle wrapper 缂撳瓨
+GRADLE_WRAPPER_CACHE = DATA_DIR / "gradle-wrapper-cache"  # 全局 Gradle wrapper 缓存
 NPM_CACHE_DIR = DATA_DIR / "npm-cache"
 AUTO_CLEAN_BUILD_OUTPUTS = os.getenv("APK_BUILDER_AUTO_CLEAN_OUTPUTS", "").strip().lower() in {"1", "true", "yes", "on"}
 
-# Gradle 缂撳瓨绛栫暐锛堣В鍐斥€滃紑濮嬫瀯寤哄弽搴旀參/瑕佺瓑鍑犲垎閽熲€濈殑闂锛?
-# - volume: 浣跨敤 Docker volume 鎸佷箙鍖?/root/.gradle锛堟帹鑽愶紝璺ㄤ换鍔″鐢ㄤ笖涓嶉渶瑕佹嫹璐濆ぇ缂撳瓨锛?
-# - task:   浣跨敤浠诲姟鐩綍涓嬬殑 gradle 缂撳瓨锛堟棫琛屼负锛屼細鍦ㄤ换鍔″惎鍔ㄦ椂澶嶅埗鍏ㄥ眬 wrapper 缂撳瓨锛屽彲鑳藉緢鎱級
+# Gradle 缓存策略（解决“开始构建响应慢/要等很久”的问题）：
+# - volume: 使用 Docker volume 持久化 `/root/.gradle`（推荐，跨任务复用，且无需复制大缓存）
+# - task:   使用任务目录下的 gradle 缓存（兼容模式，会在任务启动时复制全局 wrapper 缓存）
 GRADLE_CACHE_MODE = os.getenv("APK_BUILDER_GRADLE_CACHE_MODE", "volume").strip().lower()
 if GRADLE_CACHE_MODE not in {"volume", "task"}:
     GRADLE_CACHE_MODE = "volume"
 
-# 鍚庣瀹瑰櫒鍖?+ DATA_VOLUME 妯″紡涓嬶紝task 鏂瑰紡浼氫骇鐢熷涓昏矾寰勬寕杞介棶棰橈紱杩欓噷鐩存帴寮哄埗浣跨敤 volume
+# 后端容器化 + DATA_VOLUME 模式下，task 方式可能出现宿主路径映射问题，这里强制使用 volume。
 if DATA_VOLUME and GRADLE_CACHE_MODE == "task":
     GRADLE_CACHE_MODE = "volume"
 
@@ -129,7 +137,7 @@ GRADLE_CACHE_VOLUME = os.getenv("APK_BUILDER_GRADLE_CACHE_VOLUME", "convertapk-g
 APK_BUILDER_IMAGE = os.getenv("APK_BUILDER_IMAGE", "apk-builder:latest").strip() or "apk-builder:latest"
 DESKTOP_BUILDER_IMAGE = os.getenv("DESKTOP_BUILDER_IMAGE", "desktop-builder:latest").strip() or "desktop-builder:latest"
 
-# 纭繚鐩綍瀛樺湪
+# 确保目录存在
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 BACKEND_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -317,7 +325,7 @@ def _restore_html_task_input(task_input_dir: Path) -> None:
             entry_name = str(PurePosixPath(*parts))
             index_candidates.append((len(parts), len(entry_name), entry_name))
         if not index_candidates:
-            raise FileNotFoundError(f"HTML杈撳叆缂哄皯 index.html: {zip_file}")
+            raise FileNotFoundError(f"HTML输入缺少 index.html: {zip_file}")
 
         index_candidates.sort(key=lambda item: (item[0], item[1], item[2]))
         normalized_index = PurePosixPath(index_candidates[0][2])
@@ -339,7 +347,7 @@ def _restore_html_task_input(task_input_dir: Path) -> None:
 
     html_index = html_assets_dir / "index.html"
     if not html_index.exists():
-        raise FileNotFoundError(f"HTML杈撳叆缂哄皯 index.html: {zip_file}")
+        raise FileNotFoundError(f"HTML输入缺少 index.html: {zip_file}")
     shutil.copy2(str(html_index), str(task_input_dir / "index.html"))
 
 
@@ -571,38 +579,38 @@ class APKBuilder:
         global_wrapper_dir = GRADLE_WRAPPER_CACHE / "wrapper" / "dists"
         task_wrapper_dir = task_gradle_dir / "wrapper" / "dists"
         
-        # 濡傛灉鍏ㄥ眬缂撳瓨瀛樺湪涓斾换鍔＄洰褰曟病鏈?wrapper
+        # 如果全局缓存存在且任务目录没有 wrapper，则复制一份用于当前任务。
         if global_wrapper_dir.exists() and not task_wrapper_dir.exists():
-            print(f"[Gradle] 澶嶅埗鍏ㄥ眬 Gradle wrapper 缂撳瓨鍒颁换鍔＄洰褰?..")
+            print(f"[Gradle] 复制全局 Gradle wrapper 缓存到任务目录...")
             task_wrapper_dir.parent.mkdir(parents=True, exist_ok=True)
             shutil.copytree(global_wrapper_dir, task_wrapper_dir)
-            print(f"[Gradle] 缂撳瓨澶嶅埗瀹屾垚")
+            print(f"[Gradle] 缓存复制完成")
         elif task_wrapper_dir.exists():
             print(f"[Gradle] 任务目录已存在 Gradle wrapper 缓存，跳过复制")
     
     def _save_gradle_wrapper_cache(self, task_gradle_dir: Path):
         """
-        灏嗕换鍔＄殑 Gradle wrapper 缂撳瓨淇濆瓨鍒板叏灞€鐩綍
-        渚涘悗缁换鍔″鐢?
+        将任务目录中的 Gradle wrapper 缓存回写到全局缓存。
+        供后续任务复用。
         """
         task_wrapper_dir = task_gradle_dir / "wrapper" / "dists"
         global_wrapper_dir = GRADLE_WRAPPER_CACHE / "wrapper" / "dists"
         
-        # 濡傛灉浠诲姟鏈?wrapper 涓斿叏灞€缂撳瓨涓嶅瓨鍦ㄦ垨涓虹┖
+        # 如果任务目录有 wrapper，则把新版本补充到全局缓存。
         if task_wrapper_dir.exists():
             try:
-                # 鍙幏鍙栫洰褰曪紝蹇界暐鏂囦欢锛堝 CACHEDIR.TAG锛?
+                # 只获取目录，忽略文件（例如 CACHEDIR.TAG）
                 task_versions = [d for d in task_wrapper_dir.iterdir() if d.is_dir()]
                 
-                # 妫€鏌ユ槸鍚︽湁鏂扮増鏈渶瑕佷繚瀛?
+                # 仅补充全局缓存中不存在的版本
                 for version_dir in task_versions:
                     global_version_dir = global_wrapper_dir / version_dir.name
                     if not global_version_dir.exists():
-                        print(f"[Gradle] 淇濆瓨鏂扮殑 Gradle 鐗堟湰鍒板叏灞€缂撳瓨: {version_dir.name}")
+                        print(f"[Gradle] 保存新的 Gradle 版本到全局缓存: {version_dir.name}")
                         global_wrapper_dir.mkdir(parents=True, exist_ok=True)
                         shutil.copytree(version_dir, global_version_dir)
             except Exception as e:
-                print(f"[Gradle] 淇濆瓨缂撳瓨鏃跺嚭閿欙紙涓嶅奖鍝嶆瀯寤猴級: {e}")
+                print(f"[Gradle] 保存缓存时出错（不影响构建）: {e}")
     
     def prepare_build(
         self,
@@ -634,30 +642,30 @@ class APKBuilder:
         cdn_localize_preprocessed: bool = False,
     ) -> dict:
         """
-        鍑嗗鏋勫缓鐜
-        - 鏂囦欢宸插湪鍒涘缓浠诲姟鏃舵斁鍏ヤ换鍔＄洰褰?
-        - 杩欓噷鍙渶楠岃瘉骞舵竻鐞唎utput鐩綍
-        - 涓轰换鍔″垱寤虹嫭绔嬬殑Gradle缂撳瓨鐩綍锛堥伩鍏嶅苟鍙戝啿绐侊級
-        - 澶嶇敤鍏ㄥ眬 Gradle wrapper 缂撳瓨锛堥伩鍏嶉噸澶嶄笅杞斤級
+        准备构建环境：
+        - 输入文件在创建任务时已放入任务目录；
+        - 这里主要验证输入并清理 output 目录；
+        - 为任务创建独立 Gradle 缓存目录（避免并发冲突）；
+        - 复用全局 Gradle wrapper 缓存（避免重复下载）
         """
-        # 浠诲姟鐩綍锛堝凡鍦ㄥ垱寤轰换鍔℃椂鍒涘缓锛?
+        # 任务目录（已在创建任务时创建）
         task_dir = TASKS_DIR / task_id
         task_input_dir = task_dir / "input"
         task_output_dir = task_dir / "output"
         task_keystore_dir = task_dir / "keystore"
-        task_gradle_dir = task_dir / "gradle"  # task 妯″紡涓嬬殑 Gradle 缂撳瓨
+        task_gradle_dir = task_dir / "gradle"  # task 模式下的 Gradle 缓存
         ensure_task_input_assets(task_id, task_input_dir)
         
-        # 楠岃瘉浠诲姟鐩綍瀛樺湪
+        # 验证任务目录存在
         if not task_dir.exists():
-            raise FileNotFoundError(f"浠诲姟鐩綍涓嶅瓨鍦? {task_id}")
+            raise FileNotFoundError(f"任务目录不存在: {task_id}")
         
-        # 楠岃瘉杈撳叆鏂囦欢瀛樺湪
+        # 验证输入文件存在
         task_mode_normalized = (task_mode or "convert").strip().lower()
         if task_mode_normalized in {"convert", "desktop"}:
             zip_file = task_input_dir / "project.zip"
             if not zip_file.exists():
-                raise FileNotFoundError(f"ZIP鏂囦欢涓嶅瓨鍦? {zip_file}")
+                raise FileNotFoundError(f"ZIP 文件不存在: {zip_file}")
         elif task_mode_normalized == "html":
             if (
                 (task_input_dir / "project.zip").exists()
@@ -669,21 +677,21 @@ class APKBuilder:
                 _restore_html_task_input(task_input_dir)
             html_file = task_input_dir / "index.html"
             if not html_file.exists():
-                raise FileNotFoundError(f"HTML鏂囦欢涓嶅瓨鍦? {html_file}")
+                raise FileNotFoundError(f"HTML 文件不存在: {html_file}")
         
-        # task 妯″紡锛氬垱寤?Gradle 缂撳瓨鐩綍骞跺鐢ㄥ叏灞€ wrapper 缂撳瓨锛堥伩鍏嶉噸澶嶄笅杞?Gradle锛?
-        # volume 妯″紡锛欸radle 缂撳瓨鐢?Docker volume 鎸佷箙鍖栵紝涓嶉渶瑕佸湪杩欓噷鍋氫换浣曟嫹璐?
+        # task 模式：在任务目录创建 Gradle 缓存并复用全局 wrapper 缓存。
+        # volume 模式：Gradle 缓存由 Docker volume 持久化，此处无需复制。
         if GRADLE_CACHE_MODE == "task":
             task_gradle_dir.mkdir(parents=True, exist_ok=True)
             self._copy_gradle_wrapper_cache(task_gradle_dir)
         
-        # 娓呯悊output鐩綍锛堥噸璇曟椂闇€瑕侊級
+        # 清理 output 目录（重试场景需要）
         if task_output_dir.exists():
             for f in task_output_dir.iterdir():
                 if f.is_file():
                     f.unlink()
         
-        # 妫€鏌ユ槸鍚﹀鐢ㄧ鍚?
+        # 检查是否复用签名
         keystore_reused = False
         keystore_file = task_keystore_dir / "release.keystore"
         if keystore_file.exists():
@@ -691,7 +699,7 @@ class APKBuilder:
         if reuse_keystore_from and keystore_file.exists():
             keystore_reused = True
         
-        # 鏋勫缓鐜鍙橀噺锛堝寘鍚换鍔′笓灞炵洰褰曡矾寰勶級
+        # 构建环境变量（包含任务专属目录路径）
         output_format_normalized = (output_format or "apk").strip().lower()
         if task_mode_normalized == "desktop":
             output_format_normalized = "exe"
@@ -775,7 +783,7 @@ class APKBuilder:
             # Comma-separated permissions (prefer full names, e.g. android.permission.CAMERA)
             "PERMISSIONS": ",".join([str(p).strip() for p in (permissions or []) if str(p).strip()]),
             "TASK_ID": task_id,
-            # 浠诲姟涓撳睘鐩綍锛堢浉瀵逛簬apk-worker鐨勮矾寰勶級
+            # 任务专属目录（传给构建脚本使用）
             "TASK_INPUT_DIR": str(task_input_dir.resolve()),
             "TASK_OUTPUT_DIR": str(task_output_dir.resolve()),
             "TASK_KEYSTORE_DIR": str(task_keystore_dir.resolve()),
@@ -783,8 +791,8 @@ class APKBuilder:
             "GRADLE_CACHE_VOLUME": GRADLE_CACHE_VOLUME,
             "DATA_DIR": str(DATA_DIR),
             "DATA_VOLUME": DATA_VOLUME,
-            "TASK_GRADLE_DIR": str(task_gradle_dir.resolve()),  # task 妯″紡涓嬩娇鐢?
-            # 鏍囪鏄惁澶嶇敤浜唊eystore锛堝鏋滃鐢ㄥ垯涓嶅厑璁搁噸鏂扮敓鎴愶級
+            "TASK_GRADLE_DIR": str(task_gradle_dir.resolve()),  # task 模式下使用
+            # 标记是否复用 keystore（复用时不允许重新生成）
             "KEYSTORE_REUSED": "true" if keystore_reused else "false",
             "GRADLE_USER_HOME": str(DATA_DIR / "gradle-user-home"),
             "NPM_CONFIG_CACHE": npm_cache_dir,
@@ -1198,25 +1206,25 @@ class APKBuilder:
 
 class BuildTaskRunner:
     """
-    鏋勫缓浠诲姟杩愯鍣?
-    浣跨敤浠诲姟闃熷垪闄愬埗骞跺彂鏁帮紝閬垮厤璧勬簮鍐茬獊
+    构建任务运行器。
+    使用任务队列限制并发数，避免资源冲突
     """
     
-    # 鏈€澶у苟鍙戞瀯寤烘暟锛堝缓璁涓?锛岄伩鍏岹radle缂撳瓨鍐茬獊锛?
+    # 最大并发构建数（建议保持 1，避免 Gradle 缓存冲突）
     MAX_CONCURRENT_BUILDS = 1
     
     def __init__(self, tasks_db: dict, on_state_change: Optional[Callable[[bool], None]] = None):
         self.tasks_db = tasks_db
         self.builder = APKBuilder()
-        self.running_tasks = {}  # 姝ｅ湪杩愯鐨勪换鍔?
+        self.running_tasks = {}  # 正在运行的任务
         self.canceled_tasks = set()
-        self.task_queue = queue.Queue()  # 绛夊緟闃熷垪
+        self.task_queue = queue.Queue()  # 等待队列
         self.queue_lock = threading.Lock()
         self.on_state_change = on_state_change
         self._last_persist = 0.0
         self._persist_interval = 1.0
         
-        # 鍚姩宸ヤ綔绾跨▼锛堟暟閲忕瓑浜庢渶澶у苟鍙戞暟锛?
+        # 启动工作线程（数量等于最大并发数）
         self.workers = []
         for i in range(self.MAX_CONCURRENT_BUILDS):
             worker = threading.Thread(
@@ -1242,32 +1250,32 @@ class BuildTaskRunner:
     
     def start_build(self, task_id: str):
         """
-        娣诲姞浠诲姟鍒版瀯寤洪槦鍒?
-        浠诲姟浼氭寜椤哄簭鎵ц锛屽悓鏃惰繍琛岀殑浠诲姟鏁颁笉瓒呰繃 MAX_CONCURRENT_BUILDS
+        将任务加入构建队列。
+        任务会按顺序执行，同时运行的任务数不超过 MAX_CONCURRENT_BUILDS。
         """
         if task_id not in self.tasks_db:
-            raise ValueError(f"浠诲姟涓嶅瓨鍦? {task_id}")
+            raise ValueError(f"任务不存在: {task_id}")
         
         task = self.tasks_db[task_id]
         
-        # 妫€鏌ヤ换鍔℃槸鍚﹀凡鍦ㄩ槦鍒楁垨杩愯涓?
+        # 检查任务是否已在队列或运行中
         with self.queue_lock:
             if task_id in self.running_tasks:
-                raise ValueError(f"浠诲姟宸插湪杩愯涓? {task_id}")
+                raise ValueError(f"任务已在运行中: {task_id}")
         
-        # 璁＄畻闃熷垪浣嶇疆
+        # 计算队列位置
         queue_size = self.task_queue.qsize()
         running_count = len(self.running_tasks)
         
         if running_count >= self.MAX_CONCURRENT_BUILDS:
-            task.message = f"鎺掗槦涓紙鍓嶆柟鏈?{queue_size} 涓换鍔★級"
+            task.message = f"排队中（前方还有 {queue_size} 个任务）"
         else:
-            task.message = "鍑嗗寮€濮嬫瀯寤?.."
+            task.message = "准备开始构建..."
         self._notify_state_change(force=True)
         
-        # 娣诲姞鍒伴槦鍒?
+        # 添加到队列
         self.task_queue.put(task_id)
-        print(f"[BuildTaskRunner] 浠诲姟 {task_id} 宸插姞鍏ラ槦鍒楋紝褰撳墠闃熷垪闀垮害: {self.task_queue.qsize()}")
+        print(f"[BuildTaskRunner] 任务 {task_id} 已加入队列，当前队列长度: {self.task_queue.qsize()}")
     
     def _worker_loop(self):
         """工作线程循环：持续从队列取任务并执行。"""
@@ -1276,10 +1284,10 @@ class BuildTaskRunner:
         
         while True:
             try:
-                # 闃诲绛夊緟浠诲姟
+                # 阻塞等待任务
                 task_id = self.task_queue.get(block=True)
                 
-                # 妫€鏌ヤ换鍔℃槸鍚︿粛鐒舵湁鏁?
+                # 检查任务是否仍然有效
                 if task_id not in self.tasks_db:
                     print(f"[{worker_name}] 任务 {task_id} 已被删除，跳过处理")
                     self.task_queue.task_done()
@@ -1287,32 +1295,32 @@ class BuildTaskRunner:
                 
                 task = self.tasks_db[task_id]
                 
-                # 妫€鏌ヤ换鍔＄姸鎬侊紙鍙兘琚彇娑堬級
+                # 检查任务状态（可能已被取消）
                 if task.status not in ["pending", "processing"]:
                     print(f"[{worker_name}] 任务 {task_id} 状态为 {task.status}，跳过处理")
                     self.task_queue.task_done()
                     continue
                 
-                # 鏍囪涓鸿繍琛屼腑
+                # 标记为运行中
                 with self.queue_lock:
                     self.running_tasks[task_id] = threading.current_thread()
                 
-                print(f"[{worker_name}] 寮€濮嬪鐞嗕换鍔?{task_id}")
+                print(f"[{worker_name}] 开始处理任务 {task_id}")
                 
                 try:
-                    # 鎵ц鏋勫缓
+                    # 执行构建
                     self._run_build(task_id)
                 finally:
-                    # 绉婚櫎杩愯鏍囪
+                    # 移除运行标记
                     with self.queue_lock:
                         if task_id in self.running_tasks:
                             del self.running_tasks[task_id]
                     
                     self.task_queue.task_done()
-                    print(f"[{worker_name}] 浠诲姟 {task_id} 瀹屾垚")
+                    print(f"[{worker_name}] 任务 {task_id} 完成")
                     
             except Exception as e:
-                print(f"[{worker_name}] 宸ヤ綔绾跨▼寮傚父: {e}")
+                print(f"[{worker_name}] 工作线程异常: {e}")
     
     def get_queue_status(self) -> dict:
         """返回当前任务队列状态。"""
@@ -1324,7 +1332,7 @@ class BuildTaskRunner:
         }
 
     def cancel_running_tasks(self, client_id: str = "") -> list[str]:
-        """鍙栨秷姝ｅ湪杩愯鎴栨帓闃熺殑浠诲姟"""
+        """取消正在运行或排队中的任务。"""
         canceled: list[str] = []
         for task_id, task in list(self.tasks_db.items()):
             if client_id and task.client_id and task.client_id != client_id:
@@ -1346,7 +1354,7 @@ class BuildTaskRunner:
         return canceled
 
     def cancel_task(self, task_id: str, client_id: str = "") -> bool:
-        """鍙栨秷鎸囧畾浠诲姟"""
+        """取消指定任务"""
         task = self.tasks_db.get(task_id)
         if not task:
             return False
@@ -1365,11 +1373,64 @@ class BuildTaskRunner:
             pass
         self._notify_state_change(force=True)
         return True
+
+    def _collect_failure_log_lines(self, task_id: str, task, max_lines: int = 240) -> list[str]:
+        """收集任务失败日志，优先使用内存日志，其次回退到日志文件。"""
+        lines: list[str] = []
+        if hasattr(task, "logs") and isinstance(task.logs, list) and task.logs:
+            lines = [str(item) for item in task.logs if str(item).strip()]
+        if not lines:
+            log_file = LOGS_DIR / f"{task_id}.log"
+            if log_file.exists():
+                try:
+                    with open(log_file, "r", encoding="utf-8") as handle:
+                        lines = [line.strip() for line in handle.readlines() if line.strip()]
+                except Exception:
+                    lines = []
+        if len(lines) > max_lines:
+            return lines[-max_lines:]
+        return lines
+
+    def _start_failure_diagnosis(self, task_id: str, task, failure_message: str) -> None:
+        """异步启动失败日志诊断，避免阻塞任务状态回写。"""
+        log_lines = self._collect_failure_log_lines(task_id, task)
+        provider = "openrouter" if OPENROUTER_DIAG_ENABLED else "rule"
+        model = OPENROUTER_MODEL if OPENROUTER_DIAG_ENABLED else ""
+        task.failure_diagnosis = create_running_diagnosis(
+            provider=provider,
+            model=model,
+            analyzed_log_lines=len(log_lines),
+        )
+        self._notify_state_change(force=True)
+
+        def _worker() -> None:
+            try:
+                task_meta = {
+                    "task_id": task_id,
+                    "task_mode": str(getattr(task, "mode", "convert") or "convert"),
+                    "output_format": str(getattr(getattr(task, "config", None), "output_format", "apk") or "apk"),
+                    "app_name": str(getattr(getattr(task, "config", None), "app_name", "") or ""),
+                    "package_name": str(getattr(getattr(task, "config", None), "package_name", "") or ""),
+                }
+                diagnosis = diagnose_build_failure(
+                    log_lines=log_lines,
+                    failure_message=str(failure_message or ""),
+                    task_meta=task_meta,
+                )
+                task.failure_diagnosis = diagnosis if isinstance(diagnosis, dict) else create_failed_diagnosis("invalid diagnosis")
+            except Exception as exc:
+                task.failure_diagnosis = create_failed_diagnosis(str(exc), analyzed_log_lines=len(log_lines))
+            task.updated_at = datetime.now()
+            self._notify_state_change(force=True)
+
+        threading.Thread(target=_worker, daemon=True, name=f"Diag-{task_id[:8]}").start()
     
     def _run_build(self, task_id: str):
-        """鎵ц鏋勫缓锛堝湪鍚庡彴绾跨▼涓繍琛岋級"""
+        """执行构建（在后台线程中运行）。"""
         task = self.tasks_db[task_id]
-        # 淇濈暀鍒涘缓/鏇存柊闃舵鏃ュ織锛岄伩鍏嶈鐩栧閾鹃澶勭悊缁撴灉
+        if not isinstance(getattr(task, "failure_diagnosis", None), dict):
+            task.failure_diagnosis = create_idle_diagnosis()
+        # 保留创建/更新阶段日志，避免覆盖外链预处理结果
         if not isinstance(getattr(task, "logs", None), list):
             task.logs = []
         elif len(task.logs) > 500:
@@ -1383,9 +1444,9 @@ class BuildTaskRunner:
                     taskKeystoreDir.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(str(sharedKeystorePath), str(taskKeystorePath))
                 except Exception as e:
-                    print(f"[WARN] quickGenerate 绛惧悕鍚屾澶辫触: {e}")
+                    print(f"[WARN] quickGenerate 签名文件同步失败: {e}")
         
-        # 璋冭瘯鏃ュ織锛氳緭鍑轰换鍔￠厤缃腑鐨?output_format
+        # 调试日志：输出任务配置中的 output_format
         output_format_from_config = getattr(task.config, "output_format", "apk")
         print(f"[DEBUG] task.config.output_format = {output_format_from_config}")
         
@@ -1396,11 +1457,11 @@ class BuildTaskRunner:
             self._notify_state_change()
         
         def on_log(log_line: str):
-            """娣诲姞鏃ュ織"""
+            """添加日志"""
             if not hasattr(task, 'logs') or task.logs is None:
                 task.logs = []
             task.logs.append(log_line)
-            # 鍙繚鐣欐渶杩?00琛屾棩蹇?
+            # 仅保留最近 500 行日志
             if len(task.logs) > 500:
                 task.logs = task.logs[-500:]
             self._notify_state_change()
@@ -1422,6 +1483,7 @@ class BuildTaskRunner:
                 task.status = "failed"
                 task.progress = 0
                 task.message = "任务已取消"
+                task.failure_diagnosis = create_idle_diagnosis()
                 task.updated_at = datetime.now()
                 self.canceled_tasks.discard(task_id)
                 self._notify_state_change(force=True)
@@ -1445,14 +1507,16 @@ class BuildTaskRunner:
                     task.desktop_output_expires_at = None
                 task.output_filename = None if auto_clean_output else output_file
                 task.download_url = None if auto_clean_output else f"/api/download/{task_id}"
+                task.failure_diagnosis = create_idle_diagnosis()
             else:
                 task.status = "failed"
                 task.message = message
                 task.desktop_output_expires_at = None
+                task.failure_diagnosis = create_idle_diagnosis()
             task.updated_at = datetime.now()
             self._notify_state_change(force=True)
             
-            # 浠庤繍琛屼换鍔′腑绉婚櫎
+            # 从运行任务中移除
             if task_id in self.running_tasks:
                 del self.running_tasks[task_id]
 
@@ -1510,16 +1574,18 @@ class BuildTaskRunner:
                         except Exception:
                             last_lines = []
                 report_task_logs(task_id, task.client_id or "", "BUILD_FAILED", last_lines or [])
+                self._start_failure_diagnosis(task_id, task, message)
         
         try:
-            # 鏇存柊浠诲姟鐘舵€?
+            # 更新任务状态
             task.status = "processing"
             task.progress = 5
-            task.message = "寮€濮嬫瀯寤?.."
+            task.message = "开始构建..."
+            task.failure_diagnosis = create_idle_diagnosis()
             task.updated_at = datetime.now()
             self._notify_state_change(force=True)
             
-            # 鍑嗗鏋勫缓鐜
+            # 准备构建环境
             env, task_output_dir = self.builder.prepare_build(
                 task_id=task_id,
                 app_name=task.config.app_name,
@@ -1549,7 +1615,7 @@ class BuildTaskRunner:
                 cdn_localize_preprocessed=getattr(task, "cdn_localize_preprocessed", False),
             )
             
-            # 杩愯Docker鏋勫缓
+            # 执行构建流程（本地或 Docker）
             self.builder.run_build(
                 task_id=task_id,
                 env=env,
@@ -1560,11 +1626,11 @@ class BuildTaskRunner:
             )
             
         except Exception as e:
-            on_log(f"[ERROR] 鏋勫缓澶辫触: {str(e)}")
-            on_complete(False, f"鏋勫缓澶辫触: {str(e)}", None)
+            on_log(f"[ERROR] 构建失败: {str(e)}")
+            on_complete(False, f"构建失败: {str(e)}", None)
 
 
-# 鍏ㄥ眬鏋勫缓浠诲姟杩愯鍣紙灏嗗湪main.py涓垵濮嬪寲锛?
+# 全局构建任务运行器（在 main.py 中初始化）
 task_runner: Optional[BuildTaskRunner] = None
 
 

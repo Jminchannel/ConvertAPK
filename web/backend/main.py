@@ -61,6 +61,15 @@ from admin_client import (
     check_admin_service,
 )
 from system_info import get_system_info
+from build_failure_diagnosis import (
+    create_failed_diagnosis,
+    create_idle_diagnosis,
+    create_running_diagnosis,
+    diagnose_build_failure,
+    normalize_diag_language,
+    OPENROUTER_DIAG_ENABLED,
+    OPENROUTER_MODEL,
+)
 
 app = FastAPI(
     title="APK转换服务",
@@ -1140,6 +1149,101 @@ def _append_task_log(task: BuildTask, message: str) -> None:
     task.logs = logs
 
 
+def _collect_task_failure_log_lines(task_id: str, task: BuildTask, max_lines: int = 240) -> list[str]:
+    """收集任务失败日志，优先使用内存日志，回退到日志文件。"""
+    lines: list[str] = []
+    if isinstance(getattr(task, "logs", None), list) and task.logs:
+        lines = [str(item) for item in task.logs if str(item).strip()]
+    if not lines:
+        log_file = LOGS_DIR / f"{task_id}.log"
+        if log_file.exists():
+            try:
+                with open(log_file, "r", encoding="utf-8") as handle:
+                    lines = [line.strip() for line in handle.readlines() if line.strip()]
+            except Exception:
+                lines = []
+    if len(lines) > max_lines:
+        return lines[-max_lines:]
+    return lines
+
+
+def _schedule_task_failure_diagnosis(
+    task_id: str,
+    task: BuildTask,
+    force: bool = False,
+    language: str | None = None,
+) -> bool:
+    """调度失败任务诊断，避免重复并发分析。"""
+    if task.status != BuildStatus.FAILED:
+        return False
+    normalized_language = normalize_diag_language(language)
+
+    current_diagnosis = getattr(task, "failure_diagnosis", {})
+    if not isinstance(current_diagnosis, dict):
+        current_diagnosis = {}
+
+    current_status = str(current_diagnosis.get("status", "")).strip().lower()
+    if not force and current_status in {"running", "succeeded"}:
+        return False
+
+    with TASK_DIAGNOSIS_LOCK:
+        if task_id in TASK_DIAGNOSIS_RUNNING_IDS:
+            return False
+        TASK_DIAGNOSIS_RUNNING_IDS.add(task_id)
+
+    log_lines = _collect_task_failure_log_lines(task_id, task)
+    task.failure_diagnosis = create_running_diagnosis(
+        provider="openrouter" if OPENROUTER_DIAG_ENABLED else "rule",
+        model=OPENROUTER_MODEL if OPENROUTER_DIAG_ENABLED else "",
+        analyzed_log_lines=len(log_lines),
+        language=normalized_language,
+    )
+    task.updated_at = datetime.now()
+    try:
+        persist_tasks_db(force=True)
+    except Exception:
+        pass
+
+    def _worker() -> None:
+        try:
+            task_meta = {
+                "task_id": task_id,
+                "task_mode": str(getattr(task, "mode", "convert") or "convert"),
+                "output_format": str(getattr(getattr(task, "config", None), "output_format", "apk") or "apk"),
+                "app_name": str(getattr(getattr(task, "config", None), "app_name", "") or ""),
+                "package_name": str(getattr(getattr(task, "config", None), "package_name", "") or ""),
+                "language": normalized_language,
+            }
+            diagnosis = diagnose_build_failure(
+                log_lines=log_lines,
+                failure_message=str(getattr(task, "message", "") or ""),
+                task_meta=task_meta,
+                language=normalized_language,
+            )
+            task.failure_diagnosis = (
+                diagnosis
+                if isinstance(diagnosis, dict)
+                else create_failed_diagnosis("invalid diagnosis payload", language=normalized_language)
+            )
+        except Exception as exc:
+            task.failure_diagnosis = create_failed_diagnosis(
+                str(exc),
+                analyzed_log_lines=len(log_lines),
+                language=normalized_language,
+            )
+        finally:
+            task.updated_at = datetime.now()
+            with TASK_DIAGNOSIS_LOCK:
+                TASK_DIAGNOSIS_RUNNING_IDS.discard(task_id)
+            try:
+                persist_tasks_db(force=True)
+            except Exception:
+                pass
+
+    threading.Thread(target=_worker, daemon=True, name=f"TaskDiagnosis-{task_id[:8]}").start()
+    return True
+
+
 def _resolve_node_executable() -> str:
     """优先使用环境配置中的 Node，可回退到系统 PATH"""
     try:
@@ -1560,6 +1664,8 @@ def _get_desktop_output_unavailable_detail(task: BuildTask) -> str:
 tasks_db = {}
 TASKS_STATE_PATH = TASKS_DIR / "tasks.json"
 TASKS_STATE_LOCK = threading.Lock()
+TASK_DIAGNOSIS_LOCK = threading.Lock()
+TASK_DIAGNOSIS_RUNNING_IDS: set[str] = set()
 
 # One-click (Quick) generate defaults (client-side shortcut).
 QUICK_GENERATE_STATE_PATH = TASKS_DIR / "quick-generate.json"
@@ -2505,6 +2611,7 @@ async def create_task(task_data: BuildTaskCreate):
         updated_at=now,
         progress=0,
         message="等待构建中",
+        failure_diagnosis=create_idle_diagnosis(),
         reuse_keystore_from=reuse_from,
         cdn_localize_enabled=cdn_localize_enabled,
         cdn_localize_urls=cdn_localize_urls,
@@ -2563,6 +2670,11 @@ async def list_tasks(client_id: str = None):
     else:
         task_list = [task for task in tasks_db.values() if task.client_id == client_id]
     task_list.sort(key=lambda task: (task.updated_at, task.created_at, task.id), reverse=True)
+    for task in task_list:
+        try:
+            _schedule_task_failure_diagnosis(task.id, task, force=False)
+        except Exception:
+            pass
     return task_list
 
 
@@ -2574,6 +2686,10 @@ async def get_task(task_id: str, client_id: str = None):
     client_id = _require_client_id(client_id)
     task = tasks_db[task_id]
     _assert_task_owner(task, client_id)
+    try:
+        _schedule_task_failure_diagnosis(task.id, task, force=False)
+    except Exception:
+        pass
     return task
 
 
@@ -2668,6 +2784,7 @@ async def start_task(task_id: str, client_id: str = None):
     task.status = BuildStatus.PROCESSING
     task.progress = 5
     task.message = "正在启动构建..."
+    task.failure_diagnosis = create_idle_diagnosis()
     task.updated_at = datetime.now()
 
     try:
@@ -2711,6 +2828,7 @@ async def start_task(task_id: str, client_id: str = None):
     except Exception as e:
         task.status = BuildStatus.FAILED
         task.message = f"启动构建失败: {str(e)}"
+        task.failure_diagnosis = create_failed_diagnosis(str(e), analyzed_log_lines=0)
         task.updated_at = datetime.now()
     try:
         persist_tasks_db(force=True)
@@ -2913,6 +3031,7 @@ async def retry_task(task_id: str, client_id: str = None):
     task.progress = 0
     task.message = "任务已重置，等待重新构建"
     task.logs = []
+    task.failure_diagnosis = create_idle_diagnosis()
     task.download_url = None
     task.output_filename = None
     task.updated_at = datetime.now()
@@ -2972,7 +3091,7 @@ async def update_task(task_id: str, update_data: UpdateTaskRequest):
             if task.mode == "html":
                 index_entry = _pick_zip_index_entry(dst_zip)
                 if not index_entry:
-                    raise HTTPException(status_code=400, detail="ZIP涓湭鎵惧埌 index.html")
+                    raise HTTPException(status_code=400, detail="ZIP中未找到 index.html")
                 dst_html = task_input_dir / "index.html"
                 if dst_html.exists():
                     dst_html.unlink()
@@ -3087,6 +3206,7 @@ async def update_task(task_id: str, update_data: UpdateTaskRequest):
     task.progress = 0
     task.message = f"版本更新至 {update_data.version_name}，等待构建"
     task.logs = []
+    task.failure_diagnosis = create_idle_diagnosis()
     for line in cdn_localize_log_lines:
         _append_task_log(task, line)
     task.download_url = None
@@ -3133,6 +3253,83 @@ async def get_task_logs(task_id: str, lines: int = 100, client_id: str = None):
             return {"logs": logs, "total": len(all_logs)}
     
     return {"logs": [], "total": 0}
+
+
+@app.get("/api/tasks/{task_id}/diagnosis")
+async def get_task_diagnosis(
+    task_id: str,
+    client_id: str = None,
+    refresh: bool = False,
+    lang: str = "zh-CN",
+):
+    """获取构建失败智能诊断结果。"""
+    if task_id not in tasks_db:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    task = tasks_db[task_id]
+    client_id = _require_client_id(client_id)
+    _assert_task_owner(task, client_id)
+
+    diagnosis = getattr(task, "failure_diagnosis", {})
+    if not isinstance(diagnosis, dict):
+        diagnosis = create_idle_diagnosis(language=lang)
+        task.failure_diagnosis = diagnosis
+
+    if task.status == BuildStatus.FAILED:
+        requested_language = normalize_diag_language(lang)
+        diagnosis_language = normalize_diag_language(diagnosis.get("language"))
+        language_changed = diagnosis_language != requested_language
+        should_force = bool(refresh)
+        should_schedule = should_force or not diagnosis
+        if should_schedule:
+            _schedule_task_failure_diagnosis(
+                task_id,
+                task,
+                force=should_force,
+                language=requested_language,
+            )
+        elif language_changed and str(diagnosis.get("status", "")).strip().lower() == "succeeded":
+            _schedule_task_failure_diagnosis(
+                task_id,
+                task,
+                force=True,
+                language=requested_language,
+            )
+        elif str(diagnosis.get("status", "")).strip().lower() not in {"running", "succeeded"}:
+            _schedule_task_failure_diagnosis(
+                task_id,
+                task,
+                force=False,
+                language=requested_language,
+            )
+
+    return {
+        "task_id": task_id,
+        "task_status": task.status,
+        "diagnosis": task.failure_diagnosis if isinstance(task.failure_diagnosis, dict) else create_idle_diagnosis(language=lang),
+    }
+
+
+@app.post("/api/tasks/{task_id}/diagnosis")
+async def rerun_task_diagnosis(task_id: str, payload: dict = Body(...)):
+    """手动重新触发构建失败智能诊断。"""
+    if task_id not in tasks_db:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    task = tasks_db[task_id]
+    client_id = _require_client_id(payload.get("client_id"))
+    _assert_task_owner(task, client_id)
+
+    if task.status != BuildStatus.FAILED:
+        raise HTTPException(status_code=400, detail="只有失败任务可以重新诊断")
+
+    requested_language = normalize_diag_language(payload.get("lang"))
+    _schedule_task_failure_diagnosis(task_id, task, force=True, language=requested_language)
+    return {
+        "task_id": task_id,
+        "task_status": task.status,
+        "diagnosis": task.failure_diagnosis if isinstance(task.failure_diagnosis, dict) else create_idle_diagnosis(language=requested_language),
+    }
 
 
 @app.get("/api/queue/status")

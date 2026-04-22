@@ -91,10 +91,24 @@ export const useAppState = () => {
     applyTheme(newTheme)
   }
 
+  // 把 i18n 语言代码映射为符合 BCP 47 规范的 html lang 属性值
+  const normalizeHtmlLang = (lang) => {
+    if (lang === 'zh-CN' || lang === 'zh-TW') return lang
+    return 'en'
+  }
+
+  const applyDocumentLang = (lang) => {
+    if (typeof document !== 'undefined' && document.documentElement) {
+      document.documentElement.lang = normalizeHtmlLang(lang)
+    }
+  }
+
   const changeLanguage = (lang) => {
     currentLang.value = lang
     saveLanguage(lang)
     i18n.value = createI18n(lang)
+    // 同步 html[lang]，让屏幕阅读器发音正确
+    applyDocumentLang(lang)
     showLangMenu.value = false
   }
 
@@ -687,6 +701,34 @@ export const useAppState = () => {
   const taskLogs = ref([])
   const currentLogTaskId = ref(null)
   const logsContainer = ref(null)
+  const taskDiagnosis = ref(null)
+  const taskDiagnosisLoading = ref(false)
+  const taskDiagnosisError = ref('')
+  const diagnosisPollIntervalMs = 1500
+  const diagnosisPollMaxRounds = 40
+  let diagnosisPollTimer = null
+  let diagnosisPollRounds = 0
+
+  const stopDiagnosisPolling = () => {
+    if (diagnosisPollTimer) {
+      clearTimeout(diagnosisPollTimer)
+      diagnosisPollTimer = null
+    }
+    diagnosisPollRounds = 0
+  }
+
+  const scheduleDiagnosisPolling = () => {
+    if (diagnosisPollTimer || !showLogs.value) return
+    if (diagnosisPollRounds >= diagnosisPollMaxRounds) {
+      stopDiagnosisPolling()
+      return
+    }
+    diagnosisPollTimer = setTimeout(async () => {
+      diagnosisPollTimer = null
+      diagnosisPollRounds += 1
+      await refreshTaskDiagnosis(false, true)
+    }, diagnosisPollIntervalMs)
+  }
 
   // Update existing task
   const updatingTaskId = ref(null)
@@ -838,6 +880,78 @@ export const useAppState = () => {
   const showToast = (message, type = 'success') => {
     toast.value = { show: true, type, message }
     setTimeout(() => (toast.value.show = false), 3000)
+  }
+
+  // 自定义确认对话框：替代原生 confirm()
+  // 同一时刻仅保留一个 pending 的 Promise，避免多重弹窗导致状态紊乱
+  const confirmDialog = ref({
+    visible: false,
+    title: '',
+    message: '',
+    confirmText: '',
+    cancelText: '',
+    confirmType: 'primary'
+  })
+  let confirmDialogResolver = null
+
+  // 返回 Promise<boolean>，true 表示用户确认，false 表示取消
+  const openConfirmDialog = ({ title = '', message = '', confirmText = '', cancelText = '', confirmType = 'primary' } = {}) => {
+    // 如果上一个对话框还没关闭，先视为取消以释放上一个 Promise
+    if (confirmDialogResolver) {
+      try { confirmDialogResolver(false) } catch (_) {}
+      confirmDialogResolver = null
+    }
+    // 根据当前语言选择兜底按钮文案
+    const lang = currentLang.value || 'en'
+    const defaultOk = lang === 'zh-CN' ? '确定' : lang === 'zh-TW' ? '確定' : 'OK'
+    const defaultCancel = lang === 'zh-CN' ? '取消' : lang === 'zh-TW' ? '取消' : 'Cancel'
+    confirmDialog.value = {
+      visible: true,
+      title,
+      message,
+      confirmText: confirmText || defaultOk,
+      cancelText: cancelText || defaultCancel,
+      confirmType
+    }
+    return new Promise((resolve) => {
+      confirmDialogResolver = resolve
+    })
+  }
+
+  const closeConfirmDialog = (result) => {
+    if (confirmDialogResolver) {
+      const resolver = confirmDialogResolver
+      confirmDialogResolver = null
+      resolver(Boolean(result))
+    }
+    confirmDialog.value = { ...confirmDialog.value, visible: false }
+  }
+
+  // 从 axios 错误对象中提取可用于开发调试的细节（仅用于 console），不直接展示给用户
+  // 避免把后端堆栈、敏感字段泄露到 UI；参见 AGENTS.md 第 7 节
+  const extractErrorDetailForLog = (error) => {
+    if (!error) return ''
+    if (typeof error === 'string') return error
+    const detail = error?.response?.data?.detail
+    const msg = error?.message
+    if (typeof detail === 'string' && detail) return detail
+    if (detail && typeof detail === 'object') {
+      try { return JSON.stringify(detail) } catch { return '' }
+    }
+    return typeof msg === 'string' ? msg : ''
+  }
+
+  // 统一的错误提示入口：始终使用 i18n 文案，后端错误细节仅在控制台输出
+  const showErrorToast = (i18nKey, error) => {
+    const fallback = i18nKey ? t(i18nKey) : t('toast.operationFailed')
+    try {
+      // 仅开发调试：避免生产用户看到后端堆栈/敏感信息
+      // eslint-disable-next-line no-console
+      console.warn('[showErrorToast]', i18nKey, extractErrorDetailForLog(error))
+    } catch {
+      // ignore console 错误
+    }
+    showToast(fallback, 'error')
   }
 
   const showAuthModal = ref(false)
@@ -1765,7 +1879,7 @@ export const useAppState = () => {
       }
       showToast(t('toast.uploadSuccess'), 'success')
     } catch (error) {
-      showToast(t('toast.uploadFailed') + ': ' + (error.response?.data?.detail || error.message), 'error')
+      showErrorToast('toast.uploadFailed', error)
     }
   }
 
@@ -1862,7 +1976,7 @@ export const useAppState = () => {
       if (savedFromEditor) {
         htmlSavedUploadContent.value = ''
       }
-      showToast(t('toast.uploadFailed') + ': ' + (error.response?.data?.detail || error.message), 'error')
+      showErrorToast('toast.uploadFailed', error)
       return null
     }
   }
@@ -2326,7 +2440,9 @@ export const useAppState = () => {
       showToast(t('config.keystoreUploadSuccess'), 'success')
     } catch (error) {
       keystoreUploadError.value = t('config.keystoreUploadFailed')
-      showToast(keystoreUploadError.value + ': ' + (error.response?.data?.detail || error.message), 'error')
+      // 后端错误细节仅用于 console 调试，UI 显示本地化文案
+      try { console.warn('[uploadKeystore]', extractErrorDetailForLog(error)) } catch {}
+      showToast(keystoreUploadError.value, 'error')
     }
   }
 
@@ -2375,9 +2491,9 @@ export const useAppState = () => {
       try {
         const result = await api.uploadIcon(croppedFile)
         uploadedIcon.value = result
-        showToast('图标设置成功', 'success')
+        showToast(t('toast.iconSet'), 'success')
       } catch (error) {
-        showToast('图标上传失败: ' + (error.response?.data?.detail || error.message), 'error')
+        showErrorToast('toast.iconUploadFailed', error)
       }
       closeCropper()
     }, 'image/png', 1.0)
@@ -2422,7 +2538,7 @@ export const useAppState = () => {
       await refreshTasks()
       startPolling()
     } catch (error) {
-      showToast('启动失败: ' + (error.response?.data?.detail || error.message), 'error')
+      showErrorToast('toast.startFailed', error)
     }
   }
   const retryTask = async (taskId) => {
@@ -2431,27 +2547,36 @@ export const useAppState = () => {
       showToast(t('toast.taskRetried'), 'success')
       await refreshTasks()
     } catch (error) {
-      showToast('重试失败: ' + (error.response?.data?.detail || error.message), 'error')
+      showErrorToast('toast.retryFailed', error)
     }
   }
   const cancelTask = async (taskId) => {
-    if (!confirm('确定要取消这个任务吗？')) return
+    // 使用自定义确认对话框替代原生 confirm()，保证 UI 一致 + i18n
+    const ok = await openConfirmDialog({
+      message: t('toast.cancelConfirm'),
+      confirmType: 'danger'
+    })
+    if (!ok) return
     try {
       await api.cancelTask(taskId)
-      showToast('任务已取消', 'success')
+      showToast(t('toast.taskCanceled') || t('toast.taskDeleted'), 'success')
       await refreshTasks()
     } catch (error) {
-      showToast('取消失败: ' + (error.response?.data?.detail || error.message), 'error')
+      showErrorToast('toast.cancelFailed', error)
     }
   }
   const deleteTask = async (taskId) => {
-    if (!confirm('确定要删除这个任务吗？')) return
+    const ok = await openConfirmDialog({
+      message: t('toast.deleteConfirm'),
+      confirmType: 'danger'
+    })
+    if (!ok) return
     try {
       await api.deleteTask(taskId)
       showToast(t('toast.taskDeleted'), 'success')
       await refreshTasks()
     } catch (error) {
-      showToast('删除失败: ' + (error.response?.data?.detail || error.message), 'error')
+      showErrorToast('toast.deleteFailed', error)
     }
   }
 
@@ -2754,13 +2879,13 @@ export const useAppState = () => {
           await refreshTasks()
           startPolling()
         } catch (error) {
-          showToast('启动失败: ' + (error.response?.data?.detail || error.message), 'error')
+          showErrorToast('toast.startFailed', error)
         }
       }
       resetForm({ preserveQuickGenerate: isQuickGenerate })
       await refreshTasks()
     } catch (error) {
-      showToast('操作失败: ' + (error.response?.data?.detail || error.message), 'error')
+      showErrorToast('toast.operationFailed', error)
     } finally {
       isCreating.value = false
     }
@@ -2832,15 +2957,76 @@ export const useAppState = () => {
   }
 
   // Logs
+  const getCurrentLogTask = () => tasks.value.find((item) => item.id === currentLogTaskId.value) || null
+  const refreshTaskDiagnosis = async (refresh = false, fromPolling = false) => {
+    const task = getCurrentLogTask()
+    if (!task || task.status !== 'failed') {
+      stopDiagnosisPolling()
+      taskDiagnosis.value = null
+      taskDiagnosisError.value = ''
+      taskDiagnosisLoading.value = false
+      return
+    }
+    if (!fromPolling) {
+      taskDiagnosisLoading.value = true
+      taskDiagnosisError.value = ''
+    }
+    try {
+      const result = await api.getTaskDiagnosis(task.id, refresh)
+      taskDiagnosis.value = result?.diagnosis || null
+      const diagnosisStatus = String(taskDiagnosis.value?.status || '').trim().toLowerCase()
+      if (diagnosisStatus === 'running') {
+        scheduleDiagnosisPolling()
+      } else {
+        stopDiagnosisPolling()
+      }
+    } catch (error) {
+      stopDiagnosisPolling()
+      taskDiagnosis.value = null
+      taskDiagnosisError.value = t('logs.aiFetchFailed')
+    } finally {
+      if (!fromPolling) {
+        taskDiagnosisLoading.value = false
+      }
+    }
+  }
+  const rerunTaskDiagnosis = async () => {
+    const task = getCurrentLogTask()
+    if (!task || task.status !== 'failed') return
+    stopDiagnosisPolling()
+    taskDiagnosisLoading.value = true
+    taskDiagnosisError.value = ''
+    try {
+      const result = await api.rerunTaskDiagnosis(task.id)
+      taskDiagnosis.value = result?.diagnosis || null
+      showToast(t('logs.aiRerunStarted'), 'success')
+      const diagnosisStatus = String(taskDiagnosis.value?.status || '').trim().toLowerCase()
+      if (diagnosisStatus === 'running') {
+        scheduleDiagnosisPolling()
+      } else {
+        await refreshTaskDiagnosis(false)
+      }
+    } catch (error) {
+      stopDiagnosisPolling()
+      taskDiagnosisError.value = t('logs.aiRerunFailed')
+      showToast(t('logs.aiRerunFailed'), 'error')
+    } finally {
+      taskDiagnosisLoading.value = false
+    }
+  }
   const viewLogs = async (taskId) => {
     currentLogTaskId.value = taskId
     showLogs.value = true
     await refreshLogs()
   }
   const closeLogs = () => {
+    stopDiagnosisPolling()
     showLogs.value = false
     currentLogTaskId.value = null
     taskLogs.value = []
+    taskDiagnosis.value = null
+    taskDiagnosisLoading.value = false
+    taskDiagnosisError.value = ''
   }
   const refreshLogs = async () => {
     if (!currentLogTaskId.value) return
@@ -2853,6 +3039,7 @@ export const useAppState = () => {
     } catch {
       taskLogs.value = []
     }
+    await refreshTaskDiagnosis(false)
   }
 
   // Settings
@@ -3050,12 +3237,45 @@ export const useAppState = () => {
     }
   })
 
+  // 全局 ESC 键：按最上层弹窗的优先级关闭对话框
+  // 顺序由"最顶层/最新打开的"到"最底层"
+  const handleGlobalEscape = (event) => {
+    if (event.key !== 'Escape') return
+    // 合规弹窗需要用户显式点接受/拒绝，不支持 ESC 关闭
+    if (showComplianceNotice.value) return
+    if (confirmDialog.value.visible) {
+      event.preventDefault()
+      closeConfirmDialog(false)
+      return
+    }
+    const dialogs = [
+      { open: showCropper, close: closeCropper },
+      { open: showLogs, close: closeLogs },
+      { open: showHtmlPreviewModal, close: closeHtmlPreviewModal },
+      { open: showCdnLocalizeModal, close: closeCdnLocalizeModal },
+      { open: showHtmlEditorModal, close: closeHtmlEditorModal },
+      { open: showAuthModal, close: closeAuthModal },
+      { open: showDonation, close: closeDonation },
+      { open: showSettings, close: closeSettings }
+    ]
+    for (const d of dialogs) {
+      if (d.open && d.open.value) {
+        event.preventDefault()
+        try { d.close() } catch (_) { /* ignore */ }
+        return
+      }
+    }
+  }
+
   onMounted(async () => {
     updateMobileShell()
     applyTheme(currentTheme.value)
+    // 首次加载时应用保存的语言到 html[lang]，便于辅助技术发音
+    applyDocumentLang(currentLang.value)
     showComplianceNotice.value = true
     document.addEventListener('click', handleClickOutside)
     document.addEventListener('visibilitychange', handleDocumentVisibilityChange)
+    document.addEventListener('keydown', handleGlobalEscape)
     window.addEventListener('resize', updateMobileShell)
     window.addEventListener('pagehide', releaseDesktopOutputsOnPageExit)
     window.addEventListener('beforeunload', releaseDesktopOutputsOnPageExit)
@@ -3088,8 +3308,10 @@ export const useAppState = () => {
 
   onUnmounted(() => {
     stopPolling()
+    stopDiagnosisPolling()
     document.removeEventListener('click', handleClickOutside)
     document.removeEventListener('visibilitychange', handleDocumentVisibilityChange)
+    document.removeEventListener('keydown', handleGlobalEscape)
     window.removeEventListener('resize', updateMobileShell)
     window.removeEventListener('pagehide', releaseDesktopOutputsOnPageExit)
     window.removeEventListener('beforeunload', releaseDesktopOutputsOnPageExit)
@@ -3276,6 +3498,9 @@ export const useAppState = () => {
     previousVersionName,
     showLogs,
     taskLogs,
+    taskDiagnosis,
+    taskDiagnosisLoading,
+    taskDiagnosisError,
     currentLogTaskId,
     logsContainer,
     updatingTaskId,
@@ -3300,6 +3525,10 @@ export const useAppState = () => {
     exitQuickGenerate,
     toast,
     showToast,
+    // 自定义确认对话框
+    confirmDialog,
+    openConfirmDialog,
+    closeConfirmDialog,
     isValidPackageName,
     isValidUrl,
     isValidHostName,
@@ -3401,6 +3630,7 @@ export const useAppState = () => {
     viewLogs,
     closeLogs,
     refreshLogs,
+    rerunTaskDiagnosis,
     openSettings,
     closeSettings,
     fetchAnnouncements,

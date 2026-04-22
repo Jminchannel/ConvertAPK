@@ -1924,6 +1924,59 @@ html.light-theme .html-editor-toolbar {
 .log-line:hover { background: rgba(255,255,255,0.05); }
 .log-error { color: #f87171; }
 .log-success { color: #34d399; }
+.diag-card {
+  margin-top: 14px;
+  padding: 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  display: grid;
+  gap: 10px;
+}
+.diag-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.diag-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+.diag-item {
+  display: grid;
+  gap: 4px;
+}
+.diag-label {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.diag-value {
+  font-size: 12px;
+  color: var(--text-main);
+  line-height: 1.6;
+}
+.diag-line {
+  margin-bottom: 4px;
+}
+.diag-loading,
+.diag-empty {
+  font-size: 12px;
+  color: var(--text-sub);
+}
+.diag-error {
+  font-size: 12px;
+  color: var(--error-start);
+}
+.diag-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
 
 /* Window Controls */
 .window-controls {
@@ -2166,4 +2219,31 @@ html.light-theme .html-editor-toolbar {
   background: rgba(16, 185, 129, 0.1);
   padding: 2px 6px;
   border-radius: 4px;
+}
+
+/* ==============================
+ * 无障碍：尊重系统的低动效偏好
+ * 对前庭敏感用户禁用持续动画（如 GitHub Star 光扫、粒子、shimmer 等）
+ * 参考：https://developer.mozilla.org/en-US/docs/Web/CSS/@media/prefers-reduced-motion
+ * ============================== */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* 全局可见焦点样式：在关闭默认 outline 的地方兜底，保证键盘用户有视觉反馈 */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid #6366f1;
+  outline-offset: 2px;
 }

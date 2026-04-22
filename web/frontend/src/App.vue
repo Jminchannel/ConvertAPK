@@ -898,8 +898,8 @@
                 @click="createTask"
                 :disabled="!canCreateTask || isCreating"
               >
-                <span v-if="isCreating" class="spinner"></span>
-                <span v-else>{{ updatingTaskId ? 'RETRY' : 'NEW' }}</span>
+                <span v-if="isCreating" class="spinner" aria-hidden="true"></span>
+                <span v-else class="btn-badge" aria-hidden="true">{{ updatingTaskId ? t('tasks.retryBadge') : t('tasks.newBadge') }}</span>
                 {{ isCreating ? t('config.creating') : (updatingTaskId ? t('config.updateTask') : t('config.createTask')) }}
               </button>
             </div>
@@ -1005,9 +1005,10 @@
                     v-if="isCancelableTask(task) && task.status !== 'processing' && !isQueuedTask(task)"
                     class="btn btn-warning btn-sm"
                     @click="cancelTask(task.id)"
-                    title="取消"
+                    :title="t('tasks.cancel') || 'Cancel'"
+                    :aria-label="t('tasks.cancel') || 'Cancel'"
                   >
-                    X
+                    <span aria-hidden="true">✕</span>
                   </button>
                   <button
                     v-if="task.status === 'processing' || task.status === 'failed' || task.status === 'success'"
@@ -1182,11 +1183,20 @@
 
     <!-- Cropper dialog -->
     <Teleport to="body">
-      <div v-if="showCropper" class="cropper-overlay" @click.self="closeCropper">
+      <div
+        v-if="showCropper"
+        class="cropper-overlay"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="cropper-title"
+        @click.self="closeCropper"
+        @keydown.esc.stop="closeCropper"
+        tabindex="-1"
+      >
         <div class="cropper-dialog">
           <div class="cropper-dialog-header">
-            <h3>✂️ {{ t('cropper.title') }}</h3>
-            <button class="cropper-close-btn" @click="closeCropper">✕</button>
+            <h3 id="cropper-title">✂️ {{ t('cropper.title') }}</h3>
+            <button class="cropper-close-btn" @click="closeCropper" aria-label="Close">✕</button>
           </div>
           <div class="cropper-dialog-body">
             <Cropper
@@ -1213,11 +1223,20 @@
 
     <!-- Logs dialog -->
     <Teleport to="body">
-      <div v-if="showLogs" class="logs-overlay" @click.self="closeLogs">
+      <div
+        v-if="showLogs"
+        class="logs-overlay"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="logs-title"
+        @click.self="closeLogs"
+        @keydown.esc.stop="closeLogs"
+        tabindex="-1"
+      >
         <div class="logs-dialog">
           <div class="logs-dialog-header">
-            <h3>📋 {{ t('logs.title') }}</h3>
-            <button class="logs-close-btn" @click="closeLogs">✕</button>
+            <h3 id="logs-title">📋 {{ t('logs.title') }}</h3>
+            <button class="logs-close-btn" @click="closeLogs" aria-label="Close">✕</button>
           </div>
           <div class="logs-dialog-body" ref="logsContainer">
             <div v-if="taskLogs.length === 0" class="logs-empty">{{ t('logs.noLogs') }}</div>
@@ -1231,6 +1250,68 @@
                 {{ log }}
               </div>
             </div>
+            <div
+              v-if="taskDiagnosisLoading || taskDiagnosisError || taskDiagnosis"
+              class="diag-card"
+            >
+              <div class="diag-header">
+                <div class="diag-title">🧠 {{ t('logs.aiTitle') }}</div>
+                <button
+                  class="btn btn-ghost btn-sm"
+                  @click="rerunTaskDiagnosis"
+                  :disabled="taskDiagnosisLoading"
+                >
+                  {{ t('logs.aiRerun') }}
+                </button>
+              </div>
+              <div v-if="taskDiagnosisLoading" class="diag-loading">{{ t('logs.aiLoading') }}</div>
+              <div v-else-if="taskDiagnosisError" class="diag-error">{{ taskDiagnosisError }}</div>
+              <template v-else-if="taskDiagnosis && taskDiagnosis.status === 'running'">
+                <div class="diag-loading">{{ t('logs.aiLoading') }}</div>
+              </template>
+              <template v-else-if="taskDiagnosis && taskDiagnosis.summary">
+                <div class="diag-item">
+                  <div class="diag-label">{{ t('logs.aiSummary') }}</div>
+                  <div class="diag-value">{{ taskDiagnosis.summary }}</div>
+                </div>
+                <div class="diag-item" v-if="taskDiagnosis.reason">
+                  <div class="diag-label">{{ t('logs.aiReason') }}</div>
+                  <div class="diag-value">{{ taskDiagnosis.reason }}</div>
+                </div>
+                <div class="diag-item" v-if="taskDiagnosis.probable_causes && taskDiagnosis.probable_causes.length">
+                  <div class="diag-label">{{ t('logs.aiCauses') }}</div>
+                  <div class="diag-value">
+                    <div
+                      v-for="(cause, index) in taskDiagnosis.probable_causes"
+                      :key="`cause_${index}`"
+                      class="diag-line"
+                    >
+                      {{ index + 1 }}. {{ cause }}
+                    </div>
+                  </div>
+                </div>
+                <div class="diag-item" v-if="taskDiagnosis.suggestions && taskDiagnosis.suggestions.length">
+                  <div class="diag-label">{{ t('logs.aiSolutions') }}</div>
+                  <div class="diag-value">
+                    <div
+                      v-for="(suggestion, index) in taskDiagnosis.suggestions"
+                      :key="`suggestion_${index}`"
+                      class="diag-line"
+                    >
+                      {{ index + 1 }}. {{ suggestion }}
+                    </div>
+                  </div>
+                </div>
+                <div class="diag-meta">
+                  <span>{{ t('logs.aiProvider') }}: {{ taskDiagnosis.provider || 'rule' }}</span>
+                  <span v-if="taskDiagnosis.model">{{ t('logs.aiModel') }}: {{ taskDiagnosis.model }}</span>
+                  <span v-if="typeof taskDiagnosis.confidence === 'number'">
+                    {{ t('logs.aiConfidence') }}: {{ Math.round(taskDiagnosis.confidence * 100) }}%
+                  </span>
+                </div>
+              </template>
+              <div v-else class="diag-empty">{{ t('logs.aiEmpty') }}</div>
+            </div>
           </div>
           <div class="logs-dialog-footer">
             <button class="btn btn-secondary btn-sm" @click="refreshLogs">↻</button>
@@ -1242,10 +1323,19 @@
 
     <!-- HTML Editor dialog -->
     <Teleport to="body">
-      <div v-if="showHtmlEditorModal" class="html-editor-overlay" @click.self="closeHtmlEditorModal">
+      <div
+        v-if="showHtmlEditorModal"
+        class="html-editor-overlay"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="html-editor-title"
+        @click.self="closeHtmlEditorModal"
+        @keydown.esc.stop="closeHtmlEditorModal"
+        tabindex="-1"
+      >
         <div class="html-editor-dialog">
           <div class="html-editor-dialog-header">
-            <div class="html-editor-dialog-title">{{ t('html.editorTitle') }}</div>
+            <div id="html-editor-title" class="html-editor-dialog-title">{{ t('html.editorTitle') }}</div>
             <div class="html-editor-dialog-actions">
               <button class="btn btn-secondary btn-sm" @click="previewCurrentHtml">
                 {{ t('html.preview') }}
@@ -1293,11 +1383,20 @@
 
     <!-- HTML 预览弹窗 -->
     <Teleport to="body">
-      <div v-if="showHtmlPreviewModal" class="html-preview-overlay" @click.self="closeHtmlPreviewModal">
+      <div
+        v-if="showHtmlPreviewModal"
+        class="html-preview-overlay"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="html-preview-title"
+        @click.self="closeHtmlPreviewModal"
+        @keydown.esc.stop="closeHtmlPreviewModal"
+        tabindex="-1"
+      >
         <div class="html-preview-dialog">
           <div class="html-preview-dialog-header">
-            <div class="html-preview-dialog-title">{{ t('html.previewTitle') }}</div>
-            <button class="html-preview-close-btn" @click="closeHtmlPreviewModal">x</button>
+            <div id="html-preview-title" class="html-preview-dialog-title">{{ t('html.previewTitle') }}</div>
+                  <button class="html-preview-close-btn" @click="closeHtmlPreviewModal" aria-label="Close">✕</button>
           </div>
           <div class="html-preview-dialog-body">
             <div class="html-preview-phone">
@@ -1319,11 +1418,20 @@
     </Teleport>
 
     <Teleport to="body">
-      <div v-if="showCdnLocalizeModal" class="cdn-localize-overlay" @click.self="closeCdnLocalizeModal">
+      <div
+        v-if="showCdnLocalizeModal"
+        class="cdn-localize-overlay"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="cdn-localize-title"
+        @click.self="closeCdnLocalizeModal"
+        @keydown.esc.stop="closeCdnLocalizeModal"
+        tabindex="-1"
+      >
         <div class="cdn-localize-dialog">
           <div class="cdn-localize-dialog-header">
-            <div class="cdn-localize-dialog-title">{{ t('cdnLocalize.dialogTitle') }}</div>
-            <button class="cdn-localize-close-btn" @click="closeCdnLocalizeModal">x</button>
+            <div id="cdn-localize-title" class="cdn-localize-dialog-title">{{ t('cdnLocalize.dialogTitle') }}</div>
+                  <button class="cdn-localize-close-btn" @click="closeCdnLocalizeModal" aria-label="Close">✕</button>
           </div>
           <div class="cdn-localize-dialog-body">
             <div class="cdn-localize-toolbar">
@@ -1373,13 +1481,22 @@
 
     <!-- Auth dialog -->
     <Teleport to="body">
-      <div v-if="showAuthModal" class="auth-overlay" @click.self="closeAuthModal">
+      <div
+        v-if="showAuthModal"
+        class="auth-overlay"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="auth-dialog-title"
+        @click.self="closeAuthModal"
+        @keydown.esc.stop="closeAuthModal"
+        tabindex="-1"
+      >
         <div class="auth-dialog">
           <div class="auth-dialog-header">
-            <div class="auth-dialog-title">
+            <div id="auth-dialog-title" class="auth-dialog-title">
               {{ authMode === 'register' ? t('auth.registerTitle') : t('auth.loginTitle') }}
             </div>
-            <button class="auth-close-btn" @click="closeAuthModal">x</button>
+            <button class="auth-close-btn" @click="closeAuthModal" aria-label="Close">✕</button>
           </div>
 
           <div v-if="isAuthEntryEnabled" class="auth-tabs">
@@ -1475,11 +1592,20 @@
 
     <!-- Donation dialog -->
     <Teleport to="body">
-      <div v-if="showDonation" class="donation-overlay" @click.self="closeDonation">
+      <div
+        v-if="showDonation"
+        class="donation-overlay"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="donation-title"
+        @click.self="closeDonation"
+        @keydown.esc.stop="closeDonation"
+        tabindex="-1"
+      >
         <div class="donation-dialog">
           <div class="donation-dialog-header">
-            <h3>💛 {{ t('donation.title') }}</h3>
-            <button class="donation-close-btn" @click="closeDonation">✕</button>
+            <h3 id="donation-title">💛 {{ t('donation.title') }}</h3>
+            <button class="donation-close-btn" @click="closeDonation" aria-label="Close">✕</button>
           </div>
           <div class="donation-dialog-body">
             <div class="donation-message">{{ t('donation.message') }}</div>
@@ -1508,11 +1634,20 @@
 
     <!-- Settings -->
     <Teleport to="body">
-      <div v-if="showSettings" class="settings-overlay" @click.self="closeSettings">
+      <div
+        v-if="showSettings"
+        class="settings-overlay"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="settings-title"
+        @click.self="closeSettings"
+        @keydown.esc.stop="closeSettings"
+        tabindex="-1"
+      >
         <div class="settings-dialog">
           <div class="settings-dialog-header">
-            <h3>{{ t('settings.title') }}</h3>
-            <button class="settings-close-btn" @click="closeSettings">x</button>
+            <h3 id="settings-title">{{ t('settings.title') }}</h3>
+            <button class="settings-close-btn" @click="closeSettings" aria-label="Close">✕</button>
           </div>
 
           <div class="settings-dialog-body">
@@ -1568,10 +1703,30 @@
       </div>
     </Teleport>
 
+    <!-- 确认对话框：替代原生 confirm() -->
+    <ConfirmDialog
+      :visible="confirmDialog.visible"
+      :title="confirmDialog.title"
+      :message="confirmDialog.message"
+      :confirm-text="confirmDialog.confirmText"
+      :cancel-text="confirmDialog.cancelText"
+      :confirm-type="confirmDialog.confirmType"
+      @confirm="closeConfirmDialog(true)"
+      @cancel="closeConfirmDialog(false)"
+    />
+
     <!-- Toast -->
     <Transition name="toast">
-      <div v-if="toast.show" class="toast" :class="toast.type">
-        <span>{{ toast.type === 'success' ? 'OK' : 'X' }}</span>
+      <div
+        v-if="toast.show"
+        class="toast"
+        :class="toast.type"
+        role="status"
+        aria-live="polite"
+      >
+        <span class="toast-icon" aria-hidden="true">
+          {{ toast.type === 'success' ? '\u2714' : '\u2716' }}
+        </span>
         <span>{{ toast.message }}</span>
       </div>
     </Transition>
@@ -1583,10 +1738,11 @@ import { defineComponent } from 'vue'
 import { Cropper } from 'vue-advanced-cropper'
 import 'vue-advanced-cropper/dist/style.css'
 import { useAppState } from './composables/useAppState'
+import ConfirmDialog from './components/ConfirmDialog.vue'
 
 export default defineComponent({
   name: 'App',
-  components: { Cropper },
+  components: { Cropper, ConfirmDialog },
   setup() {
     return useAppState()
   }
@@ -1594,6 +1750,7 @@ export default defineComponent({
 </script>
 
 <style scoped>
+/* Toast 过渡动画：仅在 App.vue 组件内使用，保持 scoped */
 .toast-enter-active,
 .toast-leave-active {
   transition: all 0.3s ease;
@@ -1603,8 +1760,28 @@ export default defineComponent({
   opacity: 0;
   transform: translateY(20px);
 }
+/* Toast 内部图标样式（将 'OK'/'X' 文本替换为 Unicode 对钩/叉后所需的显示调整） */
+.toast .toast-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  font-weight: 600;
+}
+/* 尊重系统低动效偏好 */
+@media (prefers-reduced-motion: reduce) {
+  .toast-enter-active,
+  .toast-leave-active {
+    transition: none;
+  }
+}
 </style>
 
+<!--
+  下方为非 scoped 的全局样式块，承载 Teleport 到 body 的弹窗 / 全局工具类样式。
+  若迁移到 src/style.css 需要注意：弹窗样式被 Teleport 渲染到 App 组件树之外，
+  scoped 会丢失作用域属性导致样式失效；保留为非 scoped 的单文件样式块是有意选择。
+-->
 <style>
 /* Mode Tabs */
 .mode-tabs {

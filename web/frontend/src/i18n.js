@@ -271,6 +271,7 @@ export const messages = {
       useConfig: 'Use Config',
       viewLogs: 'View Logs',
       retry: 'Retry',
+      cancel: 'Cancel',
       start: 'Start Build',
       download: 'Download Product',
       downloadMenu: 'Download Menu',
@@ -279,7 +280,9 @@ export const messages = {
       confirmDelete: 'Delete this task?',
       waiting: 'Waiting',
       jump: 'Jump to',
-      go: 'Go'
+      go: 'Go',
+      newBadge: 'New',
+      retryBadge: 'Retry'
     },
     // Status
     status: {
@@ -316,9 +319,16 @@ export const messages = {
       feedbackFailed: 'Feedback submission failed',
       feedbackCooldown: 'Please wait before sending again',
       feedbackDailyLimit: 'Daily feedback limit reached',
-        saved: 'Saved',
-        iconSet: 'Icon updated',
-        iconUploadFailed: 'Icon upload failed'
+      saved: 'Saved',
+      iconSet: 'Icon updated',
+      iconUploadFailed: 'Icon upload failed',
+      startFailed: 'Failed to start task',
+      retryFailed: 'Failed to retry task',
+      cancelFailed: 'Failed to cancel task',
+      deleteFailed: 'Failed to delete task',
+      operationFailed: 'Operation failed',
+      cancelConfirm: 'Cancel this task?',
+      deleteConfirm: 'Delete this task?'
     },
     donation: {
       title: 'Support the developer',
@@ -702,8 +712,11 @@ export const messages = {
       downloadMenu: '下载菜单',
       downloadSigned: '下载签名密钥',
       delete: '删除',
+      cancel: '取消',
       jump: '跳转页码',
-      go: '跳转'
+      go: '跳转',
+      newBadge: '新建',
+      retryBadge: '重试'
     },
     // Status
     status: {
@@ -739,8 +752,15 @@ export const messages = {
       feedbackSent: '反馈已提交',
       feedbackFailed: '反馈提交失败',
       feedbackCooldown: '提交过于频繁，请稍后再试',
-        feedbackDailyLimit: '今日反馈次数已达上限'
-      },
+      feedbackDailyLimit: '今日反馈次数已达上限',
+      startFailed: '启动任务失败',
+      retryFailed: '重试任务失败',
+      cancelFailed: '取消任务失败',
+      deleteFailed: '删除任务失败',
+      operationFailed: '操作失败',
+      cancelConfirm: '确定要取消这个任务吗？',
+      deleteConfirm: '确定要删除这个任务吗？'
+    },
       donation: {
         title: '支持开发者',
         button: '支持作者',
@@ -1123,8 +1143,11 @@ export const messages = {
       downloadMenu: '下載選單',
       downloadSigned: '下載簽名密鑰',
       delete: '刪除',
+      cancel: '取消',
       jump: '跳轉頁碼',
-      go: '跳轉'
+      go: '跳轉',
+      newBadge: '新建',
+      retryBadge: '重試'
     },
     // Status
     status: {
@@ -1168,8 +1191,15 @@ export const messages = {
       feedbackSent: '回饋已提交',
       feedbackFailed: '回饋提交失敗',
       feedbackCooldown: '提交過於頻繁，請稍後再試',
-        feedbackDailyLimit: '今日回饋次數已達上限'
-      },
+      feedbackDailyLimit: '今日回饋次數已達上限',
+      startFailed: '啟動任務失敗',
+      retryFailed: '重試任務失敗',
+      cancelFailed: '取消任務失敗',
+      deleteFailed: '刪除任務失敗',
+      operationFailed: '操作失敗',
+      cancelConfirm: '確定要取消這個任務嗎？',
+      deleteConfirm: '確定要刪除這個任務嗎？'
+    },
       donation: {
         title: '支持開發者',
         button: '支持作者',
@@ -1433,6 +1463,51 @@ messages['zh-TW'].auth.githubUnavailable = 'GitHub 登入尚未設定'
 messages['zh-TW'].auth.githubStateInvalid = '登入狀態已失效，請重試'
 messages['zh-TW'].auth.githubAccessDenied = '你已取消 GitHub 授權'
 messages['zh-TW'].auth.githubCallbackFailed = 'GitHub 登入失敗，請重試'
+
+messages.en.logs.aiTitle = 'AI Diagnosis'
+messages.en.logs.aiLoading = 'Analyzing failed logs...'
+messages.en.logs.aiEmpty = 'No diagnosis available yet'
+messages.en.logs.aiSummary = 'Summary'
+messages.en.logs.aiReason = 'Reason'
+messages.en.logs.aiCauses = 'Possible Causes'
+messages.en.logs.aiSolutions = 'Solutions'
+messages.en.logs.aiProvider = 'Provider'
+messages.en.logs.aiModel = 'Model'
+messages.en.logs.aiConfidence = 'Confidence'
+messages.en.logs.aiRerun = 'Rerun'
+messages.en.logs.aiFetchFailed = 'Failed to fetch diagnosis'
+messages.en.logs.aiRerunStarted = 'Diagnosis started'
+messages.en.logs.aiRerunFailed = 'Failed to rerun diagnosis'
+
+messages['zh-CN'].logs.aiTitle = '智能诊断'
+messages['zh-CN'].logs.aiLoading = '正在分析失败日志，请稍候...'
+messages['zh-CN'].logs.aiEmpty = '暂无可用诊断结果'
+messages['zh-CN'].logs.aiSummary = '结论摘要'
+messages['zh-CN'].logs.aiReason = '主要原因'
+messages['zh-CN'].logs.aiCauses = '可能原因'
+messages['zh-CN'].logs.aiSolutions = '解决思路'
+messages['zh-CN'].logs.aiProvider = '诊断来源'
+messages['zh-CN'].logs.aiModel = '模型'
+messages['zh-CN'].logs.aiConfidence = '置信度'
+messages['zh-CN'].logs.aiRerun = '重新诊断'
+messages['zh-CN'].logs.aiFetchFailed = '获取诊断失败'
+messages['zh-CN'].logs.aiRerunStarted = '已开始重新诊断'
+messages['zh-CN'].logs.aiRerunFailed = '重新诊断失败'
+
+messages['zh-TW'].logs.aiTitle = '智慧診斷'
+messages['zh-TW'].logs.aiLoading = '正在分析失敗日誌，請稍候...'
+messages['zh-TW'].logs.aiEmpty = '暫無可用診斷結果'
+messages['zh-TW'].logs.aiSummary = '摘要'
+messages['zh-TW'].logs.aiReason = '主要原因'
+messages['zh-TW'].logs.aiCauses = '可能原因'
+messages['zh-TW'].logs.aiSolutions = '解決思路'
+messages['zh-TW'].logs.aiProvider = '診斷來源'
+messages['zh-TW'].logs.aiModel = '模型'
+messages['zh-TW'].logs.aiConfidence = '置信度'
+messages['zh-TW'].logs.aiRerun = '重新診斷'
+messages['zh-TW'].logs.aiFetchFailed = '取得診斷失敗'
+messages['zh-TW'].logs.aiRerunStarted = '已開始重新診斷'
+messages['zh-TW'].logs.aiRerunFailed = '重新診斷失敗'
 
 export function getBrowserLanguage() {
   const lang = navigator.language || navigator.userLanguage
