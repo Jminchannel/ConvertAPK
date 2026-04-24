@@ -109,9 +109,25 @@
             <span class="action-label">{{ t('donation.button') }}</span>
           </button>
           <button v-if="!isMobileShell" class="btn btn-ghost btn-sm no-drag" @click="openSettings">
-            <span class="action-icon">&#x1F41B;</span>
+            <span class="action-icon">&#9881;</span>
             <span class="action-label">{{ t('settings.title') }}</span>
           </button>
+          <div v-if="!isMobileShell && (isLoggedIn || isAuthEntryEnabled)" class="header-auth-inline no-drag">
+            <button
+              v-if="!isLoggedIn && isAuthEntryEnabled"
+              class="auth-entry-btn no-drag"
+              @click="openAuthModal('login')"
+            >
+              <span class="auth-entry-dot" aria-hidden="true"></span>
+              <span class="action-label">{{ t('auth.entry') }}</span>
+            </button>
+            <div v-else class="auth-user-chip no-drag">
+              <button class="auth-user-main" @click="openAuthModal('login')">
+                <span class="auth-user-email">{{ authDisplayName }}</span>
+              </button>
+              <button class="auth-user-logout" @click="logoutCurrentUser">{{ t('auth.logout') }}</button>
+            </div>
+          </div>
           <div class="window-controls no-drag" v-if="windowControlsAvailable">
             <button class="window-btn" @click="minimizeWindow" aria-label="Minimize">-</button>
             <button class="window-btn window-maximize" @click="toggleMaximizeWindow" aria-label="Maximize">
@@ -119,22 +135,6 @@
             </button>
             <button class="window-btn window-close" @click="closeWindow" aria-label="Close">✕</button>
           </div>
-        </div>
-      </div>
-      <div v-if="!isMobileShell && (isLoggedIn || isAuthEntryEnabled)" class="header-auth-edge no-drag">
-        <button
-          v-if="!isLoggedIn && isAuthEntryEnabled"
-          class="btn btn-ghost btn-sm no-drag auth-entry-btn"
-          @click="openAuthModal('login')"
-        >
-          <span class="action-icon">&#x1F464;</span>
-          <span class="action-label">{{ t('auth.entry') }}</span>
-        </button>
-        <div v-else class="auth-user-chip no-drag">
-          <button class="auth-user-main" @click="openAuthModal('login')">
-            <span class="auth-user-email">{{ authDisplayName }}</span>
-          </button>
-          <button class="auth-user-logout" @click="logoutCurrentUser">{{ t('auth.logout') }}</button>
         </div>
       </div>
     </header>
@@ -163,7 +163,7 @@
           style="margin-bottom: 16px;"
         >
           <div class="card-header">
-            <div class="card-icon">📢</div>
+            <div class="card-icon">!</div>
             <div>
               <div class="card-title">{{ t('announcement.title') }}</div>
               <div class="card-subtitle">{{ activeAnnouncement.title }} - {{ activeAnnouncement.body }}</div>
@@ -180,11 +180,11 @@
           v-show="!isMobileShell || mobileTab === 'build'"
         >
           <button class="mode-tab" :class="{ active: mode === 'convert' }" @click="handleModeChange('convert')">
-            <span class="mode-icon">📦</span>
+            <span class="mode-icon">◇</span>
             {{ t('mode.apk') }}
           </button>
           <button v-if="isWebModeEnabled" class="mode-tab" :class="{ active: mode === 'web' }" @click="handleModeChange('web')">
-            <span class="mode-icon">🌐</span>
+            <span class="mode-icon">◎</span>
             {{ t('mode.web') }}
           </button>
           <button v-if="isDesktopModeEnabled" class="mode-tab" :class="{ active: mode === 'desktop' }" @click="handleModeChange('desktop')">
@@ -192,7 +192,7 @@
             {{ t('mode.desktop') }}
           </button>
           <button class="mode-tab" :class="{ active: mode === 'html' }" @click="handleModeChange('html')">
-            <span class="mode-icon">📄</span>
+            <span class="mode-icon">&lt;/&gt;</span>
             {{ t('mode.html') }}
           </button>
         </div>
@@ -222,9 +222,9 @@
           <!-- Left -->
           <div class="stack mobile-page mobile-page-build" :class="isMobileShell ? mobilePageAnimClass : ''" v-show="!isMobileShell || mobileTab === 'build'">
             <!-- Guide (convert only) -->
-            <div class="card" v-if="mode === 'convert'">
+            <div class="card guide-card" v-if="mode === 'convert'">
               <div class="card-header">
-                <div class="card-icon">💡</div>
+                <div class="card-icon">i</div>
                 <div>
                   <div class="card-title">{{ t('guide.title') }}</div>
                   <div class="card-subtitle">{{ t('guide.subtitle') }}</div>
@@ -260,9 +260,9 @@
             </div>
 
             <!-- Upload (convert only) -->
-            <div class="card" v-if="mode === 'convert' || mode === 'desktop'" ref="convertUploadSection">
+            <div class="card upload-card" v-if="mode === 'convert' || mode === 'desktop'" ref="convertUploadSection">
               <div class="card-header">
-                <div class="card-icon">📦</div>
+                <div class="card-icon">↑</div>
                 <div>
                   <div class="card-title">{{ mode === 'desktop' ? t('upload.desktopTitle') : t('upload.title') }}</div>
                   <div class="card-subtitle">{{ mode === 'desktop' ? t('upload.desktopSubtitle') : t('upload.subtitle') }}</div>
@@ -285,12 +285,12 @@
                 />
 
                 <template v-if="!uploadedFile">
-                  <div class="upload-icon">📁</div>
+                  <div class="upload-icon">↑</div>
                   <div class="upload-text">{{ mode === 'desktop' ? t('upload.desktopDragDrop') : t('upload.dragDrop') }}</div>
                   <div class="upload-hint">{{ mode === 'desktop' ? t('upload.desktopHint') : t('upload.hint') }}</div>
                 </template>
                 <template v-else>
-                  <div class="upload-icon">✅</div>
+                  <div class="upload-icon">✓</div>
                   <div class="upload-text">{{ t('upload.ready') }}</div>
                   <div class="upload-file-info">
                     <span class="upload-file-name">{{ uploadedFile.original_name }}</span>
@@ -305,9 +305,9 @@
             </div>
 
             <!-- HTML Upload (html only) -->
-            <div class="card" v-if="mode === 'html'" ref="htmlUploadSection">
+            <div class="card upload-card" v-if="mode === 'html'" ref="htmlUploadSection">
               <div class="card-header">
-                <div class="card-icon">📄</div>
+                <div class="card-icon">&lt;/&gt;</div>
                 <div>
                   <div class="card-title">{{ t('html.title') }}</div>
                   <div class="card-subtitle">{{ t('html.subtitle') }}</div>
@@ -348,12 +348,12 @@
                   />
 
                   <template v-if="!uploadedHtmlFile">
-                    <div class="upload-icon">📄</div>
+                    <div class="upload-icon">&lt;/&gt;</div>
                     <div class="upload-text">{{ t('html.dragDrop') }}</div>
                     <div class="upload-hint">{{ t('html.hint') }}</div>
                   </template>
                   <template v-else>
-                    <div class="upload-icon">✅</div>
+                    <div class="upload-icon">✓</div>
                     <div class="upload-text">{{ t('html.ready') }}</div>
                     <div class="upload-file-info">
                       <span class="upload-file-name">{{ uploadedHtmlFile.original_name }}</span>
@@ -432,9 +432,9 @@
             </div>
 
             <!-- Web URL (web only) -->
-            <div class="card" v-if="mode === 'web'" ref="webUrlSection">
+            <div class="card upload-card" v-if="mode === 'web'" ref="webUrlSection">
               <div class="card-header">
-                <div class="card-icon">🌐</div>
+                <div class="card-icon">◎</div>
                 <div>
                   <div class="card-title">{{ t('web.url') }}</div>
                   <div class="card-subtitle">{{ t('web.urlHint') }}</div>
@@ -494,9 +494,9 @@
             </div>
 
             <!-- App config -->
-            <div class="card">
+            <div class="card config-card">
               <div class="card-header">
-                <div class="card-icon">⚙️</div>
+                <div class="card-icon">⚙</div>
                 <div>
                   <div class="card-title">{{ updatingTaskId ? t('config.updateTitle') : t('config.title') }}</div>
                   <div class="card-subtitle">
@@ -595,7 +595,7 @@
                     />
                     <img v-if="appIcon" :src="appIcon" alt="App Icon" />
                 <div v-else class="icon-placeholder">
-                      <span class="icon-placeholder-icon">🖼️</span>
+                    <span class="icon-placeholder-icon">▧</span>
                       <span class="icon-placeholder-text">{{ t('icon.uploadHint') }}</span>
                     </div>
                   </div>
@@ -692,7 +692,7 @@
 
               <!-- APK style -->
               <div class="card-header" style="margin-bottom: 16px; padding: 0;">
-                <div class="card-icon" style="width: 36px; height: 36px; font-size: 16px;">🎨</div>
+                <div class="card-icon" style="width: 36px; height: 36px; font-size: 16px;">◇</div>
                 <div>
                   <div class="card-title" style="font-size: 15px;">{{ t('config.styleTitle') }}</div>
                 </div>
@@ -759,7 +759,7 @@
 
               <div v-if="enablePermissions" class="permissions-panel">
                 <div class="card-header" style="margin-bottom: 16px; padding: 0; border: none;">
-                  <div class="card-icon" style="width: 36px; height: 36px; font-size: 16px;">🛡️</div>
+                  <div class="card-icon" style="width: 36px; height: 36px; font-size: 16px;">✓</div>
                   <div>
                     <div class="card-title" style="font-size: 15px;">{{ t('config.permissionsTitle') }}</div>
                     <div class="card-subtitle" style="font-size: 12px;">{{ t('config.permissionsHint') }}</div>
@@ -789,7 +789,7 @@
 
               <!-- Signing -->
               <div class="card-header" style="margin-bottom: 16px; padding: 0;">
-                <div class="card-icon" style="width: 36px; height: 36px; font-size: 16px;">🔐</div>
+                <div class="card-icon" style="width: 36px; height: 36px; font-size: 16px;">⌁</div>
                 <div>
                   <div class="card-title" style="font-size: 15px;">{{ t('config.signConfig') }}</div>
                   <div class="card-subtitle" style="font-size: 12px; color: var(--text-muted);">{{ t('config.signConfigHint') }}</div>
@@ -816,7 +816,7 @@
                     :disabled="isKeystoreUploaded || !!updatingTaskId"
                   />
                   <div class="keystore-upload-main">
-                    <div class="keystore-icon">🔑</div>
+                    <div class="keystore-icon">⌁</div>
                     <div class="keystore-meta">
                       <div class="keystore-subtitle">.jks / .keystore</div>
                     </div>
@@ -908,12 +908,12 @@
           <!-- Right -->
           <div
             ref="tasksSection"
-            class="card mobile-page mobile-page-tasks"
+            class="card task-board-card mobile-page mobile-page-tasks"
             :class="isMobileShell ? mobilePageAnimClass : ''"
             v-show="!isMobileShell || mobileTab === 'tasks'"
           >
             <div class="card-header">
-              <div class="card-icon">📋</div>
+              <div class="card-icon">≡</div>
               <div>
                 <div class="card-title">{{ t('tasks.title') }}</div>
                 <div class="card-subtitle">{{ t('tasks.subtitle') }}</div>
@@ -1031,7 +1031,7 @@
             </div>
 
             <div v-else class="empty-state">
-              <div class="empty-icon">📭</div>
+              <div class="empty-icon">＋</div>
               <div class="empty-text">{{ t('tasks.noTasks') }}</div>
               <div class="empty-hint">{{ t('tasks.createFirst') }}</div>
             </div>
@@ -1203,10 +1203,12 @@
               ref="cropperRef"
               class="cropper-component"
               :src="cropperImageSrc"
-              :stencil-props="{ aspectRatio: 1 }"
-              :resize-image="{ adjustStencil: false }"
+              :stencil-props="cropperStencilProps"
+              :resize-image="{ wheel: true, touch: true, adjustStencil: true }"
+              :default-size="cropperDefaultSize"
               image-restriction="stencil"
-              :stencil-size="{ width: 400, height: 400 }"
+              :min-width="96"
+              :min-height="96"
               :canvas="{ width: 512, height: 512 }"
             />
           </div>
@@ -2385,28 +2387,58 @@ export default defineComponent({
   position: relative;
 }
 
-.header-auth-edge {
-  position: absolute;
-  top: 50%;
-  right: max(14px, env(safe-area-inset-right));
-  transform: translateY(-50%);
-  z-index: 6;
+.header-auth-inline {
   display: inline-flex;
   align-items: center;
 }
 
 .auth-entry-btn {
-  border-color: rgba(129, 140, 248, 0.45);
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.14), rgba(14, 165, 233, 0.08));
+  min-height: 36px;
+  min-width: 112px;
+  padding: 7px 13px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid var(--glass-border-muted);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.42);
+  color: var(--text-main);
+  box-shadow: 0 1px 0 var(--glass-highlight) inset;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 750;
+  line-height: 1;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+
+.auth-entry-btn:hover {
+  background: rgba(255, 255, 255, 0.62);
+  border-color: var(--glass-border);
+  transform: translateY(-1px);
+}
+
+.auth-entry-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--success-gradient);
+  box-shadow: 0 0 0 4px rgba(24, 168, 102, 0.12);
 }
 
 .auth-user-chip {
   display: inline-flex;
   align-items: center;
-  border: 1px solid rgba(129, 140, 248, 0.36);
-  background: linear-gradient(135deg, rgba(30, 41, 59, 0.72), rgba(15, 23, 42, 0.52));
+  border: 1px solid var(--glass-border-muted);
+  background: rgba(255, 255, 255, 0.46);
   border-radius: 999px;
   overflow: hidden;
+  box-shadow: 0 1px 0 var(--glass-highlight) inset;
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
 }
 
 .auth-user-main,
@@ -2435,7 +2467,12 @@ export default defineComponent({
 
 .auth-user-logout {
   border-left: 1px solid rgba(148, 163, 184, 0.28);
-  color: #fda4af;
+  color: var(--error-start);
+}
+
+html:not(.light-theme) .auth-entry-btn,
+html:not(.light-theme) .auth-user-chip {
+  background: rgba(28, 43, 66, 0.58);
 }
 
 .auth-overlay {

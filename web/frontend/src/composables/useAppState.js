@@ -742,6 +742,13 @@ export const useAppState = () => {
   const showCropper = ref(false)
   const cropperRef = ref(null)
   const cropperImageSrc = ref('')
+  const cropperStencilProps = {
+    aspectRatio: 1
+  }
+  const cropperDefaultSize = ({ boundaries }) => {
+    const size = Math.min(boundaries.width, boundaries.height) * 0.72
+    return { width: size, height: size }
+  }
 
   // Window controls (Electron)
   const isMaximized = ref(false)
@@ -3512,6 +3519,8 @@ export const useAppState = () => {
     showCropper,
     cropperRef,
     cropperImageSrc,
+    cropperStencilProps,
+    cropperDefaultSize,
     isMaximized,
     windowControlsAvailable,
     minimizeWindow,

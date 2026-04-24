@@ -1529,7 +1529,7 @@ export function saveLanguage(lang) {
 
 // 从localStorage获取保存的主题
 export function getSavedTheme() {
-  return localStorage.getItem('apk_builder_theme') || 'dark'
+  return localStorage.getItem('apk_builder_theme') || 'light'
 }
 
 // 保存主题设置
