@@ -940,7 +940,12 @@
             </div>
 
             <div class="task-list" v-if="tasks.length > 0">
-              <div class="task-item" v-for="task in pagedTasks" :key="task.id">
+              <div
+                class="task-item"
+                :class="{ 'task-item-menu-open': openDownloadMenu === task.id }"
+                v-for="task in pagedTasks"
+                :key="task.id"
+              >
                 <div class="task-icon">{{ getTaskIcon(task.status) }}</div>
                 <div class="task-info">
                   <div class="task-name">{{ task.config.app_name }}</div>
@@ -2130,6 +2135,7 @@ export default defineComponent({
 .download-dropdown {
   position: relative;
   display: inline-flex;
+  z-index: 80;
 }
 
 .download-dropdown .dropdown-trigger {
@@ -2156,7 +2162,7 @@ export default defineComponent({
   box-shadow: var(--shadow-md);
   padding: 6px;
   display: none;
-  z-index: 50;
+  z-index: 120;
 }
 
 .download-dropdown.open .dropdown-menu {
