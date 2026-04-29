@@ -1149,28 +1149,6 @@
             </div>
           </div>
 
-          <section v-if="!isMobileShell" class="content-hub" aria-labelledby="content-hub-title">
-            <div class="content-hub-intro">
-              <p class="content-hub-kicker">{{ siteContent.trustTitle }}</p>
-              <h2 id="content-hub-title">{{ siteContent.guideTitle }}</h2>
-              <p>{{ siteContent.trustSubtitle }}</p>
-              <p>{{ siteContent.guideSubtitle }}</p>
-            </div>
-            <div class="content-guide-grid">
-              <a
-                v-for="card in siteContent.guideCards"
-                :key="card.href"
-                class="content-guide-card"
-                :href="card.href"
-              >
-                <span class="content-guide-arrow" aria-hidden="true">&#x2197;</span>
-                <strong>{{ card.title }}</strong>
-                <span>{{ card.body }}</span>
-              </a>
-            </div>
-            <p class="content-hub-note">{{ siteContent.footerNote }}</p>
-          </section>
-
           <AdSenseSlot
             v-if="!isMobileShell"
             slot-name="home_bottom"
