@@ -249,6 +249,7 @@ def fetch_feature_flags(client_id: str = "", force: bool = False) -> Dict[str, A
     result = {
         "web_link_to_apk_enabled": False,
         "zip_to_desktop_enabled": False,
+        "rewarded_build_ads_enabled": False,
         "client_login_enabled": True,
         "client_register_enabled": True,
         "upload_max_size_mb": 200,
@@ -256,6 +257,7 @@ def fetch_feature_flags(client_id: str = "", force: bool = False) -> Dict[str, A
     if isinstance(data, dict):
         result["web_link_to_apk_enabled"] = bool(data.get("web_link_to_apk_enabled"))
         result["zip_to_desktop_enabled"] = bool(data.get("zip_to_desktop_enabled"))
+        result["rewarded_build_ads_enabled"] = bool(data.get("rewarded_build_ads_enabled"))
         if "client_login_enabled" in data:
             result["client_login_enabled"] = bool(data.get("client_login_enabled"))
         if "client_register_enabled" in data:

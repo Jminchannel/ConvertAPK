@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="ConvertAPK help center with safe packaging guidance for APK, AAB, HTML, website, signing, logs, and troubleshooting.">
+  <title>帮助中心 - ConvertAPK</title>
+  <link rel="stylesheet" href="/legal.css">
+</head>
+<body>
+  <main class="page">
+    <header class="topbar">
+      <a class="brand" href="/">ConvertAPK</a>
+      <nav class="nav" aria-label="合规页面">
+        <a href="/privacy.html">隐私政策</a>
+        <a href="/terms.html">服务条款</a>
+        <a href="/about.html">关于我们</a>
+      </nav>
+    </header>
+
+    <section class="hero">
+      <div class="eyebrow">Help Center</div>
+      <h1>安全打包指南</h1>
+      <p class="lead">这里说明 ConvertAPK 的常见使用方式、支持文件、签名建议和构建失败排查方法，帮助你更稳定地生成 APK/AAB。</p>
+    </section>
+
+    <div class="content">
+      <aside class="summary">
+        <strong>目录</strong>
+        <a href="#supported">支持的输入</a>
+        <a href="#workflow">推荐流程</a>
+        <a href="#signing">签名与版本</a>
+        <a href="#logs">日志排查</a>
+        <a href="#safety">安全要求</a>
+      </aside>
+
+      <div class="sections">
+        <section id="supported" class="section">
+          <h2>支持的输入</h2>
+          <ul>
+            <li>前端项目 ZIP：适用于常见 React、Vue、Vite 等 Web 项目。</li>
+            <li>网站地址：适用于你拥有或已获授权打包的网站。</li>
+            <li>HTML 文件：适用于单文件页面、轻量演示和离线页面。</li>
+            <li>桌面端项目 ZIP：适用于需要打包为 Windows 桌面应用的前端项目。</li>
+          </ul>
+        </section>
+
+        <section id="workflow" class="section">
+          <h2>推荐流程</h2>
+          <ul>
+            <li>先确认项目能在本地浏览器正常运行，避免上传缺少入口文件或依赖的压缩包。</li>
+            <li>填写清晰的应用名称、包名、版本号和输出格式。</li>
+            <li>构建后先查看日志，再下载产物进行安装测试。</li>
+            <li>准备上架前，额外检查权限、隐私政策、图标、截图和应用商店声明。</li>
+          </ul>
+        </section>
+
+        <section id="signing" class="section">
+          <h2>签名与版本</h2>
+          <p>Android 应用需要稳定的包名和版本号。准备长期维护或上架时，请妥善保存自己的签名证书，后续更新通常必须使用同一证书。</p>
+          <p>AAB 更适合 Google Play 发布，APK 更适合直接安装和内部测试。</p>
+        </section>
+
+        <section id="logs" class="section">
+          <h2>日志排查</h2>
+          <p>如果构建失败，请优先查看日志中的依赖安装、入口文件、Android SDK、Gradle、签名配置和网络下载错误。反馈问题时，可以附上错误摘要和截图。</p>
+        </section>
+
+        <section id="safety" class="section">
+          <h2>安全要求</h2>
+          <p class="notice">请勿上传破解、盗版、恶意软件、钓鱼页面、绕过授权或侵犯第三方权利的内容。本服务会围绕合法打包和用户安全持续调整限制。</p>
+        </section>
+      </div>
+    </div>
+
+    <footer class="footer">
+      <a class="back-link" href="/">返回 ConvertAPK</a>
+      <p>最后更新：2026-04-29</p>
+    </footer>
+  </main>
+</body>
+</html>

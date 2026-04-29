@@ -129,11 +129,13 @@ export const useAppState = () => {
   const featureFlags = ref({
     web_link_to_apk_enabled: false,
     zip_to_desktop_enabled: false,
+    rewarded_build_ads_enabled: false,
     client_login_enabled: true,
     client_register_enabled: true,
   })
   const isWebModeEnabled = computed(() => Boolean(featureFlags.value.web_link_to_apk_enabled))
   const isDesktopModeEnabled = computed(() => Boolean(featureFlags.value.zip_to_desktop_enabled))
+  const isRewardedBuildAdsEnabled = computed(() => Boolean(featureFlags.value.rewarded_build_ads_enabled))
   const isClientLoginEnabled = computed(() => featureFlags.value.client_login_enabled !== false)
   const isClientRegisterEnabled = computed(() => featureFlags.value.client_register_enabled !== false)
   const isAuthEntryEnabled = computed(() => isClientLoginEnabled.value || isClientRegisterEnabled.value)
@@ -195,6 +197,105 @@ export const useAppState = () => {
     if (mobileTab.value === 'profile') return t('settings.feedbackSection')
     return mode.value === 'web' ? t('web.urlHint') : t('config.subtitle')
   })
+  const siteContentByLang = {
+    en: {
+      nav: {
+        help: 'Help',
+        privacy: 'Privacy',
+        terms: 'Terms',
+        about: 'About'
+      },
+      trustTitle: 'Build Android packages with clear rules',
+      trustSubtitle: 'ConvertAPK focuses on lawful packaging workflows: upload projects you own, configure signing clearly, and download only the artifacts produced by your own task.',
+      guideTitle: 'Publisher-friendly resources',
+      guideSubtitle: 'Original guides and policies keep the service understandable for users and safer for advertising review.',
+      guideCards: [
+        {
+          title: 'Safe packaging guide',
+          body: 'Learn which project files are supported, how signing works, and why unauthorized apps, cracked packages, and harmful software are not accepted.',
+          href: '/help.html'
+        },
+        {
+          title: 'Privacy and ads',
+          body: 'Review how task files, logs, cookies, and advertising partners are handled before using the web service.',
+          href: '/privacy.html'
+        },
+        {
+          title: 'Service terms',
+          body: 'Understand acceptable use, ownership requirements, prohibited content, and download responsibility.',
+          href: '/terms.html'
+        }
+      ],
+      footerNote: 'Use this service only for apps, websites, and assets you own or are authorized to package.',
+      adLabel: 'Advertisement',
+      adPreview: 'AdSense slot preview'
+    },
+    'zh-CN': {
+      nav: {
+        help: '帮助',
+        privacy: '隐私',
+        terms: '条款',
+        about: '关于'
+      },
+      trustTitle: '在清晰规则下构建 Android 安装包',
+      trustSubtitle: 'ConvertAPK 专注合法打包流程：上传你拥有或已获授权的项目，清楚配置签名，并只下载自己任务生成的产物。',
+      guideTitle: '适合审核的内容与合规入口',
+      guideSubtitle: '原创说明和公开政策能帮助用户理解服务，也能降低广告审核与后续投放风险。',
+      guideCards: [
+        {
+          title: '安全打包指南',
+          body: '了解支持的项目文件、签名流程，以及为什么不接受未授权应用、破解包和有害软件。',
+          href: '/help.html'
+        },
+        {
+          title: '隐私与广告',
+          body: '使用网站前，可查看任务文件、日志、Cookie 与广告合作方数据的处理方式。',
+          href: '/privacy.html'
+        },
+        {
+          title: '服务条款',
+          body: '了解可接受使用、权属要求、禁止内容以及下载产物的责任边界。',
+          href: '/terms.html'
+        }
+      ],
+      footerNote: '请仅将本服务用于你拥有或已获授权打包的应用、网站和素材。',
+      adLabel: '广告',
+      adPreview: 'AdSense 广告位预览'
+    },
+    'zh-TW': {
+      nav: {
+        help: '幫助',
+        privacy: '隱私',
+        terms: '條款',
+        about: '關於'
+      },
+      trustTitle: '在清晰規則下建置 Android 安裝包',
+      trustSubtitle: 'ConvertAPK 專注合法打包流程：上傳你擁有或已獲授權的專案，清楚設定簽名，並只下載自己任務產生的成品。',
+      guideTitle: '適合審核的內容與合規入口',
+      guideSubtitle: '原創說明和公開政策能幫助使用者理解服務，也能降低廣告審核與後續投放風險。',
+      guideCards: [
+        {
+          title: '安全打包指南',
+          body: '了解支援的專案檔案、簽名流程，以及為什麼不接受未授權應用、破解包和有害軟體。',
+          href: '/help.html'
+        },
+        {
+          title: '隱私與廣告',
+          body: '使用網站前，可查看任務檔案、日誌、Cookie 與廣告合作方資料的處理方式。',
+          href: '/privacy.html'
+        },
+        {
+          title: '服務條款',
+          body: '了解可接受使用、權屬要求、禁止內容以及下載成品的責任邊界。',
+          href: '/terms.html'
+        }
+      ],
+      footerNote: '請僅將本服務用於你擁有或已獲授權打包的應用、網站和素材。',
+      adLabel: '廣告',
+      adPreview: 'AdSense 廣告位預覽'
+    }
+  }
+  const siteContent = computed(() => siteContentByLang[currentLang.value] || siteContentByLang.en)
   const mobileTabs = ['build', 'tasks', 'profile']
   const mobilePageAnimClass = ref('')
   const mobileSwipeOffsetX = ref(0)
@@ -1513,6 +1614,8 @@ export const useAppState = () => {
     return hasAndroidAdBridge()
   }
 
+  const shouldGateBuildStartWithNativeAd = () => isRewardedBuildAdsEnabled.value && hasAndroidAdBridge()
+
   const parseNativeAdResult = (payload) => {
     if (typeof payload === 'string') {
       try {
@@ -1594,6 +1697,26 @@ export const useAppState = () => {
       finish({ code: 10002, message: error?.message || '广告调用失败' })
     }
   })
+
+  const requestRewardAdBeforeBuild = async () => {
+    if (!shouldGateBuildStartWithNativeAd()) return true
+    if (nativeAdRequesting.value) {
+      showToast(t('toast.rewardAdLoading'), 'error')
+      return false
+    }
+
+    nativeAdRequesting.value = true
+    try {
+      const result = await requestNativeRewardAd()
+      if (result.code !== 10001) {
+        showToast(result.message || t('toast.rewardAdIncomplete'), 'error')
+        return false
+      }
+      return true
+    } finally {
+      nativeAdRequesting.value = false
+    }
+  }
 
   const triggerTaskDownload = (url) => {
     if (!url || typeof document === 'undefined') return
@@ -2538,15 +2661,23 @@ export const useAppState = () => {
     }
   }
 
-  const startTask = async (taskId) => {
+  const startTaskDirectly = async (taskId, options = {}) => {
     try {
       await api.startTask(taskId)
-      showToast(t('toast.taskStarted'), 'success')
+      if (options.notify !== false) {
+        showToast(t('toast.taskStarted'), 'success')
+      }
       await refreshTasks()
       startPolling()
     } catch (error) {
       showErrorToast('toast.startFailed', error)
     }
+  }
+
+  const startTask = async (taskId) => {
+    const canStartBuild = await requestRewardAdBeforeBuild()
+    if (!canStartBuild) return
+    await startTaskDirectly(taskId)
   }
   const retryTask = async (taskId) => {
     try {
@@ -2881,12 +3012,11 @@ export const useAppState = () => {
         const created = await api.createTask(taskData)
         currentStep.value = 3
         showToast(t('toast.taskCreated'), 'success')
-        try {
-          await api.startTask(created.id)
+        const canStartBuild = await requestRewardAdBeforeBuild()
+        if (canStartBuild) {
+          await startTaskDirectly(created.id, { notify: false })
+        } else {
           await refreshTasks()
-          startPolling()
-        } catch (error) {
-          showErrorToast('toast.startFailed', error)
         }
       }
       resetForm({ preserveQuickGenerate: isQuickGenerate })
@@ -3061,6 +3191,7 @@ export const useAppState = () => {
       featureFlags.value = {
         web_link_to_apk_enabled: Boolean(result?.web_link_to_apk_enabled),
         zip_to_desktop_enabled: Boolean(result?.zip_to_desktop_enabled),
+        rewarded_build_ads_enabled: Boolean(result?.rewarded_build_ads_enabled),
         client_login_enabled: result?.client_login_enabled === undefined ? true : Boolean(result?.client_login_enabled),
         client_register_enabled: result?.client_register_enabled === undefined ? true : Boolean(result?.client_register_enabled),
       }
@@ -3068,6 +3199,7 @@ export const useAppState = () => {
       featureFlags.value = {
         web_link_to_apk_enabled: false,
         zip_to_desktop_enabled: false,
+        rewarded_build_ads_enabled: false,
         client_login_enabled: true,
         client_register_enabled: true,
       }
@@ -3402,6 +3534,7 @@ export const useAppState = () => {
     mode,
     isWebModeEnabled,
     isDesktopModeEnabled,
+    isRewardedBuildAdsEnabled,
     mainRef,
     mobilePageHeadRef,
     convertUploadSection,
@@ -3422,6 +3555,7 @@ export const useAppState = () => {
     mobileSettingsLabel,
     mobileTabTitle,
     mobileTabSubtitle,
+    siteContent,
     mobilePageAnimClass,
     mobileSwipeStyle,
     mobileSwipeDragging,
@@ -3561,6 +3695,7 @@ export const useAppState = () => {
     taskPageNumbers,
     goToTaskPage,
     taskStats,
+    nativeAdRequesting,
     dismissedAnnouncementId,
     activeAnnouncement,
     resolveActiveAnnouncement,

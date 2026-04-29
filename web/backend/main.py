@@ -116,6 +116,7 @@ def _load_client_feature_flags(client_id: str | None = None) -> dict:
     flags = {
         "web_link_to_apk_enabled": False,
         "zip_to_desktop_enabled": False,
+        "rewarded_build_ads_enabled": False,
         "client_login_enabled": True,
         "client_register_enabled": True,
         "upload_max_size_mb": UPLOAD_MAX_SIZE_MB_DEFAULT,
@@ -127,6 +128,7 @@ def _load_client_feature_flags(client_id: str | None = None) -> dict:
     if isinstance(data, dict):
         flags["web_link_to_apk_enabled"] = bool(data.get("web_link_to_apk_enabled"))
         flags["zip_to_desktop_enabled"] = bool(data.get("zip_to_desktop_enabled"))
+        flags["rewarded_build_ads_enabled"] = bool(data.get("rewarded_build_ads_enabled"))
         if "client_login_enabled" in data:
             flags["client_login_enabled"] = bool(data.get("client_login_enabled"))
         if "client_register_enabled" in data:

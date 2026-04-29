@@ -3205,3 +3205,202 @@ html:not(.light-theme) .auth-entry-btn:hover {
   background: rgba(25, 52, 88, 0.72);
   border-color: rgba(99, 177, 255, 0.34);
 }
+
+/* 广告与合规内容入口 */
+.header-legal-links {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px;
+  border: 1px solid var(--glass-border-muted, var(--border-color));
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.header-legal-links a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  color: var(--text-sub);
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.header-legal-links a:hover {
+  background: var(--bg-hover);
+  color: var(--text-main);
+}
+
+.content-hub {
+  margin-top: 28px;
+  padding: 28px;
+  border: 1px solid var(--glass-border-muted, var(--border-color));
+  border-radius: 18px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.48), rgba(255, 255, 255, 0.20)),
+    var(--bg-card);
+  box-shadow: 0 1px 0 var(--glass-highlight, rgba(255, 255, 255, 0.25)) inset, var(--shadow-sm);
+}
+
+.content-hub-intro {
+  max-width: 720px;
+}
+
+.content-hub-kicker {
+  margin-bottom: 8px;
+  color: var(--primary-start);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.content-hub h2 {
+  margin: 0;
+  color: var(--text-main);
+  font-size: 24px;
+  line-height: 1.2;
+  letter-spacing: 0;
+}
+
+.content-hub-intro p:not(.content-hub-kicker),
+.content-hub-note {
+  margin-top: 10px;
+  color: var(--text-sub);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.content-guide-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 20px;
+}
+
+.content-guide-card {
+  position: relative;
+  display: flex;
+  min-height: 168px;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px;
+  border: 1px solid var(--glass-border-muted, var(--border-color));
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.36);
+  color: var(--text-main);
+  text-decoration: none;
+  transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+}
+
+.content-guide-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(47, 111, 237, 0.34);
+  background: rgba(255, 255, 255, 0.52);
+}
+
+.content-guide-card strong {
+  padding-right: 26px;
+  font-size: 15px;
+  line-height: 1.35;
+}
+
+.content-guide-card span:not(.content-guide-arrow) {
+  color: var(--text-sub);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.content-guide-arrow {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  color: var(--primary-start);
+  font-weight: 800;
+}
+
+.adsense-slot {
+  margin-top: 24px;
+  overflow: hidden;
+  border: 1px solid var(--glass-border-muted, var(--border-color));
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.30);
+  box-shadow: 0 1px 0 var(--glass-highlight, rgba(255, 255, 255, 0.22)) inset;
+}
+
+.adsense-slot-wide {
+  width: 100%;
+}
+
+.adsense-label {
+  padding: 10px 14px 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.adsense-preview {
+  display: grid;
+  min-height: 140px;
+  place-items: center;
+  color: var(--text-muted);
+  font-size: 13px;
+  background:
+    linear-gradient(90deg, rgba(148, 163, 184, 0.08) 1px, transparent 1px),
+    linear-gradient(rgba(148, 163, 184, 0.08) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
+html:not(.light-theme) .header-legal-links,
+html:not(.light-theme) .content-hub,
+html:not(.light-theme) .content-guide-card,
+html:not(.light-theme) .adsense-slot {
+  background: rgba(10, 23, 42, 0.48);
+}
+
+html:not(.light-theme) .content-guide-card:hover {
+  background: rgba(25, 52, 88, 0.68);
+}
+
+@media (max-width: 1040px) {
+  .header-legal-links {
+    display: none;
+  }
+}
+
+@media (max-width: 960px) {
+  .content-guide-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .compliance-dialog {
+    width: calc(100vw - 28px);
+    max-width: calc(100vw - 28px);
+  }
+
+  .compliance-dialog-body {
+    overflow-x: hidden;
+  }
+
+  .compliance-dialog-body,
+  .compliance-dialog-body * {
+    overflow-wrap: anywhere;
+  }
+
+  .compliance-dialog-footer {
+    flex-wrap: wrap;
+    justify-content: stretch;
+  }
+
+  .compliance-dialog-footer .btn {
+    flex: 1 1 138px;
+    min-width: 0;
+  }
+}

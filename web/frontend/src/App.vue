@@ -112,6 +112,11 @@
             <span class="action-icon">&#9881;</span>
             <span class="action-label">{{ t('settings.title') }}</span>
           </button>
+          <nav v-if="!isMobileShell" class="header-legal-links no-drag" :aria-label="siteContent.nav.help">
+            <a href="/help.html">{{ siteContent.nav.help }}</a>
+            <a href="/privacy.html">{{ siteContent.nav.privacy }}</a>
+            <a href="/terms.html">{{ siteContent.nav.terms }}</a>
+          </nav>
           <div v-if="!isMobileShell && (isLoggedIn || isAuthEntryEnabled)" class="header-auth-inline no-drag">
             <button
               v-if="!isLoggedIn && isAuthEntryEnabled"
@@ -896,11 +901,11 @@
                 class="btn btn-primary btn-lg"
                 style="width: 100%; margin-top: 8px;"
                 @click="createTask"
-                :disabled="!canCreateTask || isCreating"
+                :disabled="!canCreateTask || isCreating || nativeAdRequesting"
               >
-                <span v-if="isCreating" class="spinner" aria-hidden="true"></span>
+                <span v-if="isCreating || nativeAdRequesting" class="spinner" aria-hidden="true"></span>
                 <span v-else class="btn-badge" aria-hidden="true">{{ updatingTaskId ? t('tasks.retryBadge') : t('tasks.newBadge') }}</span>
-                {{ isCreating ? t('config.creating') : (updatingTaskId ? t('config.updateTask') : t('config.createTask')) }}
+                {{ nativeAdRequesting ? t('config.waitingRewardAd') : (isCreating ? t('config.creating') : (isRewardedBuildAdsEnabled ? t('config.rewardedBuildButton') : (updatingTaskId ? t('config.updateTask') : t('config.createTask')))) }}
               </button>
             </div>
           </div>
@@ -966,7 +971,8 @@
                     v-if="task.status === 'pending'"
                     class="btn btn-primary btn-sm"
                     @click="startTask(task.id)"
-                    :title="t('tasks.start')"
+                    :disabled="nativeAdRequesting"
+                    :title="isRewardedBuildAdsEnabled ? t('tasks.rewardedStart') : t('tasks.start')"
                   >
                     ▶
                   </button>
@@ -1113,6 +1119,18 @@
                 <span class="mobile-action-text">{{ currentTheme === 'dark' ? t('theme.light') : t('theme.dark') }}</span>
                 <span class="mobile-action-arrow">&#x203A;</span>
               </button>
+
+              <a class="mobile-action-item" href="/help.html">
+                <span class="mobile-action-icon">&#x2139;</span>
+                <span class="mobile-action-text">{{ siteContent.nav.help }}</span>
+                <span class="mobile-action-arrow">&#x203A;</span>
+              </a>
+
+              <a class="mobile-action-item" href="/privacy.html">
+                <span class="mobile-action-icon">&#x1F512;</span>
+                <span class="mobile-action-text">{{ siteContent.nav.privacy }}</span>
+                <span class="mobile-action-arrow">&#x203A;</span>
+              </a>
             </div>
 
             <div class="mobile-lang-card">
@@ -1130,6 +1148,37 @@
               </div>
             </div>
           </div>
+
+          <section v-if="!isMobileShell" class="content-hub" aria-labelledby="content-hub-title">
+            <div class="content-hub-intro">
+              <p class="content-hub-kicker">{{ siteContent.trustTitle }}</p>
+              <h2 id="content-hub-title">{{ siteContent.guideTitle }}</h2>
+              <p>{{ siteContent.trustSubtitle }}</p>
+              <p>{{ siteContent.guideSubtitle }}</p>
+            </div>
+            <div class="content-guide-grid">
+              <a
+                v-for="card in siteContent.guideCards"
+                :key="card.href"
+                class="content-guide-card"
+                :href="card.href"
+              >
+                <span class="content-guide-arrow" aria-hidden="true">&#x2197;</span>
+                <strong>{{ card.title }}</strong>
+                <span>{{ card.body }}</span>
+              </a>
+            </div>
+            <p class="content-hub-note">{{ siteContent.footerNote }}</p>
+          </section>
+
+          <AdSenseSlot
+            v-if="!isMobileShell"
+            slot-name="home_bottom"
+            :label="siteContent.adLabel"
+            :preview-text="siteContent.adPreview"
+            :min-height="140"
+            variant="wide"
+          />
         </div>
         </div>
       </div>
@@ -1167,7 +1216,7 @@
               :key="section.title"
               class="compliance-section"
             >
-              <div class="compliance-section-title">{{ sectionIndex + 1 }}. {{ section.title }}</div>
+              <div class="compliance-section-title">{{ section.title }}</div>
               <ul class="compliance-list">
                 <li v-for="line in section.lines" :key="line">{{ line }}</li>
               </ul>
@@ -1745,11 +1794,12 @@ import { defineComponent } from 'vue'
 import { Cropper } from 'vue-advanced-cropper'
 import 'vue-advanced-cropper/dist/style.css'
 import { useAppState } from './composables/useAppState'
+import AdSenseSlot from './components/AdSenseSlot.vue'
 import ConfirmDialog from './components/ConfirmDialog.vue'
 
 export default defineComponent({
   name: 'App',
-  components: { Cropper, ConfirmDialog },
+  components: { Cropper, AdSenseSlot, ConfirmDialog },
   setup() {
     return useAppState()
   }
@@ -2914,6 +2964,7 @@ html:not(.light-theme) .auth-user-chip {
     padding: 12px 14px;
     font-size: 14px;
     cursor: pointer;
+    text-decoration: none;
   }
 
   .mobile-action-item:active {

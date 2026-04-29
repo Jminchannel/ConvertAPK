@@ -1509,6 +1509,22 @@ messages['zh-TW'].logs.aiFetchFailed = '取得診斷失敗'
 messages['zh-TW'].logs.aiRerunStarted = '已開始重新診斷'
 messages['zh-TW'].logs.aiRerunFailed = '重新診斷失敗'
 
+messages.en.config.waitingRewardAd = 'Waiting for rewarded ad...'
+messages['zh-CN'].config.waitingRewardAd = '等待激励广告播放...'
+messages['zh-TW'].config.waitingRewardAd = '等待激勵廣告播放...'
+messages.en.config.rewardedBuildButton = 'Watch ad voluntarily to get build credit'
+messages['zh-CN'].config.rewardedBuildButton = '自愿观看广告以获得构建额度'
+messages['zh-TW'].config.rewardedBuildButton = '自願觀看廣告以取得建構額度'
+messages.en.tasks.rewardedStart = 'Watch ad voluntarily, then start build'
+messages['zh-CN'].tasks.rewardedStart = '自愿观看广告后开始构建'
+messages['zh-TW'].tasks.rewardedStart = '自願觀看廣告後開始建構'
+messages.en.toast.rewardAdLoading = 'Rewarded ad is loading, please wait'
+messages['zh-CN'].toast.rewardAdLoading = '激励广告加载中，请稍候'
+messages['zh-TW'].toast.rewardAdLoading = '激勵廣告載入中，請稍候'
+messages.en.toast.rewardAdIncomplete = 'The rewarded ad was not completed. Build has not started.'
+messages['zh-CN'].toast.rewardAdIncomplete = '激励广告未播放完成，构建暂未启动'
+messages['zh-TW'].toast.rewardAdIncomplete = '激勵廣告未播放完成，建構暫未啟動'
+
 export function getBrowserLanguage() {
   const lang = navigator.language || navigator.userLanguage
   if (lang.startsWith('zh')) {
