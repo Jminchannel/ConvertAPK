@@ -3025,22 +3025,19 @@ html:not(.light-theme) .auth-user-chip {
     border-radius: 999px;
     border: 2px solid rgba(255, 255, 255, 0.84);
     background:
-      linear-gradient(90deg, rgba(255, 255, 255, 0.28), rgba(226, 232, 240, 0.10) 38%, rgba(255, 255, 255, 0.24)),
-      radial-gradient(circle at 12% 28%, rgba(125, 211, 252, 0.20), transparent 30%),
-      radial-gradient(circle at 44% 66%, rgba(196, 181, 253, 0.18), transparent 34%),
-      radial-gradient(circle at 82% 38%, rgba(147, 197, 253, 0.16), transparent 30%),
-      rgba(248, 250, 252, 0.12);
+      linear-gradient(90deg, rgba(255, 255, 255, 0.10), transparent 42%, rgba(255, 255, 255, 0.08)),
+      rgba(248, 250, 252, 0.025);
     color: var(--mobile-nav-text);
-    backdrop-filter: blur(18px) saturate(1.75) contrast(1.03) brightness(1.06);
-    -webkit-backdrop-filter: blur(18px) saturate(1.75) contrast(1.03) brightness(1.06);
+    backdrop-filter: blur(3px) saturate(1.18) contrast(1.01) brightness(1.02);
+    -webkit-backdrop-filter: blur(3px) saturate(1.18) contrast(1.01) brightness(1.02);
     box-shadow:
       0 18px 36px rgba(15, 23, 42, 0.10),
       0 8px 18px rgba(15, 23, 42, 0.08),
       inset 2px -2px 1px -1px rgba(255, 255, 255, 0.96),
       inset -2px 2px 1px -1px rgba(255, 255, 255, 0.92),
-      inset 10px -10px 2px -10px rgba(255, 255, 255, 0.54),
-      inset -10px 10px 2px -10px rgba(255, 255, 255, 0.58),
-      inset 0 0 2px rgba(15, 23, 42, 0.18);
+      inset 10px -10px 2px -10px rgba(255, 255, 255, 0.36),
+      inset -10px 10px 2px -10px rgba(255, 255, 255, 0.38),
+      inset 0 0 2px rgba(15, 23, 42, 0.12);
     overflow: hidden;
     isolation: isolate;
     z-index: 300;
@@ -3062,17 +3059,17 @@ html:not(.light-theme) .auth-user-chip {
     border-radius: inherit;
     border: 1px solid rgba(15, 23, 42, 0.16);
     filter: blur(8px);
-    opacity: 0.18;
+    opacity: 0.12;
   }
 
   .mobile-bottom-nav::after {
     inset: 0;
     border-radius: 999px;
     background:
-      linear-gradient(45deg, rgba(255, 255, 255, 0.86) 0%, transparent 18%, transparent 77%, rgba(255, 255, 255, 0.80) 100%),
-      linear-gradient(180deg, rgba(255, 255, 255, 0.28), transparent 38%, rgba(255, 255, 255, 0.08));
-    filter: blur(2px);
-    opacity: 0.78;
+      linear-gradient(45deg, rgba(255, 255, 255, 0.62) 0%, transparent 16%, transparent 82%, rgba(255, 255, 255, 0.48) 100%),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent 32%, transparent);
+    filter: blur(0.4px);
+    opacity: 0.34;
   }
 
   .light-theme .mobile-bottom-nav {
@@ -3081,11 +3078,8 @@ html:not(.light-theme) .auth-user-chip {
     --mobile-nav-active-icon: #2563eb;
     border-color: rgba(255, 255, 255, 0.84);
     background:
-      linear-gradient(90deg, rgba(255, 255, 255, 0.28), rgba(226, 232, 240, 0.10) 38%, rgba(255, 255, 255, 0.24)),
-      radial-gradient(circle at 12% 28%, rgba(125, 211, 252, 0.20), transparent 30%),
-      radial-gradient(circle at 44% 66%, rgba(196, 181, 253, 0.18), transparent 34%),
-      radial-gradient(circle at 82% 38%, rgba(147, 197, 253, 0.16), transparent 30%),
-      rgba(248, 250, 252, 0.12);
+      linear-gradient(90deg, rgba(255, 255, 255, 0.10), transparent 42%, rgba(255, 255, 255, 0.08)),
+      rgba(248, 250, 252, 0.025);
     box-shadow:
       0 18px 36px rgba(15, 23, 42, 0.10),
       0 8px 18px rgba(15, 23, 42, 0.08),
@@ -3102,19 +3096,16 @@ html:not(.light-theme) .auth-user-chip {
     --mobile-nav-active-icon: #f8fafc;
     border-color: rgba(203, 213, 225, 0.28);
     background:
-      linear-gradient(90deg, rgba(148, 163, 184, 0.18), rgba(15, 23, 42, 0.16) 42%, rgba(96, 165, 250, 0.16)),
-      radial-gradient(circle at 14% 30%, rgba(125, 211, 252, 0.14), transparent 30%),
-      radial-gradient(circle at 44% 66%, rgba(129, 140, 248, 0.12), transparent 34%),
-      radial-gradient(circle at 82% 38%, rgba(147, 197, 253, 0.12), transparent 30%),
-      rgba(15, 23, 42, 0.36);
+      linear-gradient(90deg, rgba(148, 163, 184, 0.055), rgba(15, 23, 42, 0.04) 42%, rgba(96, 165, 250, 0.055)),
+      rgba(15, 23, 42, 0.10);
     box-shadow:
       0 24px 48px rgba(0, 0, 0, 0.40),
       0 10px 22px rgba(0, 0, 0, 0.20),
       inset 2px -2px 1px -1px rgba(255, 255, 255, 0.38),
       inset -2px 2px 1px -1px rgba(255, 255, 255, 0.28),
-      inset 8px -8px 2px -8px rgba(255, 255, 255, 0.12),
-      inset -8px 8px 2px -8px rgba(255, 255, 255, 0.12),
-      inset 0 0 2px rgba(0, 0, 0, 0.62);
+      inset 8px -8px 2px -8px rgba(255, 255, 255, 0.075),
+      inset -8px 8px 2px -8px rgba(255, 255, 255, 0.075),
+      inset 0 0 2px rgba(0, 0, 0, 0.48);
   }
 
   html:not(.light-theme) .mobile-bottom-nav::before {
@@ -3124,9 +3115,9 @@ html:not(.light-theme) .auth-user-chip {
 
   html:not(.light-theme) .mobile-bottom-nav::after {
     background:
-      linear-gradient(45deg, rgba(255, 255, 255, 0.30) 0%, transparent 20%, transparent 78%, rgba(255, 255, 255, 0.24) 100%),
-      linear-gradient(180deg, rgba(226, 232, 240, 0.10), transparent 40%, rgba(15, 23, 42, 0.10));
-    opacity: 0.34;
+      linear-gradient(45deg, rgba(255, 255, 255, 0.16) 0%, transparent 18%, transparent 82%, rgba(255, 255, 255, 0.10) 100%),
+      linear-gradient(180deg, rgba(226, 232, 240, 0.025), transparent 34%, transparent);
+    opacity: 0.16;
   }
 
   .mobile-tab-btn {
@@ -3168,7 +3159,7 @@ html:not(.light-theme) .auth-user-chip {
     background:
       radial-gradient(circle at 54% 54%, rgba(148, 163, 184, 0.28), rgba(148, 163, 184, 0.13) 40%, transparent 68%),
       radial-gradient(circle at 48% 42%, rgba(255, 255, 255, 0.50), transparent 56%);
-    filter: blur(0.4px);
+    filter: blur(0.25px);
   }
 
   .mobile-tab-btn::after {
@@ -3180,7 +3171,7 @@ html:not(.light-theme) .auth-user-chip {
       inset 2px -2px 1px -1px rgba(255, 255, 255, 0.92),
       inset -2px 2px 1px -1px rgba(255, 255, 255, 0.78),
       inset 0 0 1px rgba(15, 23, 42, 0.18);
-    filter: blur(1.1px);
+    filter: blur(0.7px);
   }
 
   .mobile-tab-btn:focus,
