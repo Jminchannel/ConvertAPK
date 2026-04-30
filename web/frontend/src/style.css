@@ -3404,3 +3404,186 @@ html:not(.light-theme) .content-guide-card:hover {
     min-width: 0;
   }
 }
+
+.mode-tabs {
+  --mode-tabs-text: rgba(51, 65, 85, 0.84);
+  --mode-tabs-active-text: #1d4ed8;
+  position: relative;
+  gap: 0;
+  padding: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.70);
+  border-radius: 18px;
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.10), transparent 42%, rgba(255, 255, 255, 0.08)),
+    rgba(248, 250, 252, 0.025);
+  color: var(--mode-tabs-text);
+  box-shadow:
+    0 14px 30px rgba(15, 23, 42, 0.08),
+    inset 2px -2px 1px -1px rgba(255, 255, 255, 0.84),
+    inset -2px 2px 1px -1px rgba(255, 255, 255, 0.78),
+    inset 8px -8px 2px -8px rgba(255, 255, 255, 0.34),
+    inset -8px 8px 2px -8px rgba(255, 255, 255, 0.36),
+    inset 0 0 2px rgba(15, 23, 42, 0.11);
+  backdrop-filter: blur(3px) saturate(1.18) contrast(1.01) brightness(1.02);
+  -webkit-backdrop-filter: blur(3px) saturate(1.18) contrast(1.01) brightness(1.02);
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.mode-tabs::before,
+.mode-tabs::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+  z-index: 0;
+  border-radius: inherit;
+}
+
+.mode-tabs::before {
+  top: 34%;
+  left: 8px;
+  right: 8px;
+  bottom: 6px;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  filter: blur(7px);
+  opacity: 0.10;
+}
+
+.mode-tabs::after {
+  inset: 0;
+  background:
+    linear-gradient(45deg, rgba(255, 255, 255, 0.54) 0%, transparent 16%, transparent 82%, rgba(255, 255, 255, 0.42) 100%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent 34%, transparent);
+  filter: blur(0.4px);
+  opacity: 0.32;
+}
+
+.mode-tab {
+  position: relative;
+  z-index: 1;
+  border: 1px solid transparent;
+  border-radius: 13px;
+  background: transparent;
+  color: var(--mode-tabs-text);
+  overflow: hidden;
+  transition: color 0.2s ease, transform 0.18s ease, box-shadow 0.2s ease;
+}
+
+.mode-tab::before,
+.mode-tab::after {
+  content: "";
+  position: absolute;
+  inset: 1px 3px;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.mode-tab::before {
+  background:
+    radial-gradient(circle at 54% 54%, rgba(148, 163, 184, 0.22), rgba(148, 163, 184, 0.10) 40%, transparent 68%),
+    radial-gradient(circle at 48% 42%, rgba(255, 255, 255, 0.42), transparent 56%);
+  filter: blur(0.2px);
+}
+
+.mode-tab::after {
+  background:
+    linear-gradient(45deg, rgba(255, 255, 255, 0.58) 0%, transparent 21%, transparent 76%, rgba(255, 255, 255, 0.48) 100%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.04) 42%, rgba(226, 232, 240, 0.12));
+  box-shadow:
+    inset 2px -2px 1px -1px rgba(255, 255, 255, 0.82),
+    inset -2px 2px 1px -1px rgba(255, 255, 255, 0.62),
+    inset 0 0 1px rgba(15, 23, 42, 0.14);
+  filter: blur(0.55px);
+}
+
+.mode-tab:hover,
+.mode-tab.active {
+  background: transparent;
+  color: var(--mode-tabs-active-text);
+}
+
+.mode-tab:focus,
+.mode-tab:focus-visible,
+.mode-tab:active {
+  outline: none;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.mode-tab.active {
+  border-color: transparent;
+  font-weight: 750;
+  box-shadow: none;
+}
+
+.mode-tab.active::before,
+.mode-tab.active::after {
+  opacity: 1;
+}
+
+.mode-tab:active {
+  transform: scale(0.98);
+}
+
+.mode-tab > * {
+  position: relative;
+  z-index: 1;
+}
+
+html:not(.light-theme) .mode-tabs {
+  --mode-tabs-text: rgba(226, 232, 240, 0.78);
+  --mode-tabs-active-text: #dbeafe;
+  border-color: rgba(203, 213, 225, 0.22);
+  background:
+    linear-gradient(90deg, rgba(148, 163, 184, 0.055), rgba(15, 23, 42, 0.04) 42%, rgba(96, 165, 250, 0.055)),
+    rgba(15, 23, 42, 0.10);
+  box-shadow:
+    0 18px 34px rgba(0, 0, 0, 0.28),
+    inset 2px -2px 1px -1px rgba(255, 255, 255, 0.30),
+    inset -2px 2px 1px -1px rgba(255, 255, 255, 0.22),
+    inset 8px -8px 2px -8px rgba(255, 255, 255, 0.07),
+    inset -8px 8px 2px -8px rgba(255, 255, 255, 0.07),
+    inset 0 0 2px rgba(0, 0, 0, 0.42);
+}
+
+html:not(.light-theme) .mode-tabs::before {
+  border-color: rgba(0, 0, 0, 0.30);
+  opacity: 0.16;
+}
+
+html:not(.light-theme) .mode-tabs::after {
+  background:
+    linear-gradient(45deg, rgba(255, 255, 255, 0.14) 0%, transparent 18%, transparent 82%, rgba(255, 255, 255, 0.10) 100%),
+    linear-gradient(180deg, rgba(226, 232, 240, 0.025), transparent 34%, transparent);
+  opacity: 0.18;
+}
+
+html:not(.light-theme) .mode-tab {
+  color: var(--mode-tabs-text);
+}
+
+html:not(.light-theme) .mode-tab:hover,
+html:not(.light-theme) .mode-tab.active {
+  background: transparent;
+  color: var(--mode-tabs-active-text);
+  border-color: transparent;
+  box-shadow: none;
+}
+
+html:not(.light-theme) .mode-tab::before {
+  background:
+    radial-gradient(circle at 54% 54%, rgba(71, 85, 105, 0.38), rgba(30, 41, 59, 0.22) 40%, transparent 68%),
+    radial-gradient(circle at 48% 42%, rgba(226, 232, 240, 0.20), transparent 56%);
+}
+
+html:not(.light-theme) .mode-tab::after {
+  background:
+    linear-gradient(45deg, rgba(255, 255, 255, 0.24) 0%, transparent 22%, transparent 76%, rgba(255, 255, 255, 0.18) 100%),
+    linear-gradient(180deg, rgba(226, 232, 240, 0.09), rgba(255, 255, 255, 0.025) 42%, rgba(37, 99, 235, 0.10));
+  box-shadow:
+    inset 2px -2px 1px -1px rgba(255, 255, 255, 0.26),
+    inset -2px 2px 1px -1px rgba(255, 255, 255, 0.18),
+    inset 0 0 1px rgba(0, 0, 0, 0.44);
+}
