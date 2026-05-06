@@ -68,3 +68,14 @@ Thumbs.db
 fix-lang.js
 fix-*.js
 debug-*.js
+
+# 模板与本地打包产物（避免误提交）
+templates/HTML2APK/
+templates/Tubbim.zip
+templates/HTML2APK.zip
+templates/demoLogo.png
+build-worker-docker/templates/HTML2APK/
+build-worker-docker/templates/Tubbim/
+build-worker-docker/templates/demoLogo.png
+apk-worker/templates/HTML2APK/
+apk-worker/templates/Tubbim/
