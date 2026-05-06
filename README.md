@@ -388,7 +388,6 @@ Docker 前端 Nginx 默认 `client_max_body_size` 为 `200m`。如需上传更�
 ## 安全提醒
 
 - 不要提交真实 `.env`、数据库密码、Token、证书、签名文件和 keystore。
-- 生产环境不要使用默认的 `admin/admin123`、`change-me`、`client-secret`。
 - 对外部署时建议只暴露前端入口，并通过 HTTPS 反向代理访问。
 - 管理端前端和后端不要直接暴露公网，建议使用防火墙、VPN、SSH 隧道或 IP 白名单限制访问。
 - 下载、上传、构建产物目录属于运行态数据，升级前建议备份。
