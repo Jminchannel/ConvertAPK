@@ -1187,6 +1187,13 @@ def _normalize_desktop_installer_mode(value: Optional[str]) -> str:
     return "portable"
 
 
+def _normalize_desktop_runtime(value: Optional[str]) -> str:
+    raw = str(value or "electron").strip().lower()
+    if raw in {"tauri", "rust"}:
+        return "tauri"
+    return "electron"
+
+
 def _normalize_desktop_port(value) -> int:
     try:
         port = int(str(value).strip())
@@ -1232,6 +1239,30 @@ def _sanitize_windows_artifact_base_name(value: str, fallback: str = "DesktopApp
     if safe.upper() in reserved_names:
         safe = f"{safe}-app"
     return safe or fallback
+
+
+def _normalize_tauri_identifier(value: str) -> str:
+    raw = str(value or "").strip().lower().replace("_", "-")
+    raw = re.sub(r"[^a-z0-9.-]+", "-", raw)
+    raw = re.sub(r"\.{2,}", ".", raw).strip(".-")
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]*(\.[a-z0-9][a-z0-9-]*)+", raw):
+        return "com.example.desktop"
+    return raw
+
+
+def _sanitize_rust_package_name(value: str) -> str:
+    raw = str(value or "desktop-app").strip().lower().replace(".", "-").replace("_", "-")
+    safe = re.sub(r"[^a-z0-9-]+", "-", raw).strip("-")
+    if not safe or not re.match(r"^[a-z]", safe):
+        safe = f"desktop-{safe}" if safe else "desktop-app"
+    return safe
+
+
+def _normalize_tauri_version(value: str) -> str:
+    raw = str(value or "1.0.0").strip()
+    if re.fullmatch(r"\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?", raw):
+        return raw
+    return "1.0.0"
 
 
 def _write_desktop_wrapper_project(
@@ -1573,6 +1604,180 @@ main().catch((error) => {
     (scripts_dir / "prepare-icon.js").write_text(prepare_icon_js, encoding="utf-8")
     _log(on_log, f"[Desktop] Electron wrapper prepared: {wrapper_root}")
     return desktop_target
+
+
+def _write_tauri_desktop_wrapper_project(
+    wrapper_root: Path,
+    app_name: str,
+    package_name: str,
+    version_name: str,
+    source_app_dir: Path,
+    logo_path: Optional[Path],
+    on_log=None,
+) -> str:
+    if wrapper_root.exists():
+        shutil.rmtree(wrapper_root, ignore_errors=True)
+    wrapper_root.mkdir(parents=True, exist_ok=True)
+
+    app_dir = wrapper_root / "app"
+    shutil.copytree(source_app_dir, app_dir)
+    _shrink_desktop_web_assets(app_dir, on_log=on_log)
+
+    build_dir = wrapper_root / "build"
+    build_dir.mkdir(parents=True, exist_ok=True)
+    src_tauri_dir = wrapper_root / "src-tauri"
+    src_dir = src_tauri_dir / "src"
+    icons_dir = src_tauri_dir / "icons"
+    capabilities_dir = src_tauri_dir / "capabilities"
+    scripts_dir = wrapper_root / "scripts"
+    src_dir.mkdir(parents=True, exist_ok=True)
+    icons_dir.mkdir(parents=True, exist_ok=True)
+    capabilities_dir.mkdir(parents=True, exist_ok=True)
+    scripts_dir.mkdir(parents=True, exist_ok=True)
+
+    has_custom_logo = bool(logo_path and logo_path.exists())
+    if has_custom_logo:
+        if str(logo_path.suffix).lower() == ".ico":
+            shutil.copy2(logo_path, icons_dir / "icon.ico")
+        else:
+            shutil.copy2(logo_path, build_dir / "icon.png")
+    default_ico = _resolve_default_desktop_icon_ico()
+    if not (icons_dir / "icon.ico").exists() and default_ico and default_ico.exists():
+        shutil.copy2(default_ico, icons_dir / "icon.ico")
+
+    safe_npm_name = _sanitize_rust_package_name(package_name)
+    safe_rust_name = safe_npm_name.replace("-", "_")
+    safe_artifact_name = _sanitize_windows_artifact_base_name(str(app_name or "DesktopApp"), fallback="DesktopApp")
+    product_name = str(app_name or "DesktopApp")
+    tauri_version = _normalize_tauri_version(version_name)
+    tauri_identifier = _normalize_tauri_identifier(package_name)
+
+    package_json = {
+        "name": safe_npm_name,
+        "version": tauri_version,
+        "description": f"{product_name} desktop build",
+        "private": True,
+        "scripts": {
+            "prepare-icon": "node scripts/prepare-icon.js",
+            "dist": "npm run prepare-icon && tauri build",
+        },
+        "devDependencies": {
+            "@tauri-apps/cli": "^2.0.0",
+            "png-to-ico": "^2.1.8",
+        },
+    }
+
+    tauri_config = {
+        "$schema": "https://schema.tauri.app/config/2",
+        "productName": product_name,
+        "version": tauri_version,
+        "identifier": tauri_identifier,
+        "build": {
+            "frontendDist": "../app",
+        },
+        "app": {
+            "windows": [
+                {
+                    "title": product_name,
+                    "width": 1280,
+                    "height": 800,
+                    "minWidth": 960,
+                    "minHeight": 640,
+                    "resizable": True,
+                    "url": "index.html",
+                }
+            ],
+            "security": {
+                "csp": None,
+            },
+        },
+        "bundle": {
+            "active": True,
+            "targets": ["nsis"],
+            "icon": ["icons/icon.ico"],
+            "windows": {
+                "webviewInstallMode": {
+                    "type": "embedBootstrapper",
+                },
+                "nsis": {
+                    "installerIcon": "icons/icon.ico",
+                    "installMode": "currentUser",
+                },
+            },
+        },
+    }
+    default_capability = {
+        "$schema": "../gen/schemas/desktop-schema.json",
+        "identifier": "default",
+        "description": "默认桌面窗口权限",
+        "windows": ["main"],
+        "permissions": [],
+    }
+
+    cargo_toml = f"""[package]
+name = "{safe_rust_name}"
+version = "{tauri_version}"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = {{ version = "2", features = [] }}
+
+[dependencies]
+tauri = {{ version = "2", features = [] }}
+"""
+    build_rs = "fn main() {\n    tauri_build::build()\n}\n"
+    main_rs = """#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+fn main() {
+    tauri::Builder::default()
+        .run(tauri::generate_context!())
+        .expect("运行 Tauri 应用失败");
+}
+"""
+    prepare_icon_js = """const fs = require("fs");
+const path = require("path");
+const pngToIco = require("png-to-ico");
+
+async function main() {
+  const rootDir = path.join(__dirname, "..");
+  const pngPath = path.join(rootDir, "build", "icon.png");
+  const icoPath = path.join(rootDir, "src-tauri", "icons", "icon.ico");
+  if (fs.existsSync(pngPath)) {
+    const buffer = await pngToIco(pngPath);
+    fs.writeFileSync(icoPath, buffer);
+    console.log(`[Desktop] generated Tauri icon.ico from ${pngPath}`);
+    return;
+  }
+  if (!fs.existsSync(icoPath)) {
+    throw new Error("missing icon.png and icon.ico");
+  }
+}
+
+main().catch((error) => {
+  console.error(`[Desktop] prepare Tauri icon failed: ${error}`);
+  process.exit(1);
+});
+"""
+
+    (wrapper_root / "package.json").write_text(
+        json.dumps(package_json, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    (src_tauri_dir / "tauri.conf.json").write_text(
+        json.dumps(tauri_config, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    (src_tauri_dir / "Cargo.toml").write_text(cargo_toml, encoding="utf-8")
+    (src_tauri_dir / "build.rs").write_text(build_rs, encoding="utf-8")
+    (src_dir / "main.rs").write_text(main_rs, encoding="utf-8")
+    (capabilities_dir / "default.json").write_text(
+        json.dumps(default_capability, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    (scripts_dir / "prepare-icon.js").write_text(prepare_icon_js, encoding="utf-8")
+    _log(on_log, f"[Desktop] Tauri wrapper prepared: {wrapper_root}")
+    return safe_artifact_name
+
 
 def _offlineize_html_assets(entry_html: Path, env: Dict[str, str], on_log=None) -> None:
     if not entry_html.exists():
@@ -2636,8 +2841,10 @@ def run_local_build(
     is_html_task = task_mode == "html"
 
     if is_desktop_task:
+        desktop_runtime = _normalize_desktop_runtime(env.get("DESKTOP_RUNTIME"))
         desktop_installer_mode = _normalize_desktop_installer_mode(env.get("DESKTOP_INSTALLER_MODE"))
         desktop_port = _normalize_desktop_port(env.get("DESKTOP_PORT"))
+        _log(on_log, f"[Desktop] 桌面运行时: {desktop_runtime}")
         progress(25, "Step 1: 解压 ZIP 项目...")
         _log(on_log, "Step 1: 解压 ZIP 项目...")
         _log(on_log, f"[Desktop] 安装器模式: {desktop_installer_mode}")
@@ -2683,25 +2890,36 @@ def run_local_build(
             index_file = _pick_index_html(source_dir)
             web_dir = index_file.parent
 
-        progress(55, "Step 3: 生成 Electron 桌面壳...")
-        _log(on_log, "Step 3: 生成 Electron 桌面壳...")
+        progress(55, f"Step 3: 生成 {desktop_runtime.title()} 桌面壳...")
+        _log(on_log, f"Step 3: 生成 {desktop_runtime.title()} 桌面壳...")
         wrapper_root = task_dir / "desktop-app"
         logo_path = task_input_dir / "logo.png"
-        effective_desktop_target = _write_desktop_wrapper_project(
-            wrapper_root=wrapper_root,
-            app_name=str(env.get("APP_NAME") or "DesktopApp"),
-            package_name=str(env.get("PACKAGE_NAME") or "com.example.desktop"),
-            version_name=str(env.get("VERSION_NAME") or "1.0.0"),
-            desktop_installer_mode=desktop_installer_mode,
-            desktop_port=desktop_port,
-            source_app_dir=web_dir,
-            logo_path=logo_path if logo_path.exists() else None,
-            on_log=on_log,
-        )
+        if desktop_runtime == "tauri":
+            effective_desktop_target = _write_tauri_desktop_wrapper_project(
+                wrapper_root=wrapper_root,
+                app_name=str(env.get("APP_NAME") or "DesktopApp"),
+                package_name=str(env.get("PACKAGE_NAME") or "com.example.desktop"),
+                version_name=str(env.get("VERSION_NAME") or "1.0.0"),
+                source_app_dir=web_dir,
+                logo_path=logo_path if logo_path.exists() else None,
+                on_log=on_log,
+            )
+        else:
+            effective_desktop_target = _write_desktop_wrapper_project(
+                wrapper_root=wrapper_root,
+                app_name=str(env.get("APP_NAME") or "DesktopApp"),
+                package_name=str(env.get("PACKAGE_NAME") or "com.example.desktop"),
+                version_name=str(env.get("VERSION_NAME") or "1.0.0"),
+                desktop_installer_mode=desktop_installer_mode,
+                desktop_port=desktop_port,
+                source_app_dir=web_dir,
+                logo_path=logo_path if logo_path.exists() else None,
+                on_log=on_log,
+            )
         _log(on_log, f"[Desktop] 实际打包目标: {effective_desktop_target}")
 
-        progress(70, "Step 4: 安装 Electron 依赖...")
-        _log(on_log, "Step 4: 安装 Electron 依赖...")
+        progress(70, f"Step 4: 安装 {desktop_runtime.title()} 依赖...")
+        _log(on_log, f"Step 4: 安装 {desktop_runtime.title()} 依赖...")
         if not _should_skip_npm_install(wrapper_root, on_log=on_log):
             _run_cmd([npm_cmd, "install", "--legacy-peer-deps"], cwd=wrapper_root, env=process_env, on_log=on_log)
             _mark_npm_install(wrapper_root)
@@ -2709,19 +2927,41 @@ def run_local_build(
         progress(85, "Step 5: 打包桌面应用...")
         _log(on_log, "Step 5: 打包桌面应用...")
         process_env["CSC_IDENTITY_AUTO_DISCOVERY"] = "false"
-        _run_cmd(
-            [npx_cmd, "electron-builder", "--win", effective_desktop_target, "--publish", "never"],
-            cwd=wrapper_root,
-            env=process_env,
-            on_log=on_log,
-        )
+        if desktop_runtime == "tauri":
+            _run_cmd([npm_cmd, "run", "prepare-icon"], cwd=wrapper_root, env=process_env, on_log=on_log)
+            tauri_cmd = [npx_cmd, "tauri", "build"]
+            if os.name != "nt":
+                tauri_cmd.extend(["--runner", "cargo-xwin", "--target", "x86_64-pc-windows-msvc"])
+            _run_cmd(
+                tauri_cmd,
+                cwd=wrapper_root,
+                env=process_env,
+                on_log=on_log,
+            )
+        else:
+            _run_cmd(
+                [npx_cmd, "electron-builder", "--win", effective_desktop_target, "--publish", "never"],
+                cwd=wrapper_root,
+                env=process_env,
+                on_log=on_log,
+            )
 
         dist_dir = wrapper_root / "dist"
+        output_search_root = wrapper_root / "src-tauri" / "target" if desktop_runtime == "tauri" else dist_dir
+        output_glob = "**/bundle/nsis/*.exe" if desktop_runtime == "tauri" else "*.exe"
         output_candidates = sorted(
-            [item for item in dist_dir.glob("*.exe") if item.is_file()],
+            [item for item in output_search_root.glob(output_glob) if item.is_file()],
             key=lambda item: item.stat().st_mtime,
             reverse=True,
         )
+        if desktop_runtime == "tauri" and not output_candidates:
+            output_candidates = sorted(
+                [item for item in output_search_root.rglob("*.exe") if item.is_file()],
+                key=lambda item: item.stat().st_mtime,
+                reverse=True,
+            )
+        if desktop_runtime == "tauri" and not output_candidates:
+            raise RuntimeError("Tauri 打包完成，但未找到 .exe 产物")
         if not output_candidates:
             raise RuntimeError("Electron 打包完成，但未找到 .exe 产物")
 
@@ -2730,7 +2970,10 @@ def run_local_build(
         if target_file.exists():
             target_file.unlink()
         shutil.copy2(output_file, target_file)
-        progress(100, "Electron 桌面应用构建成功")
+        if desktop_runtime == "tauri":
+            progress(100, "Tauri 桌面应用构建成功")
+        else:
+            progress(100, "Electron 桌面应用构建成功")
         _log(on_log, f"[Desktop] 产物已生成: {target_file}")
         return {
             "output_file": str(target_file),

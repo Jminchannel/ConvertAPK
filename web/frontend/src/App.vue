@@ -666,12 +666,19 @@
                   </select>
                 </div>
                 <div v-else class="form-group desktop-field-installer">
+                  <label class="form-label">{{ t('config.desktopRuntime') }}</label>
+                  <select class="form-input form-select" v-model="config.desktop_runtime">
+                    <option value="electron">{{ t('config.desktopRuntimeElectron') }}</option>
+                    <option value="tauri">{{ t('config.desktopRuntimeTauri') }}</option>
+                  </select>
+                </div>
+                <div v-if="mode === 'desktop'" class="form-group desktop-field-installer">
                   <label class="form-label">{{ t('config.desktopInstallerMode') }}</label>
                   <select class="form-input form-select" v-model="config.desktop_installer_mode">
                     <option value="portable">{{ t('config.desktopInstallerPortable') }}</option>
                   </select>
                 </div>
-                <div v-if="mode === 'desktop'" class="form-group desktop-port-group">
+                <div v-if="mode === 'desktop' && config.desktop_runtime !== 'tauri'" class="form-group desktop-port-group">
                   <label class="form-label">{{ t('config.desktopPort') }}</label>
                   <div class="desktop-port-row">
                     <input
@@ -1820,39 +1827,193 @@ export default defineComponent({
 <style>
 /* Mode Tabs */
 .mode-tabs {
+  --mode-tabs-text: rgba(51, 65, 85, 0.84);
+  --mode-tabs-active-text: #1d4ed8;
+  position: relative;
   display: flex;
-  gap: 16px;
+  gap: 0;
   margin-bottom: 24px;
-  background: var(--bg-surface);
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.12), transparent 42%, rgba(255, 255, 255, 0.10)),
+    rgba(248, 250, 252, 0.035);
   padding: 6px;
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--border-color);
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.70);
   width: fit-content;
+  color: var(--mode-tabs-text);
+  box-shadow:
+    0 14px 30px rgba(15, 23, 42, 0.08),
+    inset 2px -2px 1px -1px rgba(255, 255, 255, 0.84),
+    inset -2px 2px 1px -1px rgba(255, 255, 255, 0.78),
+    inset 8px -8px 2px -8px rgba(255, 255, 255, 0.34),
+    inset -8px 8px 2px -8px rgba(255, 255, 255, 0.36),
+    inset 0 0 2px rgba(15, 23, 42, 0.11);
+  backdrop-filter: blur(3px) saturate(1.18) contrast(1.01) brightness(1.02);
+  -webkit-backdrop-filter: blur(3px) saturate(1.18) contrast(1.01) brightness(1.02);
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.mode-tabs::before,
+.mode-tabs::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+  z-index: 0;
+  border-radius: inherit;
+}
+
+.mode-tabs::before {
+  top: 34%;
+  left: 8px;
+  right: 8px;
+  bottom: 6px;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  filter: blur(7px);
+  opacity: 0.10;
+}
+
+.mode-tabs::after {
+  inset: 0;
+  background:
+    linear-gradient(45deg, rgba(255, 255, 255, 0.54) 0%, transparent 16%, transparent 82%, rgba(255, 255, 255, 0.42) 100%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent 34%, transparent);
+  filter: blur(0.4px);
+  opacity: 0.32;
 }
 .mode-tab {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 10px 24px;
-  border-radius: var(--radius-md);
-  border: none;
+  border-radius: 13px;
+  border: 1px solid transparent;
   background: transparent;
-  color: var(--text-sub);
+  color: var(--mode-tabs-text);
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.2s;
+  overflow: hidden;
+  transition: color 0.2s ease, transform 0.18s ease, box-shadow 0.2s ease;
+}
+
+.mode-tab::before,
+.mode-tab::after {
+  content: "";
+  position: absolute;
+  inset: 1px 3px;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.mode-tab::before {
+  background:
+    radial-gradient(circle at 54% 54%, rgba(148, 163, 184, 0.22), rgba(148, 163, 184, 0.10) 40%, transparent 68%),
+    radial-gradient(circle at 48% 42%, rgba(255, 255, 255, 0.42), transparent 56%);
+  filter: blur(0.2px);
+}
+
+.mode-tab::after {
+  background:
+    linear-gradient(45deg, rgba(255, 255, 255, 0.58) 0%, transparent 21%, transparent 76%, rgba(255, 255, 255, 0.48) 100%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.04) 42%, rgba(226, 232, 240, 0.12));
+  box-shadow:
+    inset 2px -2px 1px -1px rgba(255, 255, 255, 0.82),
+    inset -2px 2px 1px -1px rgba(255, 255, 255, 0.62),
+    inset 0 0 1px rgba(15, 23, 42, 0.14);
+  filter: blur(0.55px);
 }
 .mode-tab:hover {
-  color: var(--text-main);
-  background: var(--bg-hover);
+  color: var(--mode-tabs-active-text);
 }
+
+.mode-tab:focus,
+.mode-tab:focus-visible,
+.mode-tab:active {
+  outline: none;
+  border-color: transparent;
+  box-shadow: none;
+}
+
 .mode-tab.active {
-  background: var(--primary-gradient);
-  color: white;
-  box-shadow: var(--shadow-sm);
+  background: transparent;
+  color: var(--mode-tabs-active-text);
+  border-color: transparent;
+  box-shadow: none;
+  font-weight: 750;
+}
+
+.mode-tab.active::before,
+.mode-tab.active::after {
+  opacity: 1;
+}
+
+.mode-tab:active {
+  transform: scale(0.98);
+}
+
+.mode-tab > * {
+  position: relative;
+  z-index: 1;
 }
 .mode-icon { font-size: 16px; }
+
+html:not(.light-theme) .mode-tabs {
+  --mode-tabs-text: rgba(226, 232, 240, 0.78);
+  --mode-tabs-active-text: #dbeafe;
+  background:
+    linear-gradient(90deg, rgba(148, 163, 184, 0.055), rgba(15, 23, 42, 0.04) 42%, rgba(96, 165, 250, 0.055)),
+    rgba(15, 23, 42, 0.10);
+  border-color: rgba(203, 213, 225, 0.22);
+  box-shadow:
+    0 18px 34px rgba(0, 0, 0, 0.28),
+    inset 2px -2px 1px -1px rgba(255, 255, 255, 0.30),
+    inset -2px 2px 1px -1px rgba(255, 255, 255, 0.22),
+    inset 8px -8px 2px -8px rgba(255, 255, 255, 0.07),
+    inset -8px 8px 2px -8px rgba(255, 255, 255, 0.07),
+    inset 0 0 2px rgba(0, 0, 0, 0.42);
+}
+
+html:not(.light-theme) .mode-tabs::before {
+  border-color: rgba(0, 0, 0, 0.30);
+  opacity: 0.16;
+}
+
+html:not(.light-theme) .mode-tabs::after {
+  background:
+    linear-gradient(45deg, rgba(255, 255, 255, 0.14) 0%, transparent 18%, transparent 82%, rgba(255, 255, 255, 0.10) 100%),
+    linear-gradient(180deg, rgba(226, 232, 240, 0.025), transparent 34%, transparent);
+  opacity: 0.18;
+}
+
+html:not(.light-theme) .mode-tab {
+  color: var(--mode-tabs-text);
+}
+
+html:not(.light-theme) .mode-tab.active,
+html:not(.light-theme) .mode-tab:hover {
+  color: var(--mode-tabs-active-text);
+}
+
+html:not(.light-theme) .mode-tab::before {
+  background:
+    radial-gradient(circle at 54% 54%, rgba(71, 85, 105, 0.38), rgba(30, 41, 59, 0.22) 40%, transparent 68%),
+    radial-gradient(circle at 48% 42%, rgba(226, 232, 240, 0.20), transparent 56%);
+}
+
+html:not(.light-theme) .mode-tab::after {
+  background:
+    linear-gradient(45deg, rgba(255, 255, 255, 0.24) 0%, transparent 22%, transparent 76%, rgba(255, 255, 255, 0.18) 100%),
+    linear-gradient(180deg, rgba(226, 232, 240, 0.09), rgba(255, 255, 255, 0.025) 42%, rgba(37, 99, 235, 0.10));
+  box-shadow:
+    inset 2px -2px 1px -1px rgba(255, 255, 255, 0.26),
+    inset -2px 2px 1px -1px rgba(255, 255, 255, 0.18),
+    inset 0 0 1px rgba(0, 0, 0, 0.44);
+}
 
 @media (max-width: 640px) {
   .mode-tabs {
@@ -2325,16 +2486,22 @@ export default defineComponent({
 
 .desktop-meta-grid {
   gap: 16px;
-  grid-template-columns: minmax(180px, 1.35fr) minmax(120px, 0.8fr) minmax(170px, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
 }
 
 .desktop-basic-grid .form-group,
 .desktop-meta-grid .form-group {
+  min-width: 0;
   margin-bottom: 0;
 }
 
 .desktop-meta-grid .desktop-field-installer .form-label {
-  white-space: nowrap;
+  white-space: normal;
+}
+
+.desktop-meta-grid .form-input,
+.desktop-meta-grid .form-select {
+  min-width: 0;
 }
 
 .desktop-meta-grid .desktop-port-group {
@@ -2369,10 +2536,27 @@ export default defineComponent({
   white-space: nowrap;
 }
 
-@media (max-width: 1100px) {
-  .desktop-meta-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+.mobile-shell-active .desktop-meta-grid {
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+.mobile-shell-active .desktop-meta-grid .desktop-port-row {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  max-width: 100%;
+}
+
+.mobile-shell-active .desktop-meta-grid .desktop-port-row .form-input,
+.mobile-shell-active .desktop-meta-grid .desktop-port-row .btn {
+  width: 100%;
+  min-width: 0;
+}
+
+.mobile-shell-active .desktop-meta-grid .desktop-port-row .btn {
+  justify-content: center;
+  white-space: normal;
 }
 
 @media (max-width: 640px) {

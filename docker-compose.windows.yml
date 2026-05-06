@@ -1,0 +1,29 @@
+volumes:
+  convertapk-data:
+    name: convertapk-data
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: D:/Apps/ConvertAPK-EXE/data
+  convertapk-gradle-cache:
+    name: convertapk-gradle-cache
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: D:/Apps/ConvertAPK-EXE/data/gradle-cache
+  admin-db-data:
+    name: convertapk-admin-db
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: D:/Apps/ConvertAPK-EXE/data/admin-db
+  admin-storage:
+    name: convertapk-admin-storage
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: D:/Apps/ConvertAPK-EXE/data/admin-storage

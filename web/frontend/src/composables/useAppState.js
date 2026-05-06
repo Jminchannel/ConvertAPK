@@ -871,6 +871,7 @@ export const useAppState = () => {
     version_name: '1.0.0',
     version_code: 1,
     output_format: 'apk',
+    desktop_runtime: 'electron',
     desktop_installer_mode: 'portable',
     desktop_port: generateDesktopPort(),
     orientation: 'portrait',
@@ -909,6 +910,7 @@ export const useAppState = () => {
       version_name: '1.0.0',
       version_code: 1,
       output_format: 'apk',
+      desktop_runtime: 'electron',
       desktop_installer_mode: 'portable',
       desktop_port: normalizeDesktopPort(config.value.desktop_port),
       orientation: 'portrait',
@@ -1360,6 +1362,7 @@ export const useAppState = () => {
 
   const desktopPortError = computed(() => {
     if (mode.value !== 'desktop') return ''
+    if (config.value.desktop_runtime === 'tauri') return ''
     const port = Number(config.value.desktop_port)
     if (!Number.isInteger(port)) return t('config.desktopPortRule')
     if (port < desktopPortMin || port > desktopPortMax) return t('config.desktopPortRule')
@@ -2762,6 +2765,7 @@ export const useAppState = () => {
       version_name: bumpPatchVersion(task.config.version_name || '1.0.0'),
       version_code: (task.config.version_code || 1) + 1,
       output_format: task.config.output_format ?? 'apk',
+      desktop_runtime: task.config.desktop_runtime ?? 'electron',
       desktop_installer_mode: task.config.desktop_installer_mode ?? 'portable',
       desktop_port: normalizeDesktopPort(task.config.desktop_port),
       orientation: task.config.orientation ?? 'portrait',
@@ -2955,6 +2959,7 @@ export const useAppState = () => {
           version_name: config.value.version_name,
           version_code: config.value.version_code,
           output_format: config.value.output_format,
+          desktop_runtime: config.value.desktop_runtime,
           desktop_installer_mode: config.value.desktop_installer_mode,
           desktop_port: config.value.desktop_port,
           orientation: config.value.orientation,
@@ -2993,6 +2998,7 @@ export const useAppState = () => {
             version_name: config.value.version_name,
             version_code: config.value.version_code,
             output_format: config.value.output_format,
+            desktop_runtime: config.value.desktop_runtime,
             desktop_installer_mode: config.value.desktop_installer_mode,
             desktop_port: config.value.desktop_port,
             orientation: config.value.orientation,
@@ -3072,6 +3078,7 @@ export const useAppState = () => {
       version_name: '1.0.0',
       version_code: 1,
       output_format: 'apk',
+      desktop_runtime: 'electron',
       desktop_installer_mode: 'portable',
       desktop_port: generateDesktopPort(),
       orientation: 'portrait',

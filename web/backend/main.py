@@ -3156,6 +3156,8 @@ async def update_task(task_id: str, update_data: UpdateTaskRequest):
         style_updates["web_fill_mode"] = update_data.web_fill_mode
     if update_data.desktop_installer_mode is not None:
         style_updates["desktop_installer_mode"] = update_data.desktop_installer_mode
+    if update_data.desktop_runtime is not None:
+        style_updates["desktop_runtime"] = update_data.desktop_runtime
     if update_data.desktop_port is not None:
         style_updates["desktop_port"] = update_data.desktop_port
     if update_data.permissions is not None:

@@ -50,6 +50,7 @@ class AppConfig(BaseModel):
     keystore_password: Optional[str] = None
     key_password: Optional[str] = None
     output_format: str = "apk"
+    desktop_runtime: str = "electron"
     desktop_installer_mode: str = "portable"
     # portrait / landscape / auto (auto = follow system, do not force in AndroidManifest)
     orientation: str = "auto"
@@ -191,6 +192,14 @@ class AppConfig(BaseModel):
             return "portable"
         return "portable"
 
+    @field_validator("desktop_runtime")
+    @classmethod
+    def validate_desktop_runtime(cls, value: str) -> str:
+        raw = (value or "").strip().lower()
+        if raw in {"tauri", "rust"}:
+            return "tauri"
+        return "electron"
+
     @field_validator("desktop_port", mode="before")
     @classmethod
     def validate_desktop_port(cls, value) -> int:
@@ -321,6 +330,7 @@ class UpdateTaskRequest(BaseModel):
     version_code: int
     output_format: Optional[str] = None  # apk / aab（可选）
     desktop_installer_mode: Optional[str] = None  # 仅支持 portable（可选）
+    desktop_runtime: Optional[str] = None
     desktop_port: Optional[int] = None
     # APK style overrides (optional)
     orientation: Optional[str] = None

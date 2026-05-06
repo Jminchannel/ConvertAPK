@@ -620,6 +620,7 @@ class APKBuilder:
         version_name: str,
         version_code: int,
         output_format: str = "apk",
+        desktop_runtime: str = "electron",
         desktop_installer_mode: str = "portable",
         desktop_port: Optional[int] = None,
         task_mode: str = "convert",
@@ -708,6 +709,9 @@ class APKBuilder:
         desktop_installer_mode_normalized = str(desktop_installer_mode or "portable").strip().lower()
         if desktop_installer_mode_normalized != "portable":
             desktop_installer_mode_normalized = "portable"
+        desktop_runtime_normalized = str(desktop_runtime or "electron").strip().lower()
+        if desktop_runtime_normalized not in {"electron", "tauri"}:
+            desktop_runtime_normalized = "electron"
         desktop_port_normalized = 0
         try:
             parsed_desktop_port = int(str(desktop_port).strip()) if desktop_port is not None else 0
@@ -767,6 +771,7 @@ class APKBuilder:
             "KEY_ALIAS": key_alias or "key0",
             "KEY_PASSWORD": key_password or (keystore_password or "android"),
             "OUTPUT_FORMAT": output_format_normalized,
+            "DESKTOP_RUNTIME": desktop_runtime_normalized,
             "DESKTOP_INSTALLER_MODE": desktop_installer_mode_normalized,
             "DESKTOP_PORT": str(desktop_port_normalized),
             "SCREEN_ORIENTATION": (screen_orientation or "auto").strip().lower(),
@@ -904,6 +909,8 @@ class APKBuilder:
                 "-e",
                 f"OUTPUT_FORMAT={container_output_format}",
                 "-e",
+                f"DESKTOP_RUNTIME={env.get('DESKTOP_RUNTIME', 'electron')}",
+                "-e",
                 f"DESKTOP_INSTALLER_MODE={env.get('DESKTOP_INSTALLER_MODE', 'portable')}",
                 "-e",
                 f"DESKTOP_PORT={env.get('DESKTOP_PORT', '0')}",
@@ -982,7 +989,7 @@ class APKBuilder:
                     "Step 1": (25, "Unzipping project..."),
                     "Step 2": (40, "Installing dependencies..."),
                     "Step 3": (55, "Building desktop assets..."),
-                    "Step 4": (70, "Packaging Electron app..."),
+                    "Step 4": (70, "Packaging desktop app..."),
                     "Step 5": (85, "Signing and organizing output..."),
                 }
                 success_markers = ("[DesktopBuilder] output:",)
@@ -1593,6 +1600,7 @@ class BuildTaskRunner:
                 version_name=task.config.version_name,
                 version_code=task.config.version_code,
                 output_format=getattr(task.config, "output_format", "apk"),
+                desktop_runtime=getattr(task.config, "desktop_runtime", "electron"),
                 desktop_installer_mode=getattr(task.config, "desktop_installer_mode", "portable"),
                 desktop_port=getattr(task.config, "desktop_port", None),
                 task_mode=getattr(task, "mode", "convert"),

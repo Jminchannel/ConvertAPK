@@ -14,6 +14,7 @@ def main() -> int:
     env = dict(os.environ)
     env.setdefault("TASK_MODE", "desktop")
     env.setdefault("OUTPUT_FORMAT", "exe")
+    env.setdefault("DESKTOP_RUNTIME", "electron")
     env.setdefault("DESKTOP_INSTALLER_MODE", "portable")
     env.setdefault("TASK_INPUT_DIR", env.get("INPUT_DIR", "/workspace/input"))
     env.setdefault("TASK_OUTPUT_DIR", env.get("OUTPUT_DIR", "/workspace/output"))
@@ -29,7 +30,7 @@ def main() -> int:
     )
     output_file = str(result.get("output_file") or "").strip()
     if not output_file:
-        raise RuntimeError("Electron build completed but output file was not returned")
+        raise RuntimeError("Desktop build completed but output file was not returned")
 
     print(f"[DesktopBuilder] output: {output_file}", flush=True)
     return 0

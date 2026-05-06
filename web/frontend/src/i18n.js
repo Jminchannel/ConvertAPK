@@ -1574,3 +1574,19 @@ export function createI18n(locale) {
     }
   }
 }
+
+messages.en.config.desktopRuntime = 'Desktop Engine'
+messages.en.config.desktopRuntimeElectron = 'Electron'
+messages.en.config.desktopRuntimeTauri = 'Tauri'
+messages['zh-CN'].config.desktopRuntime = '桌面引擎'
+messages['zh-CN'].config.desktopRuntimeElectron = 'Electron'
+messages['zh-CN'].config.desktopRuntimeTauri = 'Tauri'
+messages['zh-TW'].config.desktopRuntime = '桌面引擎'
+messages['zh-TW'].config.desktopRuntimeElectron = 'Electron'
+messages['zh-TW'].config.desktopRuntimeTauri = 'Tauri'
+messages.en.upload.desktopTitle = 'Desktop App Project ZIP'
+messages['zh-CN'].upload.desktopTitle = '桌面应用项目 ZIP'
+messages['zh-TW'].upload.desktopTitle = '桌面應用專案 ZIP'
+messages.en.toast.desktopModeDisabled = 'Desktop app mode is disabled'
+messages['zh-CN'].toast.desktopModeDisabled = '桌面应用模式已关闭'
+messages['zh-TW'].toast.desktopModeDisabled = '桌面應用模式已關閉'
