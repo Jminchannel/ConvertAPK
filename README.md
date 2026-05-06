@@ -1,6 +1,6 @@
 # ConvertAPK-EXE
 
-ConvertAPK-EXE 是一套把 Web 应用打包为 Android APK/AAB 与桌面安装包的完整工具链，包含用户端、管理端、构建端和 Electron 桌面端。用户可以上传 ZIP 或 HTML，配置应用名称、包名、图标、版本、签名等信息，然后通过本地或 Docker 构建器生成产物。
+ConvertAPK-EXE 是一套把 Web 应用打包为 Android APK/AAB 与桌面安装包的完整工具链，包含用户端、管理端、构建端和 Electron/Tauri 桌面端。用户可以上传 ZIP 或 HTML，配置应用名称、包名、图标、版本、签名等信息，然后通过本地或 Docker 构建器生成产物。
 
 示例视频：[Bilibili BV1XakbBGE16](https://www.bilibili.com/video/BV1XakbBGE16/)
 
@@ -11,7 +11,7 @@ ConvertAPK-EXE 是一套把 Web 应用打包为 Android APK/AAB 与桌面安装�
 - 支持 APK/AAB 构建、任务队列、构建日志、失败诊断和产物下载。
 - 用户端后端可在 Docker 模式下调用宿主机 Docker 中的 `apk-builder` 镜像完成 Android 构建。
 - 管理端支持任务看板、公告、反馈、版本发布、文件管理和概览统计。
-- Electron 桌面端可启动本地后端并加载用户端界面，适合 Windows 本地使用。
+- Electron/Tauri 桌面端可启动本地后端并加载用户端界面，适合 Windows 本地使用。
 
 ## 技术栈
 
@@ -20,7 +20,7 @@ ConvertAPK-EXE 是一套把 Web 应用打包为 Android APK/AAB 与桌面安装�
 - 管理端前端：Vue 3 + Vite
 - 管理端后端：FastAPI + SQLAlchemy + PostgreSQL
 - 构建端：Docker + Node.js + JDK + Android SDK + Capacitor
-- 桌面端：Electron + electron-builder
+- 桌面端：Electron + electron-builder + Tauri
 
 ## 目录结构
 
