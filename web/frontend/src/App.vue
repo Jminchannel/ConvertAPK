@@ -668,8 +668,8 @@
                 <div v-else class="form-group desktop-field-installer">
                   <label class="form-label">{{ t('config.desktopRuntime') }}</label>
                   <select class="form-input form-select" v-model="config.desktop_runtime">
+                    <option value="tauri">tauri(推荐)</option>
                     <option value="electron">{{ t('config.desktopRuntimeElectron') }}</option>
-                    <option value="tauri">{{ t('config.desktopRuntimeTauri') }}</option>
                   </select>
                 </div>
                 <div v-if="mode === 'desktop'" class="form-group desktop-field-installer">
