@@ -4,6 +4,7 @@ import urllib.parse
 import urllib.request
 import urllib.error
 import time
+import re
 from typing import Any, Dict, List, Optional
 
 _QUEUE_FILENAME = "upload-queue.json"
@@ -251,15 +252,41 @@ def fetch_feature_flags(client_id: str = "", force: bool = False) -> Dict[str, A
         "zip_to_desktop_enabled": False,
         "rewarded_build_ads_enabled": False,
         "client_login_enabled": True,
+        "client_sms_login_enabled": False,
         "client_register_enabled": True,
         "upload_max_size_mb": 200,
+        "risk_scan_block_keywords": [],
+        "risk_scan_domain_keywords": [],
     }
+
+    def _normalize_keyword_list(value: Any) -> List[str]:
+        if isinstance(value, str):
+            candidates = re.split(r"[\r\n,;]+", value)
+        elif isinstance(value, (list, tuple, set)):
+            candidates = list(value)
+        else:
+            return []
+        seen = set()
+        keywords: List[str] = []
+        for item in candidates:
+            keyword = str(item or "").strip()
+            if not keyword:
+                continue
+            dedupe_key = keyword.lower()
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            keywords.append(keyword)
+        return keywords
+
     if isinstance(data, dict):
         result["web_link_to_apk_enabled"] = bool(data.get("web_link_to_apk_enabled"))
         result["zip_to_desktop_enabled"] = bool(data.get("zip_to_desktop_enabled"))
         result["rewarded_build_ads_enabled"] = bool(data.get("rewarded_build_ads_enabled"))
         if "client_login_enabled" in data:
             result["client_login_enabled"] = bool(data.get("client_login_enabled"))
+        if "client_sms_login_enabled" in data:
+            result["client_sms_login_enabled"] = bool(data.get("client_sms_login_enabled"))
         if "client_register_enabled" in data:
             result["client_register_enabled"] = bool(data.get("client_register_enabled"))
         if "upload_max_size_mb" in data:
@@ -269,6 +296,10 @@ def fetch_feature_flags(client_id: str = "", force: bool = False) -> Dict[str, A
                     result["upload_max_size_mb"] = parsed_size
             except Exception:
                 pass
+        if "risk_scan_block_keywords" in data:
+            result["risk_scan_block_keywords"] = _normalize_keyword_list(data.get("risk_scan_block_keywords"))
+        if "risk_scan_domain_keywords" in data:
+            result["risk_scan_domain_keywords"] = _normalize_keyword_list(data.get("risk_scan_domain_keywords"))
     _FEATURE_FLAGS_CACHE[cache_key] = {
         "data": result,
         "checked_at": now,

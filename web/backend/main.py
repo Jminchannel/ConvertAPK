@@ -27,11 +27,14 @@ import urllib.parse
 import zipfile
 import hashlib
 import secrets
+from redis import Redis
+from redis.exceptions import RedisError
 
 from models import (
     BuildTask, BuildTaskCreate, BuildTaskListItemResponse, BuildTaskResponse,
     BuildStatus, AppConfig, UpdateTaskRequest,
-    AuthRegisterRequest, AuthLoginRequest, AuthSessionResponse, AuthMeResponse, AuthUserProfile
+    AuthRegisterRequest, AuthLoginRequest, AuthSmsSendRequest, AuthSmsLoginRequest,
+    AuthSessionResponse, AuthMeResponse, AuthUserProfile
 )
 from builder import (
     init_task_runner,
@@ -113,13 +116,20 @@ def _normalize_upload_max_size_mb(value) -> int:
 
 
 def _load_client_feature_flags(client_id: str | None = None) -> dict:
+    sms_login_default_enabled = _env_bool(
+        "CLIENT_SMS_LOGIN_ENABLED",
+        default=bool(str(os.getenv("AUTH_SMS_REDIS_URL") or "").strip()),
+    )
     flags = {
         "web_link_to_apk_enabled": False,
         "zip_to_desktop_enabled": False,
         "rewarded_build_ads_enabled": False,
         "client_login_enabled": True,
+        "client_sms_login_enabled": sms_login_default_enabled,
         "client_register_enabled": True,
         "upload_max_size_mb": UPLOAD_MAX_SIZE_MB_DEFAULT,
+        "risk_scan_block_keywords": [],
+        "risk_scan_domain_keywords": [],
     }
     try:
         data = fetch_feature_flags(client_id=_normalize_client_id(client_id))
@@ -131,10 +141,24 @@ def _load_client_feature_flags(client_id: str | None = None) -> dict:
         flags["rewarded_build_ads_enabled"] = bool(data.get("rewarded_build_ads_enabled"))
         if "client_login_enabled" in data:
             flags["client_login_enabled"] = bool(data.get("client_login_enabled"))
+        if "client_sms_login_enabled" in data:
+            flags["client_sms_login_enabled"] = bool(data.get("client_sms_login_enabled"))
         if "client_register_enabled" in data:
             flags["client_register_enabled"] = bool(data.get("client_register_enabled"))
         if "upload_max_size_mb" in data:
             flags["upload_max_size_mb"] = _normalize_upload_max_size_mb(data.get("upload_max_size_mb"))
+        if "risk_scan_block_keywords" in data and isinstance(data.get("risk_scan_block_keywords"), list):
+            flags["risk_scan_block_keywords"] = [
+                str(item).strip()
+                for item in data.get("risk_scan_block_keywords")
+                if str(item or "").strip()
+            ]
+        if "risk_scan_domain_keywords" in data and isinstance(data.get("risk_scan_domain_keywords"), list):
+            flags["risk_scan_domain_keywords"] = [
+                str(item).strip()
+                for item in data.get("risk_scan_domain_keywords")
+                if str(item or "").strip()
+            ]
     return flags
 
 
@@ -156,6 +180,11 @@ def _is_client_login_enabled(client_id: str | None = None) -> bool:
 def _is_client_register_enabled(client_id: str | None = None) -> bool:
     flags = _load_client_feature_flags(client_id=client_id)
     return bool(flags.get("client_register_enabled", True))
+
+
+def _is_client_sms_login_enabled(client_id: str | None = None) -> bool:
+    flags = _load_client_feature_flags(client_id=client_id)
+    return bool(flags.get("client_sms_login_enabled", False))
 
 
 def _get_upload_max_size_mb(client_id: str | None = None) -> int:
@@ -249,13 +278,25 @@ AUTH_USERS_STATE_PATH = TASKS_DIR / "users.json"
 AUTH_USERS_STATE_LOCK = threading.Lock()
 AUTH_SESSIONS_LOCK = threading.Lock()
 AUTH_EMAIL_PATTERN = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
+AUTH_PHONE_E164_PATTERN = re.compile(r"^\+[1-9]\d{7,18}$")
+AUTH_SMS_CODE_PATTERN = re.compile(r"^\d{6}$")
 users_db: dict[str, dict] = {}
 email_to_user_id: dict[str, str] = {}
+phone_to_user_id: dict[str, str] = {}
 client_to_user_id: dict[str, str] = {}
 github_id_to_user_id: dict[str, str] = {}
 sessions_db: dict[str, dict] = {}
 github_oauth_states_db: dict[str, dict] = {}
 AUTH_GITHUB_STATE_LOCK = threading.Lock()
+AUTH_SMS_REDIS_LOCK = threading.Lock()
+AUTH_SMS_REDIS_CLIENT: Redis | None = None
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = str(os.getenv(name, "")).strip().lower()
+    if not raw:
+        return default
+    return raw in {"1", "true", "yes", "on"}
 
 AUTH_GITHUB_CLIENT_ID = str(os.getenv("AUTH_GITHUB_CLIENT_ID") or "").strip()
 AUTH_GITHUB_CLIENT_SECRET = str(os.getenv("AUTH_GITHUB_CLIENT_SECRET") or "").strip()
@@ -281,6 +322,743 @@ AUTH_REDIRECT_ALLOWED_ORIGINS = {
     for item in AUTH_REDIRECT_ALLOWED_ORIGINS_RAW.split(",")
     if str(item or "").strip()
 }
+
+AUTH_SMS_REDIS_URL = str(os.getenv("AUTH_SMS_REDIS_URL") or "").strip()
+AUTH_SMS_REDIS_PREFIX = str(os.getenv("AUTH_SMS_REDIS_PREFIX") or "convertapk:auth:sms:").strip() or "convertapk:auth:sms:"
+AUTH_SMS_PROVIDER = str(os.getenv("AUTH_SMS_PROVIDER") or "mock").strip().lower() or "mock"
+AUTH_SMS_PROVIDER_WEBHOOK_URL = str(os.getenv("AUTH_SMS_PROVIDER_WEBHOOK_URL") or "").strip()
+AUTH_SMS_PROVIDER_WEBHOOK_TOKEN = str(os.getenv("AUTH_SMS_PROVIDER_WEBHOOK_TOKEN") or "").strip()
+AUTH_SMS_CODE_TTL_SECONDS = 300
+AUTH_SMS_RESEND_INTERVAL_SECONDS = 60
+AUTH_SMS_DAILY_LIMIT = 30
+AUTH_SMS_IP_HOURLY_LIMIT = 60
+AUTH_SMS_VERIFY_MAX_ATTEMPTS = 8
+AUTH_SMS_DEBUG_RETURN_CODE = _env_bool("AUTH_SMS_DEBUG_RETURN_CODE", default=False)
+try:
+    AUTH_SMS_CODE_TTL_SECONDS = max(int(os.getenv("AUTH_SMS_CODE_TTL_SECONDS", "300") or "300"), 120)
+except ValueError:
+    AUTH_SMS_CODE_TTL_SECONDS = 300
+try:
+    AUTH_SMS_RESEND_INTERVAL_SECONDS = max(int(os.getenv("AUTH_SMS_RESEND_INTERVAL_SECONDS", "60") or "60"), 15)
+except ValueError:
+    AUTH_SMS_RESEND_INTERVAL_SECONDS = 60
+try:
+    AUTH_SMS_DAILY_LIMIT = max(int(os.getenv("AUTH_SMS_DAILY_LIMIT", "30") or "30"), 1)
+except ValueError:
+    AUTH_SMS_DAILY_LIMIT = 30
+try:
+    AUTH_SMS_IP_HOURLY_LIMIT = max(int(os.getenv("AUTH_SMS_IP_HOURLY_LIMIT", "60") or "60"), 1)
+except ValueError:
+    AUTH_SMS_IP_HOURLY_LIMIT = 60
+try:
+    AUTH_SMS_VERIFY_MAX_ATTEMPTS = max(int(os.getenv("AUTH_SMS_VERIFY_MAX_ATTEMPTS", "8") or "8"), 3)
+except ValueError:
+    AUTH_SMS_VERIFY_MAX_ATTEMPTS = 8
+
+MARKETPLACE_POLICY_ENABLED = _env_bool("MARKETPLACE_POLICY_ENABLED", default=True)
+MARKETPLACE_POLICY_ALLOWLIST_CLIENT_IDS_RAW = str(
+    os.getenv("MARKETPLACE_POLICY_ALLOWLIST_CLIENT_IDS") or ""
+).strip()
+MARKETPLACE_POLICY_ALLOWLIST_CLIENT_IDS = {
+    str(item or "").strip().lower()
+    for item in MARKETPLACE_POLICY_ALLOWLIST_CLIENT_IDS_RAW.split(",")
+    if str(item or "").strip()
+}
+MARKETPLACE_DECLARED_USE_CASE_MIN_LENGTH = 6
+MARKETPLACE_DECLARED_USE_CASE_MAX_LENGTH = 200
+MARKETPLACE_BLOCK_KEYWORDS = (
+    "app store",
+    "application store",
+    "apk store",
+    "app marketplace",
+    "download center",
+    "应用商店",
+    "应用市场",
+    "软件商店",
+    "软件市场",
+    "应用中心",
+    "下载中心",
+    "应用分发",
+    "分发平台",
+)
+RISK_REVIEW_ENABLED = _env_bool("TASK_RISK_REVIEW_ENABLED", default=True)
+RISK_REVIEW_ALLOWLIST_CLIENT_IDS_RAW = str(
+    os.getenv("TASK_RISK_REVIEW_ALLOWLIST_CLIENT_IDS") or ""
+).strip()
+RISK_REVIEW_ALLOWLIST_CLIENT_IDS = {
+    str(item or "").strip().lower()
+    for item in RISK_REVIEW_ALLOWLIST_CLIENT_IDS_RAW.split(",")
+    if str(item or "").strip()
+}
+RISK_REVIEW_ADMIN_TOKEN = str(
+    os.getenv("TASK_RISK_REVIEW_ADMIN_TOKEN")
+    or os.getenv("ADMIN_CLIENT_TOKEN")
+    or ""
+).strip()
+RISK_REVIEW_STATUS_NOT_REQUIRED = "not_required"
+RISK_REVIEW_STATUS_PENDING = "pending"
+RISK_REVIEW_STATUS_APPROVED = "approved"
+RISK_REVIEW_STATUS_REJECTED = "rejected"
+RISK_SCAN_BLOCK_KEYWORDS = tuple(
+    dict.fromkeys(
+        (
+            *MARKETPLACE_BLOCK_KEYWORDS,
+            "app center",
+            "software store",
+            "app mall",
+            "distribution channel",
+            "third-party app market",
+            "mod apk",
+            "cracked apk",
+            "应用商城",
+            "应用下载站",
+            "渠道分发",
+            "下载平台",
+        )
+    )
+)
+RISK_SCAN_DOMAIN_KEYWORDS = (
+    "apkpure",
+    "apkcombo",
+    "apkmirror",
+    "uptodown",
+    "coolapk",
+    "taptap",
+    "wandoujia",
+    "appchina",
+    "yingyongbao",
+    "appgallery",
+    "getapps",
+    "9apps",
+    "apk-dl",
+)
+
+
+def _normalize_runtime_keywords(raw_keywords, fallback_keywords: tuple[str, ...]) -> tuple[str, ...]:
+    if not isinstance(raw_keywords, (list, tuple)):
+        return fallback_keywords
+    seen: set[str] = set()
+    normalized: list[str] = []
+    for item in raw_keywords:
+        keyword = str(item or "").strip()
+        if not keyword:
+            continue
+        dedupe_key = keyword.lower()
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        normalized.append(keyword)
+    if not normalized:
+        return fallback_keywords
+    return tuple(normalized)
+
+
+def _resolve_risk_scan_keyword_sets(client_id: str | None) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    flags = _load_client_feature_flags(client_id=client_id)
+    block_keywords = _normalize_runtime_keywords(
+        flags.get("risk_scan_block_keywords"),
+        RISK_SCAN_BLOCK_KEYWORDS,
+    )
+    domain_keywords = _normalize_runtime_keywords(
+        flags.get("risk_scan_domain_keywords"),
+        RISK_SCAN_DOMAIN_KEYWORDS,
+    )
+    return block_keywords, domain_keywords
+
+
+RISK_SCAN_TEXT_EXTENSIONS = {
+    ".html",
+    ".htm",
+    ".js",
+    ".mjs",
+    ".cjs",
+    ".ts",
+    ".tsx",
+    ".jsx",
+    ".vue",
+    ".json",
+    ".xml",
+    ".txt",
+}
+RISK_SCAN_SKIP_DIRS = {"node_modules", ".git", "android", "__macosx", ".gradle"}
+RISK_SCAN_MAX_FILE_BYTES = 2 * 1024 * 1024
+RISK_SCAN_MAX_FILES_PER_ARCHIVE = 1200
+RISK_SCAN_MAX_MATCHES_PER_SOURCE = 24
+
+
+def _normalize_phone(value: str | None) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    compact = raw.replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+    if compact.startswith("00"):
+        compact = f"+{compact[2:]}"
+    if compact.startswith("+"):
+        digits = re.sub(r"\D", "", compact[1:])
+        normalized = f"+{digits}" if digits else ""
+    else:
+        digits = re.sub(r"\D", "", compact)
+        if len(digits) == 11 and digits.startswith("1"):
+            normalized = f"+86{digits}"
+        elif 8 <= len(digits) <= 15:
+            normalized = f"+{digits}"
+        else:
+            normalized = ""
+    if normalized and AUTH_PHONE_E164_PATTERN.fullmatch(normalized):
+        return normalized
+    return ""
+
+
+def _validate_phone_or_raise(value: str | None) -> str:
+    phone = _normalize_phone(value)
+    if not phone:
+        raise HTTPException(status_code=400, detail="phone format is invalid")
+    return phone
+
+
+def _validate_sms_code_or_raise(value: str | None) -> str:
+    code = str(value or "").strip()
+    if not AUTH_SMS_CODE_PATTERN.fullmatch(code):
+        raise HTTPException(status_code=400, detail="sms code format is invalid")
+    return code
+
+
+def _normalize_declared_use_case(value: str | None) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    return re.sub(r"\s+", " ", raw)
+
+
+def _validate_task_compliance_or_raise(compliance_ack: bool, declared_use_case: str) -> None:
+    if not bool(compliance_ack):
+        raise HTTPException(status_code=400, detail="compliance confirmation is required")
+    if len(declared_use_case) < MARKETPLACE_DECLARED_USE_CASE_MIN_LENGTH:
+        raise HTTPException(status_code=400, detail="declared use case is required")
+    if len(declared_use_case) > MARKETPLACE_DECLARED_USE_CASE_MAX_LENGTH:
+        raise HTTPException(status_code=400, detail="declared use case is too long")
+
+
+def _detect_marketplace_keyword(value: str | None) -> str:
+    normalized = str(value or "").strip().lower()
+    if not normalized:
+        return ""
+    compact = re.sub(r"[\s_\-]+", "", normalized)
+    for keyword in MARKETPLACE_BLOCK_KEYWORDS:
+        probe = str(keyword or "").strip().lower()
+        if not probe:
+            continue
+        if probe in normalized:
+            return keyword
+        probe_compact = re.sub(r"[\s_\-]+", "", probe)
+        if probe_compact and probe_compact in compact:
+            return keyword
+    return ""
+
+
+def _compact_text_for_risk_scan(value: str | None) -> tuple[str, str]:
+    normalized = str(value or "").strip().lower()
+    if not normalized:
+        return "", ""
+    collapsed = re.sub(r"\s+", " ", normalized)
+    compact = re.sub(r"[\s_\-./]+", "", collapsed)
+    return collapsed, compact
+
+
+def _collect_risk_keyword_hits(value: str | None, keywords: tuple[str, ...], max_hits: int = 24) -> list[str]:
+    normalized, compact = _compact_text_for_risk_scan(value)
+    if not normalized:
+        return []
+    hits: list[str] = []
+    seen: set[str] = set()
+    for keyword in keywords:
+        probe = str(keyword or "").strip().lower()
+        if not probe:
+            continue
+        probe_compact = re.sub(r"[\s_\-./]+", "", probe)
+        matched = probe in normalized or (probe_compact and probe_compact in compact)
+        if not matched:
+            continue
+        if probe in seen:
+            continue
+        seen.add(probe)
+        hits.append(str(keyword))
+        if len(hits) >= max_hits:
+            break
+    return hits
+
+
+def _build_risk_value_preview(value: str | None, max_len: int = 120) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    compact = re.sub(r"\s+", " ", text)
+    if len(compact) <= max_len:
+        return compact
+    return f"{compact[:max_len]}..."
+
+
+def _extract_domain_from_url(raw_url: str | None) -> str:
+    value = str(raw_url or "").strip()
+    if not value:
+        return ""
+    normalized = _normalize_external_url(value)
+    if not normalized and "://" not in value:
+        normalized = _normalize_external_url(f"https://{value}")
+    if not normalized:
+        return ""
+    try:
+        parsed = urllib.parse.urlsplit(normalized)
+    except Exception:
+        return ""
+    host = str(parsed.hostname or "").strip().lower().strip(".")
+    return host
+
+
+def _collect_domains_from_external_items(items: list[dict]) -> list[str]:
+    domains: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        domain = _extract_domain_from_url(str(item.get("url") or ""))
+        if not domain or domain in seen:
+            continue
+        seen.add(domain)
+        domains.append(domain)
+    return sorted(domains)
+
+
+def _collect_risk_matches_from_text(
+    text: str,
+    source_label: str,
+    collector: dict[str, set[str]],
+    block_keywords: tuple[str, ...],
+) -> None:
+    if not text:
+        return
+    hits = _collect_risk_keyword_hits(
+        text,
+        block_keywords,
+        max_hits=RISK_SCAN_MAX_MATCHES_PER_SOURCE,
+    )
+    if not hits:
+        return
+    slot = collector.setdefault(source_label, set())
+    for keyword in hits:
+        slot.add(keyword)
+
+
+def _format_risk_text_matches(collector: dict[str, set[str]]) -> list[dict]:
+    items: list[dict] = []
+    for source, keywords in collector.items():
+        ordered = sorted(str(keyword) for keyword in keywords if str(keyword).strip())
+        if not ordered:
+            continue
+        items.append({
+            "source": source,
+            "keywords": ordered,
+        })
+    items.sort(key=lambda item: (item["source"], ",".join(item["keywords"])))
+    return items
+
+
+def _scan_risk_keywords_in_html(html_path: Path, block_keywords: tuple[str, ...]) -> dict:
+    collector: dict[str, set[str]] = {}
+    try:
+        text = html_path.read_text(encoding="utf-8", errors="ignore")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to read HTML file: {str(exc)}")
+    _collect_risk_matches_from_text(text, html_path.name, collector, block_keywords)
+    return {
+        "scanned_files": 1,
+        "matches": _format_risk_text_matches(collector),
+    }
+
+
+def _scan_risk_keywords_in_zip(zip_path: Path, block_keywords: tuple[str, ...]) -> dict:
+    collector: dict[str, set[str]] = {}
+    scanned_files = 0
+    try:
+        with zipfile.ZipFile(zip_path, "r") as archive:
+            for info, parts in _iter_zip_entries(archive):
+                if scanned_files >= RISK_SCAN_MAX_FILES_PER_ARCHIVE:
+                    break
+                lower_parts = [part.lower() for part in parts]
+                if any(part in RISK_SCAN_SKIP_DIRS for part in lower_parts):
+                    continue
+                suffix = PurePosixPath(parts[-1]).suffix.lower()
+                if suffix not in RISK_SCAN_TEXT_EXTENSIONS:
+                    continue
+                file_size = int(info.file_size or 0)
+                if file_size <= 0 or file_size > RISK_SCAN_MAX_FILE_BYTES:
+                    continue
+                try:
+                    with archive.open(info, "r") as source:
+                        content = source.read(RISK_SCAN_MAX_FILE_BYTES + 1)
+                    if len(content) > RISK_SCAN_MAX_FILE_BYTES:
+                        continue
+                    text = content.decode("utf-8", errors="ignore")
+                except Exception:
+                    continue
+                scanned_files += 1
+                file_label = str(PurePosixPath(*parts))
+                _collect_risk_matches_from_text(text, file_label, collector, block_keywords)
+    except zipfile.BadZipFile:
+        raise HTTPException(status_code=400, detail="ZIP format is invalid, please upload again")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to scan ZIP text risk: {str(exc)}")
+    return {
+        "scanned_files": scanned_files,
+        "matches": _format_risk_text_matches(collector),
+    }
+
+
+def _scan_task_risk_inputs(
+    *,
+    client_id: str | None,
+    app_name: str | None,
+    package_name: str | None,
+    declared_use_case: str,
+    web_url: str | None,
+    zip_path: Path | None = None,
+    html_path: Path | None = None,
+) -> dict:
+    block_keywords, domain_keywords = _resolve_risk_scan_keyword_sets(client_id)
+    field_hits: list[dict] = []
+    text_hits: list[dict] = []
+    domain_hits: list[dict] = []
+    scan_errors: list[str] = []
+    scanned_text_files = 0
+    external_link_items: list[dict] = []
+
+    field_candidates = [
+        ("app_name", app_name),
+        ("package_name", package_name),
+        ("declared_use_case", declared_use_case),
+    ]
+    if web_url:
+        field_candidates.append(("web_url", web_url))
+    for field_name, value in field_candidates:
+        hits = _collect_risk_keyword_hits(value, block_keywords)
+        for keyword in hits:
+            field_hits.append({
+                "field": field_name,
+                "keyword": keyword,
+                "sample": _build_risk_value_preview(value),
+            })
+
+    if zip_path and zip_path.exists():
+        try:
+            text_result = _scan_risk_keywords_in_zip(zip_path, block_keywords)
+            scanned_text_files += int(text_result.get("scanned_files") or 0)
+            text_hits.extend(list(text_result.get("matches") or []))
+        except HTTPException as exc:
+            scan_errors.append(f"text_scan_zip_failed:{str(exc.detail or exc)}")
+        except Exception as exc:
+            scan_errors.append(f"text_scan_zip_failed:{str(exc)}")
+        try:
+            external_link_items = _scan_external_links_in_zip(zip_path)
+        except HTTPException as exc:
+            scan_errors.append(f"external_links_zip_failed:{str(exc.detail or exc)}")
+        except Exception as exc:
+            scan_errors.append(f"external_links_zip_failed:{str(exc)}")
+    elif html_path and html_path.exists():
+        try:
+            text_result = _scan_risk_keywords_in_html(html_path, block_keywords)
+            scanned_text_files += int(text_result.get("scanned_files") or 0)
+            text_hits.extend(list(text_result.get("matches") or []))
+        except HTTPException as exc:
+            scan_errors.append(f"text_scan_html_failed:{str(exc.detail or exc)}")
+        except Exception as exc:
+            scan_errors.append(f"text_scan_html_failed:{str(exc)}")
+        try:
+            external_link_items = _scan_external_links_in_html(html_path)
+        except HTTPException as exc:
+            scan_errors.append(f"external_links_html_failed:{str(exc.detail or exc)}")
+        except Exception as exc:
+            scan_errors.append(f"external_links_html_failed:{str(exc)}")
+
+    external_domains = _collect_domains_from_external_items(external_link_items)
+    web_domain = _extract_domain_from_url(web_url)
+    if web_domain and web_domain not in external_domains:
+        external_domains.append(web_domain)
+        external_domains.sort()
+
+    for domain in external_domains:
+        hits = _collect_risk_keyword_hits(domain, domain_keywords, max_hits=6)
+        for keyword in hits:
+            domain_hits.append({
+                "domain": domain,
+                "keyword": keyword,
+            })
+
+    risk_hit_count = len(field_hits) + len(text_hits) + len(domain_hits)
+    high_risk = risk_hit_count > 0 or bool(scan_errors)
+    return {
+        "risk_level": "high" if high_risk else "normal",
+        "hit_count": risk_hit_count,
+        "field_hits": field_hits[:128],
+        "html_hits": text_hits[:128],
+        "domain_hits": domain_hits[:128],
+        "external_domains": external_domains[:256],
+        "external_link_count": len(external_link_items),
+        "external_links_preview": [
+            str(item.get("url") or "")
+            for item in external_link_items[:40]
+            if str(item.get("url") or "").strip()
+        ],
+        "scanned_text_files": scanned_text_files,
+        "scan_errors": scan_errors[:32],
+        "scanned_at": datetime.now().isoformat(),
+    }
+
+
+def _is_marketplace_policy_allowlisted(client_id: str | None) -> bool:
+    normalized_client_id = str(client_id or "").strip().lower()
+    if not normalized_client_id:
+        return False
+    return normalized_client_id in MARKETPLACE_POLICY_ALLOWLIST_CLIENT_IDS
+
+
+def _is_risk_review_allowlisted(client_id: str | None) -> bool:
+    normalized_client_id = str(client_id or "").strip().lower()
+    if not normalized_client_id:
+        return False
+    if normalized_client_id in RISK_REVIEW_ALLOWLIST_CLIENT_IDS:
+        return True
+    return _is_marketplace_policy_allowlisted(normalized_client_id)
+
+
+def _requires_risk_review(client_id: str | None, risk_scan: dict) -> bool:
+    if not RISK_REVIEW_ENABLED:
+        return False
+    if str(risk_scan.get("risk_level") or "").strip().lower() != "high":
+        return False
+    if _is_risk_review_allowlisted(client_id):
+        return False
+    return True
+
+
+def _is_task_review_approved(task: BuildTask) -> bool:
+    if not bool(getattr(task, "review_required", False)):
+        return True
+    review_status = str(getattr(task, "review_status", "") or "").strip().lower()
+    return review_status == RISK_REVIEW_STATUS_APPROVED
+
+
+def _datetime_to_iso_or_none(value) -> str | None:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return None
+
+
+def _build_task_risk_sync_meta(task: BuildTask) -> dict:
+    risk_scan = getattr(task, "risk_scan", {})
+    if not isinstance(risk_scan, dict):
+        risk_scan = {}
+    return {
+        "risk_level": str(getattr(task, "risk_level", "normal") or "normal"),
+        "review_required": bool(getattr(task, "review_required", False)),
+        "review_status": str(getattr(task, "review_status", "") or RISK_REVIEW_STATUS_NOT_REQUIRED),
+        "review_requested_at": _datetime_to_iso_or_none(getattr(task, "review_requested_at", None)),
+        "review_decision_at": _datetime_to_iso_or_none(getattr(task, "review_decision_at", None)),
+        "review_decision_by": str(getattr(task, "review_decision_by", "") or ""),
+        "review_note": str(getattr(task, "review_note", "") or ""),
+        "risk_scan": risk_scan,
+    }
+
+
+def _extract_bearer_token(raw_value: str | None) -> str:
+    header = str(raw_value or "").strip()
+    if not header:
+        return ""
+    if not header.lower().startswith("bearer "):
+        return ""
+    return header[7:].strip()
+
+
+def _require_risk_review_admin_access(request: Request) -> str:
+    expected_token = RISK_REVIEW_ADMIN_TOKEN
+    if not expected_token:
+        raise HTTPException(status_code=503, detail="risk review admin token is not configured")
+    raw_token = str(request.headers.get("X-Admin-Token") or "").strip()
+    if not raw_token:
+        raw_token = _extract_bearer_token(request.headers.get("Authorization"))
+    if not raw_token:
+        raise HTTPException(status_code=401, detail="risk review admin token is required")
+    if not secrets.compare_digest(raw_token, expected_token):
+        raise HTTPException(status_code=403, detail="risk review admin token is invalid")
+    return "admin"
+
+
+def _sync_task_risk_review_to_admin(task_id: str, task: BuildTask) -> None:
+    try:
+        config_data = task.config.model_dump() if hasattr(task.config, "model_dump") else task.config.dict()
+    except Exception:
+        config_data = {}
+    config_data["build_type"] = task.mode
+    config_data["task_mode"] = task.mode
+    if task.mode == "web" and task.web_url:
+        config_data["web_url"] = task.web_url
+    risk_meta = _build_task_risk_sync_meta(task)
+    config_data.update(risk_meta)
+
+    risk_scan = risk_meta.get("risk_scan", {}) if isinstance(risk_meta.get("risk_scan"), dict) else {}
+    zip_info = {
+        "build_type": task.mode,
+        "risk_level": risk_meta.get("risk_level", "normal"),
+        "review_required": bool(risk_meta.get("review_required")),
+        "review_status": str(risk_meta.get("review_status") or RISK_REVIEW_STATUS_NOT_REQUIRED),
+        "risk_hit_count": int(risk_scan.get("hit_count") or 0),
+    }
+
+    task_input_dir = TASKS_DIR / task_id / "input"
+    ensure_task_input_assets(task_id, task_input_dir)
+    persisted_zip_path = get_persisted_task_asset_path(task_id, "project.zip")
+    persisted_html_path = get_persisted_task_asset_path(task_id, "index.html")
+    zip_path = persisted_zip_path if persisted_zip_path.exists() else _resolve_task_asset_path(task_id, "project.zip")
+    html_path = persisted_html_path if persisted_html_path.exists() else _resolve_task_asset_path(task_id, "index.html")
+    icon_path = _resolve_task_asset_path(task_id, "logo.png")
+    if zip_path.exists():
+        zip_info.update({
+            "name": zip_path.name,
+            "size": zip_path.stat().st_size,
+        })
+
+    upload_task_assets(
+        task_id,
+        task.client_id or "",
+        task.updated_at.isoformat(),
+        zip_info,
+        config_data,
+        zip_path=str(zip_path) if zip_path.exists() else None,
+        html_path=str(html_path) if html_path.exists() else None,
+        icon_path=str(icon_path) if icon_path.exists() else None,
+        keystore_path=None,
+        keystore_info={},
+    )
+    flush_task_assets_queue()
+
+
+def _enforce_marketplace_policy_or_raise(
+    *,
+    client_id: str,
+    app_name: str | None,
+    package_name: str | None,
+    declared_use_case: str,
+    web_url: str | None,
+) -> None:
+    if not MARKETPLACE_POLICY_ENABLED:
+        return
+    if _is_marketplace_policy_allowlisted(client_id):
+        return
+
+    field_candidates = [
+        ("app_name", app_name),
+        ("package_name", package_name),
+        ("declared_use_case", declared_use_case),
+    ]
+    if web_url:
+        field_candidates.append(("web_url", web_url))
+
+    for field_name, value in field_candidates:
+        matched_keyword = _detect_marketplace_keyword(value)
+        if matched_keyword:
+            raise HTTPException(
+                status_code=403,
+                detail=f"task blocked by policy: suspected marketplace app ({field_name}:{matched_keyword})",
+            )
+
+
+def _extract_request_ip(request: Request | None) -> str:
+    if request is None:
+        return "unknown"
+    forwarded_for = str(request.headers.get("X-Forwarded-For") or "").strip()
+    if forwarded_for:
+        candidate = str(forwarded_for.split(",")[0]).strip()
+        if candidate:
+            return candidate
+    if request.client and request.client.host:
+        return str(request.client.host).strip() or "unknown"
+    return "unknown"
+
+
+def _sms_redis_key(suffix: str) -> str:
+    return f"{AUTH_SMS_REDIS_PREFIX}{suffix}"
+
+
+def _get_sms_redis_client() -> Redis:
+    global AUTH_SMS_REDIS_CLIENT
+    if not AUTH_SMS_REDIS_URL:
+        raise HTTPException(status_code=503, detail="sms login unavailable")
+    if AUTH_SMS_REDIS_CLIENT is not None:
+        return AUTH_SMS_REDIS_CLIENT
+    with AUTH_SMS_REDIS_LOCK:
+        if AUTH_SMS_REDIS_CLIENT is not None:
+            return AUTH_SMS_REDIS_CLIENT
+        try:
+            client = Redis.from_url(
+                AUTH_SMS_REDIS_URL,
+                decode_responses=True,
+                socket_connect_timeout=2,
+                socket_timeout=2,
+                health_check_interval=30,
+            )
+            client.ping()
+        except Exception:
+            raise HTTPException(status_code=503, detail="sms login unavailable")
+        AUTH_SMS_REDIS_CLIENT = client
+        return client
+
+
+def _hash_sms_code(code: str, salt_hex: str) -> str:
+    salt = bytes.fromhex(salt_hex)
+    digest = hashlib.pbkdf2_hmac("sha256", code.encode("utf-8"), salt, AUTH_PASSWORD_ITERATIONS, dklen=32)
+    return digest.hex()
+
+
+def _check_and_incr_sms_rate_limit(redis_client: Redis, key: str, window_seconds: int, limit: int, detail: str) -> None:
+    count = int(redis_client.incr(key))
+    if count <= 1:
+        redis_client.expire(key, int(window_seconds))
+    if count > int(limit):
+        raise HTTPException(status_code=429, detail=detail)
+
+
+def _send_sms_code_via_provider(phone: str, code: str) -> tuple[bool, str]:
+    provider = str(AUTH_SMS_PROVIDER or "mock").strip().lower()
+    if provider == "mock":
+        print(f"[AUTH SMS] {phone} code={code}")
+        return True, ""
+    if provider == "webhook":
+        if not AUTH_SMS_PROVIDER_WEBHOOK_URL:
+            return False, "sms provider webhook is not configured"
+        headers = {"Content-Type": "application/json"}
+        if AUTH_SMS_PROVIDER_WEBHOOK_TOKEN:
+            headers["Authorization"] = f"Bearer {AUTH_SMS_PROVIDER_WEBHOOK_TOKEN}"
+        payload = {
+            "phone": phone,
+            "code": code,
+            "scene": "login",
+            "ttl_seconds": AUTH_SMS_CODE_TTL_SECONDS,
+        }
+        req = urllib.request.Request(
+            AUTH_SMS_PROVIDER_WEBHOOK_URL,
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            method="POST",
+            headers=headers,
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=8) as response:
+                if 200 <= int(response.status) < 300:
+                    return True, ""
+                return False, f"provider http status {response.status}"
+        except urllib.error.HTTPError as exc:
+            return False, f"provider http status {exc.code}"
+        except Exception as exc:
+            return False, str(exc)
+    return False, f"unsupported sms provider: {provider}"
 
 
 def _normalize_email(value: str | None) -> str:
@@ -328,7 +1106,7 @@ def _normalize_github_id(value: str | int | None) -> str:
 
 def _normalize_auth_provider(value: str | None) -> str:
     provider = str(value or "").strip().lower()
-    if provider in {"github", "local"}:
+    if provider in {"github", "local", "sms"}:
         return provider
     return "local"
 
@@ -559,6 +1337,7 @@ def _upsert_user_by_github_identity(identity: dict) -> tuple[str, dict]:
         user = {
             "id": user_id,
             "email": email,
+            "phone": "",
             "password_salt": salt_hex,
             "password_hash": _hash_password(random_password, salt_hex),
             "client_ids": [],
@@ -584,6 +1363,40 @@ def _upsert_user_by_github_identity(identity: dict) -> tuple[str, dict]:
     return user_id, user
 
 
+def _upsert_user_by_phone(phone: str) -> tuple[str, dict]:
+    normalized_phone = _validate_phone_or_raise(phone)
+    user_id = phone_to_user_id.get(normalized_phone)
+    user = users_db.get(user_id) if user_id else None
+    now_iso = datetime.now().isoformat()
+    if not user:
+        user_id = f"user_{uuid.uuid4().hex}"
+        random_password = secrets.token_urlsafe(32)
+        salt_hex = secrets.token_hex(16)
+        user = {
+            "id": user_id,
+            "email": "",
+            "phone": normalized_phone,
+            "password_salt": salt_hex,
+            "password_hash": _hash_password(random_password, salt_hex),
+            "client_ids": [],
+            "created_at": now_iso,
+            "updated_at": now_iso,
+            "last_login_at": now_iso,
+            "auth_provider": "sms",
+            "github_id": "",
+            "github_login": "",
+        }
+    user["phone"] = normalized_phone
+    provider = _normalize_auth_provider(user.get("auth_provider"))
+    if provider in {"local", "sms"} and not _normalize_email(user.get("email")) and not _normalize_github_id(user.get("github_id")):
+        user["auth_provider"] = "sms"
+    user["updated_at"] = now_iso
+    user["last_login_at"] = now_iso
+    users_db[user_id] = user
+    _rebuild_auth_indexes()
+    return user_id, user
+
+
 def _parse_iso_datetime(value, default_value: datetime | None = None) -> datetime:
     if isinstance(value, datetime):
         return value
@@ -600,6 +1413,7 @@ def _serialize_auth_user(user: dict) -> dict:
     return {
         "id": str(user.get("id") or "").strip(),
         "email": _normalize_email(user.get("email")),
+        "phone": _normalize_phone(user.get("phone")),
         "auth_provider": _normalize_auth_provider(user.get("auth_provider")),
         "github_id": _normalize_github_id(user.get("github_id")),
         "github_login": str(user.get("github_login") or "").strip(),
@@ -613,9 +1427,12 @@ def _serialize_auth_user(user: dict) -> dict:
 
 
 def _user_to_profile(user: dict) -> AuthUserProfile:
+    email = _normalize_email(user.get("email"))
+    phone = _normalize_phone(user.get("phone"))
     return AuthUserProfile(
         id=str(user.get("id") or "").strip(),
-        email=_normalize_email(user.get("email")),
+        email=email or None,
+        phone=phone or None,
         auth_provider=_normalize_auth_provider(user.get("auth_provider")),
         github_id=_normalize_github_id(user.get("github_id")) or None,
         github_login=str(user.get("github_login") or "").strip() or None,
@@ -628,6 +1445,7 @@ def _user_to_profile(user: dict) -> AuthUserProfile:
 
 def _rebuild_auth_indexes() -> None:
     email_to_user_id.clear()
+    phone_to_user_id.clear()
     client_to_user_id.clear()
     github_id_to_user_id.clear()
     for user_id, user in users_db.items():
@@ -638,6 +1456,10 @@ def _rebuild_auth_indexes() -> None:
         email = _normalize_email(user.get("email"))
         if email and email not in email_to_user_id:
             email_to_user_id[email] = normalized_user_id
+        phone = _normalize_phone(user.get("phone"))
+        user["phone"] = phone
+        if phone and phone not in phone_to_user_id:
+            phone_to_user_id[phone] = normalized_user_id
         github_id = _normalize_github_id(user.get("github_id"))
         user["github_id"] = github_id
         user["github_login"] = str(user.get("github_login") or "").strip()
@@ -673,16 +1495,18 @@ def _load_auth_users_db() -> None:
             continue
         user_id = str(item.get("id") or "").strip()
         email = _normalize_email(item.get("email"))
+        phone = _normalize_phone(item.get("phone"))
         auth_provider = _normalize_auth_provider(item.get("auth_provider"))
         github_id = _normalize_github_id(item.get("github_id"))
         github_login = str(item.get("github_login") or "").strip()
         password_salt = str(item.get("password_salt") or "").strip()
         password_hash = str(item.get("password_hash") or "").strip()
-        if not user_id or not email:
+        if not user_id or (not email and not phone):
             continue
         users_db[user_id] = {
             "id": user_id,
             "email": email,
+            "phone": phone,
             "auth_provider": auth_provider,
             "github_id": github_id,
             "github_login": github_login,
@@ -2058,6 +2882,7 @@ async def auth_register(payload: AuthRegisterRequest):
     users_db[user_id] = {
         "id": user_id,
         "email": email,
+        "phone": "",
         "auth_provider": "local",
         "github_id": "",
         "github_login": "",
@@ -2096,6 +2921,127 @@ async def auth_login(payload: AuthLoginRequest):
     now_iso = datetime.now().isoformat()
     user["last_login_at"] = now_iso
     user["updated_at"] = now_iso
+    users_db[user_id] = user
+    _persist_auth_users_db()
+    token, expires_at = _create_auth_session(user_id, client_id)
+    return _build_auth_session_response(user, token, expires_at)
+
+
+@app.post("/api/auth/sms/send-code")
+async def auth_sms_send_code(payload: AuthSmsSendRequest, request: Request):
+    """发送短信验证码"""
+    client_id = _require_client_id(payload.client_id)
+    if not _is_client_login_enabled(client_id):
+        raise HTTPException(status_code=403, detail="login is disabled by admin for current client")
+    if not _is_client_sms_login_enabled(client_id):
+        raise HTTPException(status_code=403, detail="sms login is disabled by admin for current client")
+    phone = _validate_phone_or_raise(payload.phone)
+    redis_client = _get_sms_redis_client()
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    code_key = _sms_redis_key(f"code:{phone}")
+    send_lock_key = _sms_redis_key(f"send-lock:{phone}")
+    day_bucket = datetime.utcnow().strftime("%Y%m%d")
+    hour_bucket = datetime.utcnow().strftime("%Y%m%d%H")
+    day_limit_key = _sms_redis_key(f"send-day:{phone}:{day_bucket}")
+    ip = _extract_request_ip(request)
+    ip_limit_key = _sms_redis_key(f"send-ip:{ip}:{hour_bucket}")
+    salt_hex = secrets.token_hex(16)
+    code_hash = _hash_sms_code(code, salt_hex)
+    try:
+        _check_and_incr_sms_rate_limit(
+            redis_client=redis_client,
+            key=ip_limit_key,
+            window_seconds=3700,
+            limit=AUTH_SMS_IP_HOURLY_LIMIT,
+            detail="sms send rate limited",
+        )
+        if not redis_client.set(send_lock_key, "1", ex=AUTH_SMS_RESEND_INTERVAL_SECONDS, nx=True):
+            raise HTTPException(status_code=429, detail="sms send too frequently")
+        _check_and_incr_sms_rate_limit(
+            redis_client=redis_client,
+            key=day_limit_key,
+            window_seconds=2 * 24 * 3600,
+            limit=AUTH_SMS_DAILY_LIMIT,
+            detail="sms send daily limit reached",
+        )
+        redis_client.hset(
+            code_key,
+            mapping={
+                "code_hash": code_hash,
+                "salt": salt_hex,
+                "attempts": "0",
+                "issued_at": str(int(time.time())),
+            },
+        )
+        redis_client.expire(code_key, AUTH_SMS_CODE_TTL_SECONDS)
+    except HTTPException:
+        raise
+    except RedisError:
+        raise HTTPException(status_code=503, detail="sms login unavailable")
+
+    sent, detail = _send_sms_code_via_provider(phone, code)
+    if not sent:
+        try:
+            redis_client.delete(code_key)
+        except Exception:
+            pass
+        raise HTTPException(status_code=502, detail=f"sms send failed: {detail or 'unknown error'}")
+
+    response = {
+        "ok": True,
+        "expires_in": AUTH_SMS_CODE_TTL_SECONDS,
+        "resend_after": AUTH_SMS_RESEND_INTERVAL_SECONDS,
+    }
+    if AUTH_SMS_DEBUG_RETURN_CODE:
+        response["debug_code"] = code
+    return response
+
+
+@app.post("/api/auth/sms/login", response_model=AuthSessionResponse)
+async def auth_sms_login(payload: AuthSmsLoginRequest):
+    """短信验证码登录"""
+    client_id = _require_client_id(payload.client_id)
+    if not _is_client_login_enabled(client_id):
+        raise HTTPException(status_code=403, detail="login is disabled by admin for current client")
+    if not _is_client_sms_login_enabled(client_id):
+        raise HTTPException(status_code=403, detail="sms login is disabled by admin for current client")
+    phone = _validate_phone_or_raise(payload.phone)
+    code = _validate_sms_code_or_raise(payload.code)
+    redis_client = _get_sms_redis_client()
+    code_key = _sms_redis_key(f"code:{phone}")
+    try:
+        code_data = redis_client.hgetall(code_key)
+        if not code_data:
+            raise HTTPException(status_code=400, detail="sms code has expired")
+        attempts = int(redis_client.hincrby(code_key, "attempts", 1))
+        if attempts > AUTH_SMS_VERIFY_MAX_ATTEMPTS:
+            redis_client.delete(code_key)
+            raise HTTPException(status_code=429, detail="sms code attempts exceeded")
+    except HTTPException:
+        raise
+    except RedisError:
+        raise HTTPException(status_code=503, detail="sms login unavailable")
+
+    expected_hash = str(code_data.get("code_hash") or "").strip()
+    salt_hex = str(code_data.get("salt") or "").strip()
+    if not expected_hash or not salt_hex:
+        try:
+            redis_client.delete(code_key)
+        except Exception:
+            pass
+        raise HTTPException(status_code=400, detail="sms code has expired")
+
+    actual_hash = _hash_sms_code(code, salt_hex)
+    if not secrets.compare_digest(actual_hash, expected_hash):
+        raise HTTPException(status_code=401, detail="sms code is incorrect")
+
+    try:
+        redis_client.delete(code_key)
+    except RedisError:
+        raise HTTPException(status_code=503, detail="sms login unavailable")
+
+    user_id, user = _upsert_user_by_phone(phone)
+    _bind_client_to_user(user_id, client_id)
     users_db[user_id] = user
     _persist_auth_users_db()
     token, expires_at = _create_auth_session(user_id, client_id)
@@ -2423,6 +3369,8 @@ async def create_task(task_data: BuildTaskCreate):
     task_id = str(uuid.uuid4())
     now = datetime.now()
     client_id = _require_client_id(task_data.client_id)
+    declared_use_case = _normalize_declared_use_case(task_data.declared_use_case)
+    _validate_task_compliance_or_raise(task_data.compliance_ack, declared_use_case)
 
     mode = (task_data.mode or "convert").strip().lower()
     if mode not in {"convert", "web", "html", "desktop"}:
@@ -2442,6 +3390,15 @@ async def create_task(task_data: BuildTaskCreate):
         html_filename = str(task_data.html_filename or "").strip()
         if not html_filename:
             raise HTTPException(status_code=400, detail="html_filename is required for html mode")
+
+    if not RISK_REVIEW_ENABLED:
+        _enforce_marketplace_policy_or_raise(
+            client_id=client_id,
+            app_name=task_data.config.app_name,
+            package_name=task_data.config.package_name,
+            declared_use_case=declared_use_case,
+            web_url=web_url,
+        )
 
     quick_generate = bool(task_data.quick_generate)
     if mode == "desktop" and quick_generate:
@@ -2596,10 +3553,37 @@ async def create_task(task_data: BuildTaskCreate):
         if src_keystore.exists():
             dst_keystore = task_keystore_dir / "release.keystore"
             shutil.copy2(str(src_keystore), str(dst_keystore))
-    
+
+    risk_scan_zip_path = task_input_dir / "project.zip"
+    risk_scan_html_path = task_input_dir / "index.html"
+    risk_scan = _scan_task_risk_inputs(
+        client_id=client_id,
+        app_name=effective_config.app_name,
+        package_name=effective_config.package_name,
+        declared_use_case=declared_use_case,
+        web_url=web_url,
+        zip_path=risk_scan_zip_path if risk_scan_zip_path.exists() else None,
+        html_path=risk_scan_html_path if risk_scan_html_path.exists() else None,
+    )
+    risk_level = str(risk_scan.get("risk_level") or "normal").strip().lower()
+    allowlisted_for_review = _is_risk_review_allowlisted(client_id)
+    review_required = _requires_risk_review(client_id, risk_scan)
+    review_status = (
+        RISK_REVIEW_STATUS_PENDING
+        if review_required
+        else (RISK_REVIEW_STATUS_APPROVED if risk_level == "high" else RISK_REVIEW_STATUS_NOT_REQUIRED)
+    )
+    review_requested_at = now if review_required else None
+    review_decision_at = now if (risk_level == "high" and not review_required) else None
+    review_decision_by = "allowlist" if (risk_level == "high" and allowlisted_for_review and not review_required) else None
+    review_note = "风险命中但已在放行名单内" if (risk_level == "high" and allowlisted_for_review and not review_required) else None
+    pending_message = "命中高风险规则，等待管理人员审核放行" if review_required else "等待构建中"
+
     task = BuildTask(
         id=task_id,
         client_id=client_id,
+        compliance_ack=bool(task_data.compliance_ack),
+        declared_use_case=declared_use_case,
         quick_generate=quick_generate,
         mode=mode,
         web_url=web_url,
@@ -2612,13 +3596,21 @@ async def create_task(task_data: BuildTaskCreate):
         created_at=now,
         updated_at=now,
         progress=0,
-        message="等待构建中",
+        message=pending_message,
         failure_diagnosis=create_idle_diagnosis(),
         reuse_keystore_from=reuse_from,
         cdn_localize_enabled=cdn_localize_enabled,
         cdn_localize_urls=cdn_localize_urls,
         cdn_localize_select_all=cdn_localize_select_all,
         cdn_localize_preprocessed=cdn_localize_preprocessed,
+        risk_level=risk_level,
+        risk_scan=risk_scan,
+        review_required=review_required,
+        review_status=review_status,
+        review_requested_at=review_requested_at,
+        review_decision_at=review_decision_at,
+        review_decision_by=review_decision_by,
+        review_note=review_note,
     )
 
     for line in cdn_localize_log_lines:
@@ -2637,12 +3629,19 @@ async def create_task(task_data: BuildTaskCreate):
     config_data["task_mode"] = task.mode
     if task.mode == "web" and task.web_url:
         config_data["web_url"] = task.web_url
+    config_data.update(_build_task_risk_sync_meta(task))
     persisted_zip_path = get_persisted_task_asset_path(task_id, "project.zip")
     persisted_html_path = get_persisted_task_asset_path(task_id, "index.html")
     zip_path = persisted_zip_path if persisted_zip_path.exists() else _resolve_task_asset_path(task_id, "project.zip")
     html_path = persisted_html_path if persisted_html_path.exists() else _resolve_task_asset_path(task_id, "index.html")
     icon_path = _resolve_task_asset_path(task_id, "logo.png")
-    zip_info = {"build_type": task.mode}
+    zip_info = {
+        "build_type": task.mode,
+        "risk_level": task.risk_level,
+        "review_required": bool(task.review_required),
+        "review_status": str(task.review_status or RISK_REVIEW_STATUS_NOT_REQUIRED),
+        "risk_hit_count": int(task.risk_scan.get("hit_count") or 0) if isinstance(task.risk_scan, dict) else 0,
+    }
     if zip_path.exists():
         zip_info.update({"name": zip_path.name, "size": zip_path.stat().st_size})
     upload_task_assets(
@@ -2690,6 +3689,90 @@ async def get_task(task_id: str, client_id: str = None):
     _assert_task_owner(task, client_id)
     try:
         _schedule_task_failure_diagnosis(task.id, task, force=False)
+    except Exception:
+        pass
+    return task
+
+
+@app.get("/api/risk-reviews/pending", response_model=List[BuildTaskListItemResponse], response_model_exclude_none=True)
+async def list_pending_risk_reviews(request: Request, client_id: str | None = None, limit: int = 200):
+    """获取待审核的高风险任务（管理端调用）。"""
+    _require_risk_review_admin_access(request)
+    normalized_client_id = _normalize_client_id(client_id)
+    safe_limit = max(1, min(int(limit or 200), 500))
+    items = []
+    for task in tasks_db.values():
+        if not bool(getattr(task, "review_required", False)):
+            continue
+        review_status = str(getattr(task, "review_status", "") or "").strip().lower()
+        if review_status != RISK_REVIEW_STATUS_PENDING:
+            continue
+        if normalized_client_id and _normalize_client_id(getattr(task, "client_id", "")) != normalized_client_id:
+            continue
+        items.append(task)
+    items.sort(key=lambda item: (item.updated_at, item.created_at, item.id), reverse=True)
+    return items[:safe_limit]
+
+
+@app.post("/api/risk-reviews/{task_id}/approve", response_model=BuildTaskResponse)
+async def approve_risk_review_task(task_id: str, request: Request, payload: dict | None = Body(default=None)):
+    """放行高风险任务（管理端调用）。"""
+    reviewer = _require_risk_review_admin_access(request)
+    if task_id not in tasks_db:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    task = tasks_db[task_id]
+    review_payload = payload if isinstance(payload, dict) else {}
+    review_note = str(review_payload.get("note") or "").strip()
+    review_operator = str(review_payload.get("reviewer") or "").strip() or reviewer
+    now = datetime.now()
+    task.review_required = True if str(getattr(task, "risk_level", "") or "").strip().lower() == "high" else bool(task.review_required)
+    task.review_status = RISK_REVIEW_STATUS_APPROVED
+    if not task.review_requested_at:
+        task.review_requested_at = now
+    task.review_decision_at = now
+    task.review_decision_by = review_operator
+    task.review_note = review_note or "管理员审核通过"
+    if task.status == BuildStatus.PENDING:
+        task.message = "风险审核已通过，可启动构建"
+    task.updated_at = now
+    try:
+        persist_tasks_db(force=True)
+    except Exception:
+        pass
+    try:
+        _sync_task_risk_review_to_admin(task_id, task)
+    except Exception:
+        pass
+    return task
+
+
+@app.post("/api/risk-reviews/{task_id}/reject", response_model=BuildTaskResponse)
+async def reject_risk_review_task(task_id: str, request: Request, payload: dict | None = Body(default=None)):
+    """驳回高风险任务（管理端调用）。"""
+    reviewer = _require_risk_review_admin_access(request)
+    if task_id not in tasks_db:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    task = tasks_db[task_id]
+    review_payload = payload if isinstance(payload, dict) else {}
+    review_note = str(review_payload.get("note") or "").strip()
+    review_operator = str(review_payload.get("reviewer") or "").strip() or reviewer
+    now = datetime.now()
+    task.review_required = True
+    task.review_status = RISK_REVIEW_STATUS_REJECTED
+    if not task.review_requested_at:
+        task.review_requested_at = now
+    task.review_decision_at = now
+    task.review_decision_by = review_operator
+    task.review_note = review_note or "管理员审核驳回"
+    if task.status == BuildStatus.PENDING:
+        task.message = "风险审核未通过，任务已冻结"
+    task.updated_at = now
+    try:
+        persist_tasks_db(force=True)
+    except Exception:
+        pass
+    try:
+        _sync_task_risk_review_to_admin(task_id, task)
     except Exception:
         pass
     return task
@@ -2771,6 +3854,11 @@ async def start_task(task_id: str, client_id: str = None):
     
     if task.status != BuildStatus.PENDING:
         raise HTTPException(status_code=400, detail="任务状态不允许启动")
+    if not _is_task_review_approved(task):
+        review_status = str(getattr(task, "review_status", "") or "").strip().lower()
+        if review_status == RISK_REVIEW_STATUS_REJECTED:
+            raise HTTPException(status_code=403, detail="task was rejected by admin risk review")
+        raise HTTPException(status_code=403, detail="task is pending admin risk review")
 
     if env_setup.is_required():
         status = env_setup.get_status()
@@ -2797,6 +3885,7 @@ async def start_task(task_id: str, client_id: str = None):
     config_data["task_mode"] = task.mode
     if task.mode == "web" and task.web_url:
         config_data["web_url"] = task.web_url
+    config_data.update(_build_task_risk_sync_meta(task))
     task_input_dir = TASKS_DIR / task_id / "input"
     ensure_task_input_assets(task_id, task_input_dir)
     persisted_zip_path = get_persisted_task_asset_path(task_id, "project.zip")
@@ -2804,7 +3893,13 @@ async def start_task(task_id: str, client_id: str = None):
     zip_path = persisted_zip_path if persisted_zip_path.exists() else _resolve_task_asset_path(task_id, "project.zip")
     html_path = persisted_html_path if persisted_html_path.exists() else _resolve_task_asset_path(task_id, "index.html")
     icon_path = _resolve_task_asset_path(task_id, "logo.png")
-    zip_info = {"build_type": task.mode}
+    zip_info = {
+        "build_type": task.mode,
+        "risk_level": task.risk_level,
+        "review_required": bool(task.review_required),
+        "review_status": str(task.review_status or RISK_REVIEW_STATUS_NOT_REQUIRED),
+        "risk_hit_count": int(task.risk_scan.get("hit_count") or 0) if isinstance(task.risk_scan, dict) else 0,
+    }
     if zip_path.exists():
         zip_info.update({"name": zip_path.name, "size": zip_path.stat().st_size})
     report_task_start(task_id, task.client_id or '', task.updated_at.isoformat(), zip_info, config_data)
@@ -2834,6 +3929,10 @@ async def start_task(task_id: str, client_id: str = None):
         task.updated_at = datetime.now()
     try:
         persist_tasks_db(force=True)
+    except Exception:
+        pass
+    try:
+        _sync_task_risk_review_to_admin(task_id, task)
     except Exception:
         pass
 
@@ -3050,6 +4149,10 @@ async def retry_task(task_id: str, client_id: str = None):
         persist_tasks_db(force=True)
     except Exception:
         pass
+    try:
+        _sync_task_risk_review_to_admin(task_id, task)
+    except Exception:
+        pass
 
     return task
 
@@ -3204,11 +4307,53 @@ async def update_task(task_id: str, update_data: UpdateTaskRequest):
         task.cdn_localize_urls = []
         task.cdn_localize_select_all = False
         task.cdn_localize_preprocessed = False
+
+    if RISK_REVIEW_ENABLED:
+        risk_scan_zip_path = task_input_dir / "project.zip"
+        risk_scan_html_path = task_input_dir / "index.html"
+        risk_scan = _scan_task_risk_inputs(
+            client_id=client_id,
+            app_name=getattr(task.config, "app_name", ""),
+            package_name=getattr(task.config, "package_name", ""),
+            declared_use_case=getattr(task, "declared_use_case", ""),
+            web_url=getattr(task, "web_url", None),
+            zip_path=risk_scan_zip_path if risk_scan_zip_path.exists() else None,
+            html_path=risk_scan_html_path if risk_scan_html_path.exists() else None,
+        )
+        risk_level = str(risk_scan.get("risk_level") or "normal").strip().lower()
+        allowlisted_for_review = _is_risk_review_allowlisted(client_id)
+        review_required = _requires_risk_review(client_id, risk_scan)
+        task.risk_level = risk_level
+        task.risk_scan = risk_scan
+        task.review_required = review_required
+        if review_required:
+            task.review_status = RISK_REVIEW_STATUS_PENDING
+            task.review_requested_at = datetime.now()
+            task.review_decision_at = None
+            task.review_decision_by = None
+            task.review_note = None
+        elif risk_level == "high":
+            task.review_status = RISK_REVIEW_STATUS_APPROVED
+            if not task.review_requested_at:
+                task.review_requested_at = datetime.now()
+            task.review_decision_at = datetime.now()
+            task.review_decision_by = "allowlist" if allowlisted_for_review else "system"
+            task.review_note = "风险命中但已在放行名单内" if allowlisted_for_review else ""
+        else:
+            task.review_status = RISK_REVIEW_STATUS_NOT_REQUIRED
+            task.review_requested_at = None
+            task.review_decision_at = None
+            task.review_decision_by = None
+            task.review_note = None
     
     # 重置任务状态
     task.status = BuildStatus.PENDING
     task.progress = 0
-    task.message = f"版本更新至 {update_data.version_name}，等待构建"
+    task.message = (
+        "命中高风险规则，等待管理人员审核放行"
+        if bool(getattr(task, "review_required", False))
+        else f"版本更新至 {update_data.version_name}，等待构建"
+    )
     task.logs = []
     task.failure_diagnosis = create_idle_diagnosis()
     for line in cdn_localize_log_lines:
@@ -3227,6 +4372,10 @@ async def update_task(task_id: str, update_data: UpdateTaskRequest):
         pass
     try:
         persist_tasks_db(force=True)
+    except Exception:
+        pass
+    try:
+        _sync_task_risk_review_to_admin(task_id, task)
     except Exception:
         pass
 

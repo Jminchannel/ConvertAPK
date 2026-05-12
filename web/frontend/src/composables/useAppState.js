@@ -71,9 +71,9 @@ export const useAppState = () => {
     const count = Number(githubStarCount.value)
     if (!Number.isFinite(count) || count < 0) return ''
     if (count < 1000) return String(count)
-    if (count < 10000) return `${(count / 1000).toFixed(1).replace(/\\.0$/, '')}k`
+    if (count < 10000) return `${(count / 1000).toFixed(1).replace(/\.0$/, '')}k`
     if (count < 1000000) return `${Math.round(count / 1000)}k`
-    return `${(count / 1000000).toFixed(1).replace(/\\.0$/, '')}M`
+    return `${(count / 1000000).toFixed(1).replace(/\.0$/, '')}M`
   })
 
   const i18n = ref(createI18n(currentLang.value))
@@ -131,12 +131,14 @@ export const useAppState = () => {
     zip_to_desktop_enabled: false,
     rewarded_build_ads_enabled: false,
     client_login_enabled: true,
+    client_sms_login_enabled: false,
     client_register_enabled: true,
   })
   const isWebModeEnabled = computed(() => Boolean(featureFlags.value.web_link_to_apk_enabled))
   const isDesktopModeEnabled = computed(() => Boolean(featureFlags.value.zip_to_desktop_enabled))
   const isRewardedBuildAdsEnabled = computed(() => Boolean(featureFlags.value.rewarded_build_ads_enabled))
   const isClientLoginEnabled = computed(() => featureFlags.value.client_login_enabled !== false)
+  const isClientSmsLoginEnabled = computed(() => featureFlags.value.client_sms_login_enabled === true)
   const isClientRegisterEnabled = computed(() => featureFlags.value.client_register_enabled !== false)
   const isAuthEntryEnabled = computed(() => isClientLoginEnabled.value || isClientRegisterEnabled.value)
   const desktopPortMin = 1024
@@ -600,6 +602,10 @@ export const useAppState = () => {
   const donationHideChecked = ref(false)
   const donationAutoDisabled = ref(localStorage.getItem('apk_builder_donation_hide') === '1')
   const showComplianceNotice = ref(true)
+  const taskComplianceAck = ref(false)
+  const taskDeclaredUseCase = ref('')
+  const taskDeclaredUseCaseMinLength = 6
+  const taskDeclaredUseCaseMaxLength = 200
   const previousVersionName = ref('')
 
   const complianceNoticeByLang = {
@@ -795,6 +801,17 @@ export const useAppState = () => {
     if (currentLang.value === 'zh-CN') return complianceNoticeByLang['zh-CN']
     if (currentLang.value === 'zh-TW') return complianceNoticeByLang['zh-TW']
     return complianceNoticeByLang.en
+  })
+  const normalizedTaskDeclaredUseCase = computed(() => String(taskDeclaredUseCase.value || '').trim().replace(/\s+/g, ' '))
+  const taskComplianceError = computed(() => {
+    if (updatingTaskId.value) return ''
+    if (!taskComplianceAck.value) return t('config.taskComplianceAckRequired')
+    const useCaseLength = normalizedTaskDeclaredUseCase.value.length
+    if (useCaseLength < taskDeclaredUseCaseMinLength) {
+      return t('config.taskUseCaseRequired', { min: taskDeclaredUseCaseMinLength })
+    }
+    if (useCaseLength > taskDeclaredUseCaseMaxLength) return t('config.taskUseCaseTooLong', { max: taskDeclaredUseCaseMaxLength })
+    return ''
   })
 
   // Logs
@@ -1063,28 +1080,57 @@ export const useAppState = () => {
     }
     showToast(fallback, 'error')
   }
+  const resolveCreateTaskErrorMessage = (error) => {
+    const detail = String(error?.response?.data?.detail || error?.message || '').trim().toLowerCase()
+    if (!detail) return ''
+    if (detail.includes('compliance confirmation is required')) return t('config.taskComplianceAckRequired')
+    if (detail.includes('declared use case is required')) {
+      return t('config.taskUseCaseRequired', { min: taskDeclaredUseCaseMinLength })
+    }
+    if (detail.includes('declared use case is too long')) return t('config.taskUseCaseTooLong', { max: taskDeclaredUseCaseMaxLength })
+    if (detail.includes('task blocked by policy')) return t('config.marketplaceBlocked')
+    if (detail.includes('task is pending admin risk review')) return t('toast.riskReviewPending')
+    if (detail.includes('task was rejected by admin risk review')) return t('toast.riskReviewRejected')
+    return ''
+  }
+
+  const resolveStartTaskErrorMessage = (error) => {
+    const detail = String(error?.response?.data?.detail || error?.message || '').trim().toLowerCase()
+    if (!detail) return ''
+    if (detail.includes('task is pending admin risk review')) return t('toast.riskReviewPending')
+    if (detail.includes('task was rejected by admin risk review')) return t('toast.riskReviewRejected')
+    return ''
+  }
 
   const showAuthModal = ref(false)
   const authMode = ref('login')
+  const authLoginMethod = ref('password')
   const authSubmitting = ref(false)
   const githubAuthSubmitting = ref(false)
+  const authSmsSending = ref(false)
+  const authSmsCountdown = ref(0)
   const authSubmitButtonShake = ref(false)
   const authError = ref('')
   const authForm = ref({
     email: '',
+    phone: '',
+    code: '',
     password: '',
     confirmPassword: ''
   })
   const authUser = ref(null)
   const authEmailPattern = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/
+  const authSmsCodePattern = /^\d{6}$/
   let authShakeTimer = null
+  let authSmsCountdownTimer = null
 
   const isLoggedIn = computed(() => Boolean(api.getAuthToken() && authUser.value?.id))
   const authDisplayName = computed(() => {
     const user = authUser.value || {}
     const githubLogin = String(user.github_login || '').trim()
     const email = String(user.email || '').trim()
-    return githubLogin || email || ''
+    const phone = String(user.phone || '').trim()
+    return githubLogin || email || phone || ''
   })
 
   const extractAuthErrorDetail = (errorLike) => {
@@ -1098,11 +1144,20 @@ export const useAppState = () => {
     if (detail.includes('login is disabled by admin')) return t('auth.loginDisabled')
     if (detail.includes('register is disabled by admin')) return t('auth.registerDisabled')
     if (detail.includes('login_disabled')) return t('auth.loginDisabled')
+    if (detail.includes('sms login is disabled by admin')) return t('auth.smsLoginDisabled')
     if (detail.includes('email format')) return t('auth.errorEmailFormat')
+    if (detail.includes('phone format')) return t('auth.errorPhoneFormat')
     if (detail.includes('password must be at least')) return t('auth.errorPasswordLength')
+    if (detail.includes('sms code format')) return t('auth.errorSmsCodeFormat')
     if (detail.includes('password mismatch')) return t('auth.errorPasswordConfirm')
     if (detail.includes('email already exists')) return t('auth.errorEmailExists')
     if (detail.includes('email or password is incorrect')) return t('auth.errorCredential')
+    if (detail.includes('sms code is incorrect')) return t('auth.errorSmsIncorrect')
+    if (detail.includes('sms code has expired')) return t('auth.errorSmsExpired')
+    if (detail.includes('sms code attempts exceeded')) return t('auth.errorSmsAttemptsExceeded')
+    if (detail.includes('sms send too frequently')) return t('auth.errorSmsTooFrequent')
+    if (detail.includes('sms send daily limit reached')) return t('auth.errorSmsDailyLimit')
+    if (detail.includes('sms send rate limited')) return t('auth.errorSmsTooFrequent')
     if (detail.includes('client_id has been bound')) return t('auth.errorClientBound')
     if (detail.includes('github oauth is not configured')) return t('auth.githubUnavailable')
     if (detail.includes('invalid_state')) return t('auth.githubStateInvalid')
@@ -1133,10 +1188,51 @@ export const useAppState = () => {
     triggerAuthSubmitShake()
   }
 
-  const resetAuthForm = (keepEmail = false) => {
+  const stopAuthSmsCountdown = () => {
+    if (authSmsCountdownTimer) {
+      clearInterval(authSmsCountdownTimer)
+      authSmsCountdownTimer = null
+    }
+    authSmsCountdown.value = 0
+  }
+
+  const startAuthSmsCountdown = (seconds = 60) => {
+    const normalizedSeconds = Math.max(1, Math.round(Number(seconds) || 60))
+    stopAuthSmsCountdown()
+    authSmsCountdown.value = normalizedSeconds
+    authSmsCountdownTimer = setInterval(() => {
+      authSmsCountdown.value = Math.max(0, authSmsCountdown.value - 1)
+      if (authSmsCountdown.value <= 0) {
+        stopAuthSmsCountdown()
+      }
+    }, 1000)
+  }
+
+  const normalizeAuthPhone = (value) => {
+    const raw = String(value || '').trim()
+    if (!raw) return ''
+    const compact = raw.replace(/[\s()\-]/g, '')
+    if (compact.startsWith('+')) {
+      const digits = compact.slice(1).replace(/\D/g, '')
+      return digits ? `+${digits}` : ''
+    }
+    const digits = compact.replace(/\D/g, '')
+    if (digits.length === 11 && digits.startsWith('1')) {
+      return `+86${digits}`
+    }
+    if (digits.length >= 8 && digits.length <= 15) {
+      return `+${digits}`
+    }
+    return ''
+  }
+
+  const resetAuthForm = (keepEmail = false, keepPhone = false) => {
     const nextEmail = keepEmail ? String(authForm.value.email || '').trim() : ''
+    const nextPhone = keepPhone ? String(authForm.value.phone || '').trim() : ''
     authForm.value = {
       email: nextEmail,
+      phone: nextPhone,
+      code: '',
       password: '',
       confirmPassword: ''
     }
@@ -1169,6 +1265,11 @@ export const useAppState = () => {
     authSubmitButtonShake.value = false
     if (authMode.value === 'login') {
       authForm.value.confirmPassword = ''
+      if (authLoginMethod.value === 'sms' && !isClientSmsLoginEnabled.value) {
+        authLoginMethod.value = 'password'
+      }
+    } else {
+      authLoginMethod.value = 'password'
     }
     showAuthModal.value = true
   }
@@ -1179,7 +1280,9 @@ export const useAppState = () => {
     authSubmitButtonShake.value = false
     authSubmitting.value = false
     githubAuthSubmitting.value = false
-    resetAuthForm(true)
+    authSmsSending.value = false
+    stopAuthSmsCountdown()
+    resetAuthForm(true, true)
   }
 
   const switchAuthMode = (mode = 'login') => {
@@ -1198,7 +1301,38 @@ export const useAppState = () => {
     authSubmitButtonShake.value = false
     if (authMode.value === 'login') {
       authForm.value.confirmPassword = ''
+      if (authLoginMethod.value === 'sms' && !isClientSmsLoginEnabled.value) {
+        authLoginMethod.value = 'password'
+      }
+    } else {
+      authLoginMethod.value = 'password'
+      authSmsSending.value = false
+      stopAuthSmsCountdown()
     }
+  }
+
+  const switchAuthLoginMethod = (method = 'password') => {
+    if (authSubmitting.value || githubAuthSubmitting.value || authSmsSending.value) return
+    if (method === 'sms') {
+      if (!isClientSmsLoginEnabled.value) {
+        applyAuthError('sms login is disabled by admin')
+        return
+      }
+      authLoginMethod.value = 'sms'
+      authForm.value.email = ''
+      authForm.value.password = ''
+      authForm.value.confirmPassword = ''
+      authError.value = ''
+      authSubmitButtonShake.value = false
+      return
+    }
+    authLoginMethod.value = 'password'
+    authForm.value.phone = ''
+    authForm.value.code = ''
+    authError.value = ''
+    authSubmitButtonShake.value = false
+    authSmsSending.value = false
+    stopAuthSmsCountdown()
   }
 
   const validateAuthForm = () => {
@@ -1210,6 +1344,24 @@ export const useAppState = () => {
       applyAuthError('register is disabled by admin')
       return null
     }
+    if (authMode.value === 'login' && authLoginMethod.value === 'sms') {
+      if (!isClientSmsLoginEnabled.value) {
+        applyAuthError('sms login is disabled by admin')
+        return null
+      }
+      const phone = normalizeAuthPhone(authForm.value.phone)
+      const code = String(authForm.value.code || '').trim()
+      if (!phone) {
+        applyAuthError('phone format is invalid')
+        return null
+      }
+      if (!authSmsCodePattern.test(code)) {
+        applyAuthError('sms code format is invalid')
+        return null
+      }
+      return { loginType: 'sms', phone, code }
+    }
+
     const email = String(authForm.value.email || '').trim().toLowerCase()
     const password = String(authForm.value.password || '')
     const confirmPassword = String(authForm.value.confirmPassword || '')
@@ -1225,7 +1377,7 @@ export const useAppState = () => {
       applyAuthError('password mismatch')
       return null
     }
-    return { email, password }
+    return { loginType: 'password', email, password }
   }
 
   const syncAuthUser = async ({ silent = false } = {}) => {
@@ -1256,6 +1408,36 @@ export const useAppState = () => {
     }
   }
 
+  const sendAuthSmsCode = async () => {
+    if (authMode.value !== 'login' || authLoginMethod.value !== 'sms') return
+    if (!isClientSmsLoginEnabled.value) {
+      applyAuthError('sms login is disabled by admin')
+      return
+    }
+    if (authSmsSending.value || authSmsCountdown.value > 0) return
+    const phone = normalizeAuthPhone(authForm.value.phone)
+    if (!phone) {
+      applyAuthError('phone format is invalid')
+      return
+    }
+    authForm.value.phone = phone
+    authSmsSending.value = true
+    authError.value = ''
+    try {
+      const result = await api.sendSmsLoginCode({
+        phone,
+        clientId: api.getClientId()
+      })
+      const resendAfter = Math.max(1, Number(result?.resend_after || 60))
+      startAuthSmsCountdown(resendAfter)
+      showToast(t('auth.sendSmsCodeSuccess'), 'success')
+    } catch (error) {
+      applyAuthError(error)
+    } finally {
+      authSmsSending.value = false
+    }
+  }
+
   const submitAuthForm = async () => {
     if (authSubmitting.value || githubAuthSubmitting.value) return
     const normalized = validateAuthForm()
@@ -1263,17 +1445,32 @@ export const useAppState = () => {
     authSubmitting.value = true
     authError.value = ''
     try {
-      const payload = {
-        email: normalized.email,
-        password: normalized.password,
-        clientId: api.getClientId()
-      }
+      const clientId = api.getClientId()
       const result = authMode.value === 'register'
-        ? await api.registerAccount(payload)
-        : await api.loginAccount(payload)
+        ? await api.registerAccount({
+          email: normalized.email,
+          password: normalized.password,
+          clientId
+        })
+        : (normalized.loginType === 'sms'
+          ? await api.loginBySmsCode({
+            phone: normalized.phone,
+            code: normalized.code,
+            clientId
+          })
+          : await api.loginAccount({
+            email: normalized.email,
+            password: normalized.password,
+            clientId
+          }))
       authUser.value = result?.user || null
       closeAuthModal()
-      showToast(authMode.value === 'register' ? t('auth.registerSuccess') : t('auth.loginSuccess'), 'success')
+      showToast(
+        authMode.value === 'register'
+          ? t('auth.registerSuccess')
+          : (normalized.loginType === 'sms' ? t('auth.smsLoginSuccess') : t('auth.loginSuccess')),
+        'success'
+      )
       await refreshTasks()
     } catch (error) {
       applyAuthError(error)
@@ -1305,7 +1502,7 @@ export const useAppState = () => {
   }
 
   const startGithubAuth = async () => {
-    if (authSubmitting.value || githubAuthSubmitting.value) return
+    if (authSubmitting.value || githubAuthSubmitting.value || authSmsSending.value) return
     if (!isClientLoginEnabled.value) {
       applyAuthError('login is disabled by admin')
       return
@@ -1435,6 +1632,10 @@ export const useAppState = () => {
       return false
     }
     const shouldCheckKeystore = !isKeystoreUploaded.value
+    const requireTaskCompliance = !updatingTaskId.value
+    const complianceReady = requireTaskCompliance
+      ? taskComplianceAck.value && !taskComplianceError.value
+      : true
     const hasIcon = quickGenerate.value && (mode.value === 'convert' || mode.value === 'web' || mode.value === 'html') && !updatingTaskId.value
       ? true
       : (appIcon.value || uploadedIcon.value)
@@ -1445,6 +1646,7 @@ export const useAppState = () => {
       !desktopPortError.value &&
       !keystoreUpgradeVersionError.value &&
       (!shouldCheckKeystore || (!keystorePasswordError.value && !keyPasswordError.value)) &&
+      complianceReady &&
       hasIcon
 
     if (mode.value === 'convert' || mode.value === 'desktop') {
@@ -2673,7 +2875,12 @@ export const useAppState = () => {
       await refreshTasks()
       startPolling()
     } catch (error) {
-      showErrorToast('toast.startFailed', error)
+      const mappedMessage = resolveStartTaskErrorMessage(error)
+      if (mappedMessage) {
+        showToast(mappedMessage, 'error')
+      } else {
+        showErrorToast('toast.startFailed', error)
+      }
     }
   }
 
@@ -2902,6 +3109,16 @@ export const useAppState = () => {
       showToast(keystoreUpgradeVersionError.value, 'error')
       return
     }
+    if (!updatingTaskId.value) {
+      if (!taskComplianceAck.value) {
+        showToast(t('config.taskComplianceAckRequired'), 'error')
+        return
+      }
+      if (taskComplianceError.value) {
+        showToast(taskComplianceError.value, 'error')
+        return
+      }
+    }
     if (!canCreateTask.value) return
     if (mode.value === 'web' && !isWebModeEnabled.value) {
       showToast('Web（链接）转 APK 模式已关闭', 'error')
@@ -2985,6 +3202,8 @@ export const useAppState = () => {
         const taskData = {
           quick_generate: isQuickGenerate,
           mode: mode.value,
+          compliance_ack: Boolean(taskComplianceAck.value),
+          declared_use_case: normalizedTaskDeclaredUseCase.value,
           web_url: mode.value === 'web' ? normalizedWebUrl : null,
           ad_config: mode.value === 'web' && enableAds.value ? adConfig.value : null,
           filename: (mode.value === 'convert' || mode.value === 'desktop') ? uploadedFile.value.filename : null,
@@ -3018,17 +3237,30 @@ export const useAppState = () => {
         const created = await api.createTask(taskData)
         currentStep.value = 3
         showToast(t('toast.taskCreated'), 'success')
-        const canStartBuild = await requestRewardAdBeforeBuild()
-        if (canStartBuild) {
-          await startTaskDirectly(created.id, { notify: false })
-        } else {
+        const reviewRequired = Boolean(created?.review_required)
+        const reviewStatus = String(created?.review_status || '').trim().toLowerCase()
+        const requiresManualReview = reviewRequired && reviewStatus !== 'approved'
+        if (requiresManualReview) {
+          showToast(t('toast.riskReviewPending'), 'error')
           await refreshTasks()
+        } else {
+          const canStartBuild = await requestRewardAdBeforeBuild()
+          if (canStartBuild) {
+            await startTaskDirectly(created.id, { notify: false })
+          } else {
+            await refreshTasks()
+          }
         }
       }
       resetForm({ preserveQuickGenerate: isQuickGenerate })
       await refreshTasks()
     } catch (error) {
-      showErrorToast('toast.operationFailed', error)
+      const mappedMessage = resolveCreateTaskErrorMessage(error)
+      if (mappedMessage) {
+        showToast(mappedMessage, 'error')
+      } else {
+        showErrorToast('toast.operationFailed', error)
+      }
     } finally {
       isCreating.value = false
     }
@@ -3071,6 +3303,8 @@ export const useAppState = () => {
       quickGenerate.value = false
       quickGenerateStash.value = null
     }
+    taskComplianceAck.value = false
+    taskDeclaredUseCase.value = ''
     previousVersionName.value = ''
     config.value = {
       app_name: '',
@@ -3200,6 +3434,7 @@ export const useAppState = () => {
         zip_to_desktop_enabled: Boolean(result?.zip_to_desktop_enabled),
         rewarded_build_ads_enabled: Boolean(result?.rewarded_build_ads_enabled),
         client_login_enabled: result?.client_login_enabled === undefined ? true : Boolean(result?.client_login_enabled),
+        client_sms_login_enabled: result?.client_sms_login_enabled === true,
         client_register_enabled: result?.client_register_enabled === undefined ? true : Boolean(result?.client_register_enabled),
       }
     } catch {
@@ -3208,6 +3443,7 @@ export const useAppState = () => {
         zip_to_desktop_enabled: false,
         rewarded_build_ads_enabled: false,
         client_login_enabled: true,
+        client_sms_login_enabled: false,
         client_register_enabled: true,
       }
     }
@@ -3228,6 +3464,11 @@ export const useAppState = () => {
     }
     if (authMode.value === 'login' && !isClientLoginEnabled.value && isClientRegisterEnabled.value) {
       authMode.value = 'register'
+    }
+    if (authMode.value === 'login' && authLoginMethod.value === 'sms' && !isClientSmsLoginEnabled.value) {
+      authLoginMethod.value = 'password'
+      authSmsSending.value = false
+      stopAuthSmsCountdown()
     }
   }
   const fetchAnnouncements = async () => {
@@ -3478,6 +3719,7 @@ export const useAppState = () => {
       clearTimeout(authShakeTimer)
       authShakeTimer = null
     }
+    stopAuthSmsCountdown()
     mobileSwipeTracking.value = false
     mobileSwipeDragging.value = false
     mobileSwipeOffsetX.value = 0
@@ -3522,8 +3764,11 @@ export const useAppState = () => {
     handleClickOutside,
     showAuthModal,
     authMode,
+    authLoginMethod,
     authSubmitting,
     githubAuthSubmitting,
+    authSmsSending,
+    authSmsCountdown,
     authSubmitButtonShake,
     authError,
     authForm,
@@ -3531,11 +3776,14 @@ export const useAppState = () => {
     authDisplayName,
     isAuthEntryEnabled,
     isClientLoginEnabled,
+    isClientSmsLoginEnabled,
     isClientRegisterEnabled,
     openAuthModal,
     closeAuthModal,
     switchAuthMode,
+    switchAuthLoginMethod,
     submitAuthForm,
+    sendAuthSmsCode,
     startGithubAuth,
     logoutCurrentUser,
     mode,
@@ -3642,6 +3890,12 @@ export const useAppState = () => {
     donationHideChecked,
     donationAutoDisabled,
     showComplianceNotice,
+    taskComplianceAck,
+    taskDeclaredUseCase,
+    taskDeclaredUseCaseMinLength,
+    taskDeclaredUseCaseMaxLength,
+    normalizedTaskDeclaredUseCase,
+    taskComplianceError,
     complianceNotice,
     previousVersionName,
     showLogs,

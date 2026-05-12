@@ -219,6 +219,8 @@ class BuildTask(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
     client_id: str = ""  # 客户端ID，用于隔离不同设备/浏览器
+    compliance_ack: bool = False
+    declared_use_case: str = ""
     quick_generate: bool = False
     mode: str = "convert"
     web_url: Optional[str] = None
@@ -242,11 +244,21 @@ class BuildTask(BaseModel):
     cdn_localize_select_all: bool = False
     cdn_localize_preprocessed: bool = False
     reuse_keystore_from: Optional[str] = None  # 复用某个任务的签名密钥
+    risk_level: str = "normal"
+    risk_scan: Dict[str, Any] = Field(default_factory=dict)
+    review_required: bool = False
+    review_status: str = "not_required"
+    review_requested_at: Optional[datetime] = None
+    review_decision_at: Optional[datetime] = None
+    review_decision_by: Optional[str] = None
+    review_note: Optional[str] = None
 
 
 class BuildTaskCreate(BaseModel):
     """创建构建任务的请求"""
     client_id: str  # 客户端ID
+    compliance_ack: bool = False
+    declared_use_case: Optional[str] = None
     quick_generate: bool = False
     mode: str = "convert"
     web_url: Optional[str] = None
@@ -266,6 +278,8 @@ class BuildTaskResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
     client_id: str = ""
+    compliance_ack: bool = False
+    declared_use_case: str = ""
     quick_generate: bool = False
     mode: str = "convert"
     web_url: Optional[str] = None
@@ -289,13 +303,23 @@ class BuildTaskResponse(BaseModel):
     cdn_localize_urls: List[str] = []
     cdn_localize_select_all: bool = False
     cdn_localize_preprocessed: bool = False
+    risk_level: str = "normal"
+    risk_scan: Dict[str, Any] = Field(default_factory=dict)
+    review_required: bool = False
+    review_status: str = "not_required"
+    review_requested_at: Optional[datetime] = None
+    review_decision_at: Optional[datetime] = None
+    review_decision_by: Optional[str] = None
+    review_note: Optional[str] = None
 
 
 class BuildTaskListItemResponse(BaseModel):
-    """鏋勫缓浠诲姟鍒楄〃椤?"""
+    """构建任务列表项响应"""
     model_config = ConfigDict(from_attributes=True)
     id: str
     client_id: str = ""
+    compliance_ack: bool = False
+    declared_use_case: str = ""
     quick_generate: bool = False
     mode: str = "convert"
     web_url: Optional[str] = None
@@ -318,6 +342,14 @@ class BuildTaskListItemResponse(BaseModel):
     cdn_localize_urls: List[str] = []
     cdn_localize_select_all: bool = False
     cdn_localize_preprocessed: bool = False
+    risk_level: str = "normal"
+    risk_scan: Dict[str, Any] = Field(default_factory=dict)
+    review_required: bool = False
+    review_status: str = "not_required"
+    review_requested_at: Optional[datetime] = None
+    review_decision_at: Optional[datetime] = None
+    review_decision_by: Optional[str] = None
+    review_note: Optional[str] = None
 
 
 class UpdateTaskRequest(BaseModel):
@@ -361,10 +393,24 @@ class AuthLoginRequest(BaseModel):
     client_id: str
 
 
+class AuthSmsSendRequest(BaseModel):
+    """短信验证码发送请求"""
+    phone: str
+    client_id: str
+
+
+class AuthSmsLoginRequest(BaseModel):
+    """短信验证码登录请求"""
+    phone: str
+    code: str
+    client_id: str
+
+
 class AuthUserProfile(BaseModel):
     """用户资料"""
     id: str
-    email: str
+    email: Optional[str] = None
+    phone: Optional[str] = None
     auth_provider: str = "local"
     github_id: Optional[str] = None
     github_login: Optional[str] = None

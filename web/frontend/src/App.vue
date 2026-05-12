@@ -904,6 +904,29 @@
 
               </template>
 
+              <div v-if="!updatingTaskId" class="task-compliance-panel">
+                <div class="task-compliance-title">{{ t('config.taskComplianceTitle') }}</div>
+                <label class="settings-checkbox task-compliance-ack">
+                  <input type="checkbox" v-model="taskComplianceAck" />
+                  {{ t('config.taskComplianceAckLabel') }}
+                </label>
+                <div class="form-group" style="margin-bottom: 0;">
+                  <label class="form-label">{{ t('config.taskUseCaseLabel') }}</label>
+                  <input
+                    v-model.trim="taskDeclaredUseCase"
+                    type="text"
+                    class="form-input"
+                    :class="{ 'input-error': taskComplianceError }"
+                    :maxlength="taskDeclaredUseCaseMaxLength"
+                    :placeholder="t('config.taskUseCasePlaceholder')"
+                  />
+                  <div class="task-compliance-counter">
+                    {{ normalizedTaskDeclaredUseCase.length }} / {{ taskDeclaredUseCaseMaxLength }}
+                  </div>
+                  <div v-if="taskComplianceError" class="form-error">{{ taskComplianceError }}</div>
+                </div>
+              </div>
+
               <button
                 class="btn btn-primary btn-lg"
                 style="width: 100%; margin-top: 8px;"
@@ -1560,43 +1583,104 @@
           </div>
 
           <div class="auth-dialog-body">
-            <div class="form-group">
-              <label class="form-label">{{ t('auth.email') }}</label>
-              <input
-                v-model.trim="authForm.email"
-                type="email"
-                class="form-input auth-input"
-                :placeholder="t('auth.emailPlaceholder')"
-                autocomplete="username"
-                @keyup.enter="submitAuthForm"
-              />
+            <div v-if="authMode === 'login' && isClientSmsLoginEnabled" class="auth-login-methods">
+              <button
+                class="auth-method-btn"
+                :class="{ active: authLoginMethod === 'password' }"
+                @click="switchAuthLoginMethod('password')"
+              >
+                {{ t('auth.loginMethodPassword') }}
+              </button>
+              <button
+                class="auth-method-btn"
+                :class="{ active: authLoginMethod === 'sms' }"
+                @click="switchAuthLoginMethod('sms')"
+              >
+                {{ t('auth.loginMethodSms') }}
+              </button>
             </div>
-            <div class="form-group">
-              <label class="form-label">{{ t('auth.password') }}</label>
-              <input
-                v-model="authForm.password"
-                type="password"
-                class="form-input auth-input"
-                :placeholder="t('auth.passwordPlaceholder')"
-                autocomplete="current-password"
-                @keyup.enter="submitAuthForm"
-              />
-            </div>
-            <div v-if="authMode === 'register'" class="form-group">
-              <label class="form-label">{{ t('auth.confirmPassword') }}</label>
-              <input
-                v-model="authForm.confirmPassword"
-                type="password"
-                class="form-input auth-input"
-                :placeholder="t('auth.confirmPasswordPlaceholder')"
-                autocomplete="new-password"
-                @keyup.enter="submitAuthForm"
-              />
-            </div>
+
+            <template v-if="authMode === 'login' && authLoginMethod === 'sms'">
+              <div class="form-group">
+                <label class="form-label">{{ t('auth.phone') }}</label>
+                <input
+                  v-model.trim="authForm.phone"
+                  type="tel"
+                  class="form-input auth-input"
+                  :placeholder="t('auth.phonePlaceholder')"
+                  autocomplete="tel"
+                  @keyup.enter="submitAuthForm"
+                />
+              </div>
+              <div class="form-group">
+                <label class="form-label">{{ t('auth.smsCode') }}</label>
+                <div class="auth-sms-row">
+                  <input
+                    v-model.trim="authForm.code"
+                    type="text"
+                    class="form-input auth-input"
+                    :placeholder="t('auth.smsCodePlaceholder')"
+                    inputmode="numeric"
+                    maxlength="6"
+                    autocomplete="one-time-code"
+                    @keyup.enter="submitAuthForm"
+                  />
+                  <button
+                    class="btn btn-secondary btn-sm auth-sms-btn"
+                    :disabled="authSmsSending || authSubmitting || authSmsCountdown > 0"
+                    @click="sendAuthSmsCode"
+                  >
+                    {{
+                      authSmsSending
+                        ? t('auth.submitting')
+                        : (authSmsCountdown > 0
+                          ? t('auth.sendSmsCodeRetry', { seconds: authSmsCountdown })
+                          : t('auth.sendSmsCode'))
+                    }}
+                  </button>
+                </div>
+              </div>
+            </template>
+
+            <template v-else>
+              <div class="form-group">
+                <label class="form-label">{{ t('auth.email') }}</label>
+                <input
+                  v-model.trim="authForm.email"
+                  type="email"
+                  class="form-input auth-input"
+                  :placeholder="t('auth.emailPlaceholder')"
+                  autocomplete="username"
+                  @keyup.enter="submitAuthForm"
+                />
+              </div>
+              <div class="form-group">
+                <label class="form-label">{{ t('auth.password') }}</label>
+                <input
+                  v-model="authForm.password"
+                  type="password"
+                  class="form-input auth-input"
+                  :placeholder="t('auth.passwordPlaceholder')"
+                  autocomplete="current-password"
+                  @keyup.enter="submitAuthForm"
+                />
+              </div>
+              <div v-if="authMode === 'register'" class="form-group">
+                <label class="form-label">{{ t('auth.confirmPassword') }}</label>
+                <input
+                  v-model="authForm.confirmPassword"
+                  type="password"
+                  class="form-input auth-input"
+                  :placeholder="t('auth.confirmPasswordPlaceholder')"
+                  autocomplete="new-password"
+                  @keyup.enter="submitAuthForm"
+                />
+              </div>
+            </template>
             <div v-if="authError" class="form-error auth-error">{{ authError }}</div>
           </div>
 
-          <div v-if="isClientLoginEnabled" class="auth-oauth-wrap">
+          <div v-if="isClientLoginEnabled && authMode === 'login' && authLoginMethod === 'password'" class="auth-oauth-wrap">
             <div class="auth-oauth-divider">
               <span>{{ t('auth.orDivider') }}</span>
             </div>
@@ -1617,13 +1701,13 @@
             <button
               class="btn btn-primary btn-sm auth-submit-btn"
               :class="{ 'auth-submit-shake': authSubmitButtonShake }"
-              :disabled="authSubmitting || githubAuthSubmitting || (authMode === 'login' ? !isClientLoginEnabled : !isClientRegisterEnabled)"
+              :disabled="authSubmitting || githubAuthSubmitting || authSmsSending || (authMode === 'login' ? (!isClientLoginEnabled || (authLoginMethod === 'sms' && !isClientSmsLoginEnabled)) : !isClientRegisterEnabled)"
               @click="submitAuthForm"
             >
               {{
                 authSubmitting
                   ? t('auth.submitting')
-                  : (authMode === 'register' ? t('auth.registerSubmit') : t('auth.loginSubmit'))
+                  : (authMode === 'register' ? t('auth.registerSubmit') : (authLoginMethod === 'sms' ? t('auth.smsLoginSubmit') : t('auth.loginSubmit')))
               }}
             </button>
           </div>
@@ -2217,6 +2301,32 @@ html:not(.light-theme) .mode-tab::after {
   animation: slideDown 0.3s ease;
 }
 
+.task-compliance-panel {
+  margin: 14px 0 10px;
+  padding: 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  background: rgba(0, 0, 0, 0.16);
+}
+
+.task-compliance-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-main);
+  margin-bottom: 10px;
+}
+
+.task-compliance-ack {
+  margin-bottom: 10px;
+}
+
+.task-compliance-counter {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: right;
+}
+
 .code-preview {
   margin-top: 16px;
   background: #0d0d0d;
@@ -2765,12 +2875,47 @@ html:not(.light-theme) .auth-user-chip {
   background: var(--primary-gradient);
 }
 
+.auth-login-methods {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.auth-method-btn {
+  height: 34px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: rgba(148, 163, 184, 0.08);
+  color: var(--text-sub);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.auth-method-btn.active {
+  color: #fff;
+  border-color: transparent;
+  background: var(--primary-gradient);
+}
+
 .auth-dialog-body {
   padding: 0 20px 8px;
 }
 
 .auth-input {
   height: 42px;
+}
+
+.auth-sms-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.auth-sms-btn {
+  min-width: 120px;
 }
 
 .auth-error {

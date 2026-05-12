@@ -83,6 +83,30 @@ export const loginAccount = async ({ email, password, clientId } = {}) => {
   return response.data
 }
 
+// 发送短信验证码
+export const sendSmsLoginCode = async ({ phone, clientId } = {}) => {
+  const payload = {
+    phone: String(phone || '').trim(),
+    client_id: clientId || getClientId()
+  }
+  const response = await api.post('/auth/sms/send-code', payload)
+  return response.data
+}
+
+// 短信验证码登录，成功后自动保存登录令牌
+export const loginBySmsCode = async ({ phone, code, clientId } = {}) => {
+  const payload = {
+    phone: String(phone || '').trim(),
+    code: String(code || '').trim(),
+    client_id: clientId || getClientId()
+  }
+  const response = await api.post('/auth/sms/login', payload)
+  if (response?.data?.token) {
+    setAuthToken(response.data.token)
+  }
+  return response.data
+}
+
 // 获取当前登录用户信息
 export const getAuthMe = async (clientId) => {
   const response = await api.get('/auth/me', {
