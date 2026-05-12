@@ -15,17 +15,18 @@ import zipfile
 from datetime import datetime, timedelta
 from pathlib import Path, PurePosixPath
 from typing import Callable, Optional, List, Tuple
+from redis import Redis
+from redis.exceptions import RedisError
 
 from local_builder import run_local_build
 import env_setup
-from admin_client import report_task_logs, upload_task_assets, report_task_status, flush_task_assets_queue
+from admin_client import report_task_logs, upload_task_assets, report_task_status, flush_task_assets_queue, fetch_feature_flags
 from build_failure_diagnosis import (
-    OPENROUTER_DIAG_ENABLED,
-    OPENROUTER_MODEL,
     create_failed_diagnosis,
     create_idle_diagnosis,
     create_running_diagnosis,
     diagnose_build_failure,
+    resolve_openrouter_diag_runtime_config,
 )
 
 # 项目根目录
@@ -121,6 +122,228 @@ TASK_INPUT_ASSETS_DIR = DATA_DIR / "task-inputs"
 GRADLE_WRAPPER_CACHE = DATA_DIR / "gradle-wrapper-cache"  # 全局 Gradle wrapper 缓存
 NPM_CACHE_DIR = DATA_DIR / "npm-cache"
 AUTO_CLEAN_BUILD_OUTPUTS = os.getenv("APK_BUILDER_AUTO_CLEAN_OUTPUTS", "").strip().lower() in {"1", "true", "yes", "on"}
+AI_PROVIDER_DEFAULT = "openrouter"
+AI_API_URL_DEFAULT = "https://openrouter.ai/api/v1/chat/completions"
+AI_MODEL_DEFAULT = "qwen/qwen3.5-flash-02-23"
+AI_TIMEOUT_SECONDS_DEFAULT = 18
+AI_TIMEOUT_SECONDS_MIN = 8
+AI_TIMEOUT_SECONDS_MAX = 120
+TASK_AI_STATE_REDIS_URL = str(
+    os.getenv("TASK_AI_STATE_REDIS_URL")
+    or os.getenv("AUTH_SMS_REDIS_URL")
+    or ""
+).strip()
+TASK_AI_STATE_REDIS_PREFIX = str(
+    os.getenv("TASK_AI_STATE_REDIS_PREFIX")
+    or "convertapk:task:ai:"
+).strip() or "convertapk:task:ai:"
+try:
+    TASK_AI_DIAG_COOLDOWN_SECONDS = max(
+        int(os.getenv("TASK_AI_DIAG_COOLDOWN_SECONDS", "600") or "600"),
+        60,
+    )
+except ValueError:
+    TASK_AI_DIAG_COOLDOWN_SECONDS = 600
+TASK_AI_STATE_REDIS_LOCK = threading.Lock()
+TASK_AI_STATE_REDIS_CLIENT: Optional[Redis] = None
+TASK_AI_DIAG_COOLDOWN_FALLBACK_LOCK = threading.Lock()
+TASK_AI_DIAG_COOLDOWN_FALLBACK: dict[str, float] = {}
+
+
+def _to_runtime_bool(value, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
+def _normalize_ai_timeout_seconds(value) -> int:
+    try:
+        timeout_seconds = int(value)
+    except Exception:
+        return AI_TIMEOUT_SECONDS_DEFAULT
+    if timeout_seconds < AI_TIMEOUT_SECONDS_MIN:
+        return AI_TIMEOUT_SECONDS_MIN
+    if timeout_seconds > AI_TIMEOUT_SECONDS_MAX:
+        return AI_TIMEOUT_SECONDS_MAX
+    return timeout_seconds
+
+
+def _normalize_ai_api_url(value: str | None) -> str:
+    api_url = str(value or "").strip()
+    if not api_url:
+        return AI_API_URL_DEFAULT
+    normalized = api_url.rstrip("/")
+    if normalized.lower() == "https://openrouter.ai/api/v1":
+        return f"{normalized}/chat/completions"
+    return api_url
+
+
+def _task_ai_state_redis_key(suffix: str) -> str:
+    return f"{TASK_AI_STATE_REDIS_PREFIX}{suffix}"
+
+
+def _normalize_client_state_key(client_id: str | None) -> str:
+    normalized = str(client_id or "").strip().lower()
+    return normalized
+
+
+def _get_task_ai_state_redis_client() -> Optional[Redis]:
+    global TASK_AI_STATE_REDIS_CLIENT
+    if not TASK_AI_STATE_REDIS_URL:
+        return None
+    if TASK_AI_STATE_REDIS_CLIENT is not None:
+        return TASK_AI_STATE_REDIS_CLIENT
+    with TASK_AI_STATE_REDIS_LOCK:
+        if TASK_AI_STATE_REDIS_CLIENT is not None:
+            return TASK_AI_STATE_REDIS_CLIENT
+        try:
+            client = Redis.from_url(
+                TASK_AI_STATE_REDIS_URL,
+                decode_responses=True,
+                socket_connect_timeout=2,
+                socket_timeout=2,
+                health_check_interval=30,
+            )
+            client.ping()
+        except Exception:
+            return None
+        TASK_AI_STATE_REDIS_CLIENT = client
+        return client
+
+
+def _set_client_ai_diag_cooldown(
+    client_id: str | None,
+    ttl_seconds: int | None = None,
+    task_id: str | None = None,
+    source: str = "ai",
+) -> None:
+    normalized_key = _normalize_client_state_key(client_id)
+    if not normalized_key:
+        return
+    ttl = max(int(ttl_seconds or TASK_AI_DIAG_COOLDOWN_SECONDS), 60)
+    payload = {
+        "client_id": normalized_key,
+        "task_id": str(task_id or "").strip(),
+        "source": str(source or "ai").strip() or "ai",
+        "set_at": datetime.now().isoformat(),
+    }
+    redis_client = _get_task_ai_state_redis_client()
+    if redis_client is not None:
+        redis_key = _task_ai_state_redis_key(f"diag-cooldown:{normalized_key}")
+        try:
+            redis_client.set(redis_key, json.dumps(payload, ensure_ascii=False), ex=ttl)
+            return
+        except RedisError:
+            pass
+    with TASK_AI_DIAG_COOLDOWN_FALLBACK_LOCK:
+        TASK_AI_DIAG_COOLDOWN_FALLBACK[normalized_key] = time.time() + float(ttl)
+
+
+def _get_client_ai_diag_cooldown_remaining_seconds(client_id: str | None) -> int:
+    normalized_key = _normalize_client_state_key(client_id)
+    if not normalized_key:
+        return 0
+    redis_client = _get_task_ai_state_redis_client()
+    if redis_client is not None:
+        redis_key = _task_ai_state_redis_key(f"diag-cooldown:{normalized_key}")
+        try:
+            ttl = int(redis_client.ttl(redis_key))
+            if ttl > 0:
+                return ttl
+        except RedisError:
+            pass
+    with TASK_AI_DIAG_COOLDOWN_FALLBACK_LOCK:
+        expires_at = float(TASK_AI_DIAG_COOLDOWN_FALLBACK.get(normalized_key, 0.0) or 0.0)
+        if expires_at <= 0:
+            return 0
+        remaining = int(max(0.0, expires_at - time.time()))
+        if remaining <= 0:
+            TASK_AI_DIAG_COOLDOWN_FALLBACK.pop(normalized_key, None)
+            return 0
+        return remaining
+
+
+def _apply_ai_diag_cooldown_to_runtime_config(
+    client_id: str | None,
+    runtime_config: dict | None,
+    scope: str = "",
+) -> tuple[dict, int]:
+    base_config = dict(runtime_config or {})
+    remaining = _get_client_ai_diag_cooldown_remaining_seconds(client_id)
+    if remaining <= 0:
+        return base_config, 0
+    base_config["enabled"] = False
+    base_config["cooldown_rule_only"] = True
+    base_config["cooldown_remaining_seconds"] = remaining
+    base_config["cooldown_scope"] = str(scope or "").strip()
+    return base_config, remaining
+
+
+def _resolve_task_ai_runtime_config(client_id: str | None) -> dict:
+    default_enabled = _to_runtime_bool(os.getenv("OPENROUTER_DIAG_ENABLED"), default=True)
+    config = {
+        "enabled": default_enabled,
+        "provider": str(os.getenv("TASK_AI_PROVIDER") or AI_PROVIDER_DEFAULT).strip().lower() or AI_PROVIDER_DEFAULT,
+        "api_url": str(
+            os.getenv("TASK_AI_RISK_GUARD_API_URL")
+            or os.getenv("OPENROUTER_API_URL")
+            or AI_API_URL_DEFAULT
+        ).strip(),
+        "api_key": str(
+            os.getenv("TASK_AI_RISK_GUARD_API_KEY")
+            or os.getenv("OPENROUTER_API_KEY")
+            or ""
+        ).strip(),
+        "model": str(
+            os.getenv("TASK_AI_RISK_GUARD_MODEL")
+            or os.getenv("OPENROUTER_MODEL")
+            or AI_MODEL_DEFAULT
+        ).strip(),
+        "timeout_seconds": _normalize_ai_timeout_seconds(
+            os.getenv("TASK_AI_RISK_GUARD_TIMEOUT_SECONDS")
+            or os.getenv("OPENROUTER_DIAG_TIMEOUT_SECONDS")
+            or AI_TIMEOUT_SECONDS_DEFAULT
+        ),
+        "site_url": str(os.getenv("OPENROUTER_SITE_URL") or "").strip(),
+        "app_name": str(os.getenv("OPENROUTER_APP_NAME") or "ConvertAPK-EXE").strip(),
+    }
+    normalized_client_id = str(client_id or "").strip()
+    if not normalized_client_id:
+        config["api_url"] = _normalize_ai_api_url(config.get("api_url"))
+        return config
+    try:
+        flags = fetch_feature_flags(client_id=normalized_client_id)
+    except Exception:
+        flags = None
+    if not isinstance(flags, dict):
+        return config
+    if "ai_enabled" in flags:
+        config["enabled"] = _to_runtime_bool(flags.get("ai_enabled"), default=config["enabled"])
+    ai_provider = str(flags.get("ai_provider") or "").strip().lower()
+    if ai_provider:
+        config["provider"] = ai_provider
+    ai_api_url = str(flags.get("ai_api_url") or "").strip()
+    if ai_api_url:
+        config["api_url"] = ai_api_url
+    ai_api_key = str(flags.get("ai_api_key") or "").strip()
+    if ai_api_key:
+        config["api_key"] = ai_api_key
+    ai_model = str(flags.get("ai_model") or "").strip()
+    if ai_model:
+        config["model"] = ai_model
+    if "ai_timeout_seconds" in flags:
+        config["timeout_seconds"] = _normalize_ai_timeout_seconds(flags.get("ai_timeout_seconds"))
+    config["api_url"] = _normalize_ai_api_url(config.get("api_url"))
+    return config
 
 # Gradle 缓存策略（解决“开始构建响应慢/要等很久”的问题）：
 # - volume: 使用 Docker volume 持久化 `/root/.gradle`（推荐，跨任务复用，且无需复制大缓存）
@@ -1401,13 +1624,25 @@ class BuildTaskRunner:
     def _start_failure_diagnosis(self, task_id: str, task, failure_message: str) -> None:
         """异步启动失败日志诊断，避免阻塞任务状态回写。"""
         log_lines = self._collect_failure_log_lines(task_id, task)
-        provider = "openrouter" if OPENROUTER_DIAG_ENABLED else "rule"
-        model = OPENROUTER_MODEL if OPENROUTER_DIAG_ENABLED else ""
+        client_id = str(getattr(task, "client_id", "") or "")
+        ai_runtime_config = _resolve_task_ai_runtime_config(client_id=client_id)
+        ai_runtime_config, ai_cooldown_remaining = _apply_ai_diag_cooldown_to_runtime_config(
+            client_id,
+            ai_runtime_config,
+            scope="builder_failure_diagnosis",
+        )
+        diagnosis_runtime = resolve_openrouter_diag_runtime_config(ai_config=ai_runtime_config)
+        provider = "openrouter" if bool(diagnosis_runtime.get("enabled")) else "rule"
+        model = str(diagnosis_runtime.get("model") or "") if bool(diagnosis_runtime.get("enabled")) else ""
         task.failure_diagnosis = create_running_diagnosis(
             provider=provider,
             model=model,
             analyzed_log_lines=len(log_lines),
         )
+        if ai_cooldown_remaining > 0 and isinstance(task.failure_diagnosis, dict):
+            task.failure_diagnosis["cooldown_rule_only"] = True
+            task.failure_diagnosis["cooldown_remaining_seconds"] = ai_cooldown_remaining
+            task.failure_diagnosis["cooldown_seconds"] = int(TASK_AI_DIAG_COOLDOWN_SECONDS)
         self._notify_state_change(force=True)
 
         def _worker() -> None:
@@ -1418,15 +1653,35 @@ class BuildTaskRunner:
                     "output_format": str(getattr(getattr(task, "config", None), "output_format", "apk") or "apk"),
                     "app_name": str(getattr(getattr(task, "config", None), "app_name", "") or ""),
                     "package_name": str(getattr(getattr(task, "config", None), "package_name", "") or ""),
+                    "client_id": client_id,
                 }
                 diagnosis = diagnose_build_failure(
                     log_lines=log_lines,
                     failure_message=str(failure_message or ""),
                     task_meta=task_meta,
+                    ai_config=ai_runtime_config,
                 )
                 task.failure_diagnosis = diagnosis if isinstance(diagnosis, dict) else create_failed_diagnosis("invalid diagnosis")
+                if isinstance(task.failure_diagnosis, dict):
+                    diag_provider = str(task.failure_diagnosis.get("provider") or "").strip().lower()
+                    diag_status = str(task.failure_diagnosis.get("status") or "").strip().lower()
+                    if diag_provider and diag_provider != "rule" and diag_status == "succeeded":
+                        _set_client_ai_diag_cooldown(
+                            client_id,
+                            ttl_seconds=TASK_AI_DIAG_COOLDOWN_SECONDS,
+                            task_id=task_id,
+                            source="builder_failure_diagnosis",
+                        )
+                    if ai_cooldown_remaining > 0:
+                        task.failure_diagnosis["cooldown_rule_only"] = True
+                        task.failure_diagnosis["cooldown_remaining_seconds"] = ai_cooldown_remaining
+                        task.failure_diagnosis["cooldown_seconds"] = int(TASK_AI_DIAG_COOLDOWN_SECONDS)
             except Exception as exc:
                 task.failure_diagnosis = create_failed_diagnosis(str(exc), analyzed_log_lines=len(log_lines))
+                if ai_cooldown_remaining > 0 and isinstance(task.failure_diagnosis, dict):
+                    task.failure_diagnosis["cooldown_rule_only"] = True
+                    task.failure_diagnosis["cooldown_remaining_seconds"] = ai_cooldown_remaining
+                    task.failure_diagnosis["cooldown_seconds"] = int(TASK_AI_DIAG_COOLDOWN_SECONDS)
             task.updated_at = datetime.now()
             self._notify_state_change(force=True)
 

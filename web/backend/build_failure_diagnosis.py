@@ -366,6 +366,46 @@ except ValueError:
     MAX_ANALYZE_LOG_LINES = 240
 
 
+def _normalize_timeout_seconds(value: Any, default_value: int) -> int:
+    try:
+        parsed = int(value)
+    except Exception:
+        return default_value
+    return max(8, min(parsed, 120))
+
+
+def _normalize_openrouter_api_url(value: str | None) -> str:
+    api_url = str(value or "").strip()
+    if not api_url:
+        return str(OPENROUTER_API_URL or "").strip()
+    normalized = api_url.rstrip("/")
+    if normalized.lower() == "https://openrouter.ai/api/v1":
+        return f"{normalized}/chat/completions"
+    return api_url
+
+
+def resolve_openrouter_diag_runtime_config(ai_config: dict[str, Any] | None = None) -> dict[str, Any]:
+    config = ai_config if isinstance(ai_config, dict) else {}
+    enabled = _to_bool(config.get("enabled"), default=OPENROUTER_DIAG_ENABLED)
+    provider = str(config.get("provider") or "openrouter").strip().lower() or "openrouter"
+    api_url = _normalize_openrouter_api_url(config.get("api_url") or OPENROUTER_API_URL)
+    api_key = str(config.get("api_key") or os.getenv("OPENROUTER_API_KEY") or "").strip()
+    model = str(config.get("model") or OPENROUTER_MODEL).strip()
+    timeout_seconds = _normalize_timeout_seconds(config.get("timeout_seconds"), OPENROUTER_TIMEOUT_SECONDS)
+    site_url = str(config.get("site_url") or os.getenv("OPENROUTER_SITE_URL") or "").strip()
+    app_name = str(config.get("app_name") or os.getenv("OPENROUTER_APP_NAME") or "ConvertAPK-EXE").strip()
+    return {
+        "enabled": enabled,
+        "provider": provider,
+        "api_url": api_url,
+        "api_key": api_key,
+        "model": model,
+        "timeout_seconds": timeout_seconds,
+        "site_url": site_url,
+        "app_name": app_name,
+    }
+
+
 KNOWLEDGE_RULES = [
     {
         "id": "source_syntax_error",
@@ -1418,18 +1458,22 @@ def _call_openrouter_diagnosis(
     rule_result: dict[str, Any],
     task_meta: dict[str, Any] | None = None,
     language: str = "zh-CN",
+    ai_config: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any] | None, str]:
     normalized_language = _normalize_diag_language(language)
-    if not OPENROUTER_DIAG_ENABLED:
+    runtime_config = resolve_openrouter_diag_runtime_config(ai_config=ai_config)
+    if not runtime_config.get("enabled"):
         return None, "openrouter disabled"
 
-    api_key = str(os.getenv("OPENROUTER_API_KEY") or "").strip()
+    api_key = str(runtime_config.get("api_key") or "").strip()
     if not api_key:
         return None, "OPENROUTER_API_KEY is empty"
 
-    if not OPENROUTER_API_URL:
+    api_url = str(runtime_config.get("api_url") or "").strip()
+    if not api_url:
         return None, "OPENROUTER_API_URL is empty"
-    if not OPENROUTER_MODEL:
+    model = str(runtime_config.get("model") or "").strip()
+    if not model:
         return None, "OPENROUTER model is empty"
 
     brief_logs = "\n".join(lines[-80:])
@@ -1494,7 +1538,7 @@ def _call_openrouter_diagnosis(
     )
 
     request_body = {
-        "model": OPENROUTER_MODEL,
+        "model": model,
         "temperature": 0.0,
         "messages": [
             {"role": "system", "content": system_prompt},
@@ -1507,8 +1551,8 @@ def _call_openrouter_diagnosis(
         "Content-Type": "application/json",
     }
 
-    site_url = str(os.getenv("OPENROUTER_SITE_URL") or "").strip()
-    app_name = str(os.getenv("OPENROUTER_APP_NAME") or "ConvertAPK-EXE").strip()
+    site_url = str(runtime_config.get("site_url") or "").strip()
+    app_name = str(runtime_config.get("app_name") or "ConvertAPK-EXE").strip()
     if site_url:
         headers["HTTP-Referer"] = site_url
     if app_name:
@@ -1516,13 +1560,13 @@ def _call_openrouter_diagnosis(
 
     data_bytes = json.dumps(request_body, ensure_ascii=False).encode("utf-8")
     request = urllib.request.Request(
-        url=OPENROUTER_API_URL,
+        url=api_url,
         data=data_bytes,
         headers=headers,
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=OPENROUTER_TIMEOUT_SECONDS) as response:
+        with urllib.request.urlopen(request, timeout=float(runtime_config.get("timeout_seconds") or OPENROUTER_TIMEOUT_SECONDS)) as response:
             payload_text = response.read().decode("utf-8", errors="ignore")
     except urllib.error.HTTPError as exc:
         details = ""
@@ -1552,8 +1596,10 @@ def diagnose_build_failure(
     failure_message: str = "",
     task_meta: dict[str, Any] | None = None,
     language: str = "zh-CN",
+    ai_config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     normalized_language = _normalize_diag_language(language)
+    runtime_config = resolve_openrouter_diag_runtime_config(ai_config=ai_config)
     lines = normalize_log_lines(log_lines, max_lines=MAX_ANALYZE_LOG_LINES)
     if not lines and not str(failure_message or "").strip():
         result = create_idle_diagnosis(language=normalized_language)
@@ -1573,6 +1619,7 @@ def diagnose_build_failure(
         rule_result=rule_result,
         task_meta=task_meta,
         language=normalized_language,
+        ai_config=runtime_config,
     )
     if llm_result is None:
         if llm_error:
@@ -1615,8 +1662,8 @@ def diagnose_build_failure(
 
     result = {
         "status": "succeeded",
-        "provider": "openrouter",
-        "model": OPENROUTER_MODEL,
+        "provider": str(runtime_config.get("provider") or "openrouter"),
+        "model": str(runtime_config.get("model") or OPENROUTER_MODEL),
         "language": normalized_language,
         "summary": merged_summary,
         "reason": merged_reason,

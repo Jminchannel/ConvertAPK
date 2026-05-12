@@ -468,6 +468,14 @@ export const getAdminFeatures = async () => {
   return response.data
 }
 
+// 查询当前客户端是否处于 AI 风险冻结状态
+export const getClientFreezeStatus = async (clientId) => {
+  const response = await api.get('/client-freeze/status', {
+    params: { client_id: clientId || getClientId() }
+  })
+  return response.data
+}
+
 // 检查当前客户端是否存在新版本
 export const checkUpdate = async (version) => {
   const response = await api.get('/adminhub/update-check', { params: { version } })

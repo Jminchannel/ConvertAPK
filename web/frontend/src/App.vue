@@ -1850,7 +1850,7 @@
         aria-live="polite"
       >
         <span class="toast-icon" aria-hidden="true">
-          {{ toast.type === 'success' ? '\u2714' : '\u2716' }}
+          {{ toast.type === 'success' ? '\u2714' : (toast.type === 'warning' ? '\u26A0' : '\u2716') }}
         </span>
         <span>{{ toast.message }}</span>
       </div>

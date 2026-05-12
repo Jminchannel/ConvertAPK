@@ -70,8 +70,7 @@ from build_failure_diagnosis import (
     create_running_diagnosis,
     diagnose_build_failure,
     normalize_diag_language,
-    OPENROUTER_DIAG_ENABLED,
-    OPENROUTER_MODEL,
+    resolve_openrouter_diag_runtime_config,
 )
 
 app = FastAPI(
@@ -101,6 +100,12 @@ UPLOAD_MAX_SIZE_MB_DEFAULT = 200
 UPLOAD_MAX_SIZE_MB_MIN = 1
 UPLOAD_MAX_SIZE_MB_MAX = 10240
 UPLOAD_STREAM_CHUNK_SIZE = 1024 * 1024
+AI_PROVIDER_DEFAULT = "openrouter"
+AI_API_URL_DEFAULT = "https://openrouter.ai/api/v1/chat/completions"
+AI_MODEL_DEFAULT = "qwen/qwen3.5-flash-02-23"
+AI_TIMEOUT_SECONDS_DEFAULT = 18
+AI_TIMEOUT_SECONDS_MIN = 8
+AI_TIMEOUT_SECONDS_MAX = 120
 
 
 def _normalize_upload_max_size_mb(value) -> int:
@@ -113,6 +118,43 @@ def _normalize_upload_max_size_mb(value) -> int:
     if size_mb > UPLOAD_MAX_SIZE_MB_MAX:
         return UPLOAD_MAX_SIZE_MB_MAX
     return size_mb
+
+
+def _normalize_ai_timeout_seconds(value) -> int:
+    try:
+        timeout_seconds = int(value)
+    except Exception:
+        return AI_TIMEOUT_SECONDS_DEFAULT
+    if timeout_seconds < AI_TIMEOUT_SECONDS_MIN:
+        return AI_TIMEOUT_SECONDS_MIN
+    if timeout_seconds > AI_TIMEOUT_SECONDS_MAX:
+        return AI_TIMEOUT_SECONDS_MAX
+    return timeout_seconds
+
+
+def _normalize_ai_api_url(value: str | None) -> str:
+    api_url = str(value or "").strip()
+    if not api_url:
+        return AI_API_URL_DEFAULT
+    normalized = api_url.rstrip("/")
+    if normalized.lower() == "https://openrouter.ai/api/v1":
+        return f"{normalized}/chat/completions"
+    return api_url
+
+
+def _to_runtime_bool(value, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return default
 
 
 def _load_client_feature_flags(client_id: str | None = None) -> dict:
@@ -130,6 +172,28 @@ def _load_client_feature_flags(client_id: str | None = None) -> dict:
         "upload_max_size_mb": UPLOAD_MAX_SIZE_MB_DEFAULT,
         "risk_scan_block_keywords": [],
         "risk_scan_domain_keywords": [],
+        "ai_enabled": _env_bool("TASK_AI_RISK_GUARD_ENABLED", default=True),
+        "ai_provider": str(os.getenv("TASK_AI_PROVIDER") or AI_PROVIDER_DEFAULT).strip().lower() or AI_PROVIDER_DEFAULT,
+        "ai_api_url": str(
+            os.getenv("TASK_AI_RISK_GUARD_API_URL")
+            or os.getenv("OPENROUTER_API_URL")
+            or AI_API_URL_DEFAULT
+        ).strip(),
+        "ai_api_key": str(
+            os.getenv("TASK_AI_RISK_GUARD_API_KEY")
+            or os.getenv("OPENROUTER_API_KEY")
+            or ""
+        ).strip(),
+        "ai_model": str(
+            os.getenv("TASK_AI_RISK_GUARD_MODEL")
+            or os.getenv("OPENROUTER_MODEL")
+            or AI_MODEL_DEFAULT
+        ).strip(),
+        "ai_timeout_seconds": _normalize_ai_timeout_seconds(
+            os.getenv("TASK_AI_RISK_GUARD_TIMEOUT_SECONDS")
+            or os.getenv("OPENROUTER_DIAG_TIMEOUT_SECONDS")
+            or AI_TIMEOUT_SECONDS_DEFAULT
+        ),
     }
     try:
         data = fetch_feature_flags(client_id=_normalize_client_id(client_id))
@@ -159,6 +223,25 @@ def _load_client_feature_flags(client_id: str | None = None) -> dict:
                 for item in data.get("risk_scan_domain_keywords")
                 if str(item or "").strip()
             ]
+        if "ai_enabled" in data:
+            flags["ai_enabled"] = _to_runtime_bool(data.get("ai_enabled"), default=flags["ai_enabled"])
+        if "ai_provider" in data:
+            ai_provider = str(data.get("ai_provider") or "").strip().lower()
+            if ai_provider:
+                flags["ai_provider"] = ai_provider
+        if "ai_api_url" in data:
+            ai_api_url = str(data.get("ai_api_url") or "").strip()
+            if ai_api_url:
+                flags["ai_api_url"] = ai_api_url
+        if "ai_api_key" in data:
+            flags["ai_api_key"] = str(data.get("ai_api_key") or "").strip()
+        if "ai_model" in data:
+            ai_model = str(data.get("ai_model") or "").strip()
+            if ai_model:
+                flags["ai_model"] = ai_model
+        if "ai_timeout_seconds" in data:
+            flags["ai_timeout_seconds"] = _normalize_ai_timeout_seconds(data.get("ai_timeout_seconds"))
+    flags["ai_api_url"] = _normalize_ai_api_url(flags.get("ai_api_url"))
     return flags
 
 
@@ -355,6 +438,33 @@ try:
 except ValueError:
     AUTH_SMS_VERIFY_MAX_ATTEMPTS = 8
 
+TASK_AI_STATE_REDIS_URL = str(
+    os.getenv("TASK_AI_STATE_REDIS_URL")
+    or AUTH_SMS_REDIS_URL
+    or ""
+).strip()
+TASK_AI_STATE_REDIS_PREFIX = str(
+    os.getenv("TASK_AI_STATE_REDIS_PREFIX")
+    or "convertapk:task:ai:"
+).strip() or "convertapk:task:ai:"
+TASK_AI_DIAG_COOLDOWN_SECONDS = 600
+try:
+    TASK_AI_DIAG_COOLDOWN_SECONDS = max(
+        int(os.getenv("TASK_AI_DIAG_COOLDOWN_SECONDS", "600") or "600"),
+        60,
+    )
+except ValueError:
+    TASK_AI_DIAG_COOLDOWN_SECONDS = 600
+TASK_AI_FREEZE_CONTACT = str(
+    os.getenv("TASK_AI_FREEZE_CONTACT")
+    or "请联系开发者处理高风险预警并解除冻结"
+).strip() or "请联系开发者处理高风险预警并解除冻结"
+TASK_AI_STATE_REDIS_LOCK = threading.Lock()
+TASK_AI_STATE_REDIS_CLIENT: Redis | None = None
+TASK_AI_STATE_FALLBACK_LOCK = threading.Lock()
+TASK_AI_DIAG_COOLDOWN_FALLBACK: dict[str, float] = {}
+TASK_AI_CLIENT_FREEZE_FALLBACK: dict[str, dict] = {}
+
 MARKETPLACE_POLICY_ENABLED = _env_bool("MARKETPLACE_POLICY_ENABLED", default=True)
 MARKETPLACE_POLICY_ALLOWLIST_CLIENT_IDS_RAW = str(
     os.getenv("MARKETPLACE_POLICY_ALLOWLIST_CLIENT_IDS") or ""
@@ -484,6 +594,92 @@ RISK_SCAN_SKIP_DIRS = {"node_modules", ".git", "android", "__macosx", ".gradle"}
 RISK_SCAN_MAX_FILE_BYTES = 2 * 1024 * 1024
 RISK_SCAN_MAX_FILES_PER_ARCHIVE = 1200
 RISK_SCAN_MAX_MATCHES_PER_SOURCE = 24
+TASK_AI_RISK_GUARD_ENABLED = _env_bool("TASK_AI_RISK_GUARD_ENABLED", default=True)
+TASK_AI_RISK_GUARD_PROVIDER = "openrouter"
+TASK_AI_RISK_GUARD_API_URL = str(
+    os.getenv("TASK_AI_RISK_GUARD_API_URL")
+    or os.getenv("OPENROUTER_API_URL")
+    or "https://openrouter.ai/api/v1/chat/completions"
+).strip()
+TASK_AI_RISK_GUARD_MODEL = str(
+    os.getenv("TASK_AI_RISK_GUARD_MODEL")
+    or os.getenv("OPENROUTER_MODEL")
+    or "qwen/qwen3.5-flash-02-23"
+).strip()
+TASK_AI_RISK_GUARD_TIMEOUT_SECONDS = 18
+try:
+    TASK_AI_RISK_GUARD_TIMEOUT_SECONDS = max(
+        int(os.getenv("TASK_AI_RISK_GUARD_TIMEOUT_SECONDS", "18") or "18"),
+        8,
+    )
+except ValueError:
+    TASK_AI_RISK_GUARD_TIMEOUT_SECONDS = 18
+TASK_AI_RISK_GUARD_MAX_KEY_FILES = 12
+TASK_AI_RISK_GUARD_MAX_FILE_BYTES = 120 * 1024
+TASK_AI_RISK_GUARD_MAX_FILE_CHARS = 2400
+TASK_AI_RISK_GUARD_MAX_HTML_CHARS = 8000
+TASK_AI_RISK_GUARD_MAX_EVIDENCE = 12
+AI_RISK_GUARD_JSON_PATTERN = re.compile(r"\{[\s\S]*\}")
+AI_RISK_GUARD_KEY_FILENAMES = {
+    "package.json",
+    "manifest.json",
+    "app.json",
+    "index.html",
+    "app.tsx",
+    "app.ts",
+    "app.jsx",
+    "app.js",
+    "app.vue",
+    "main.tsx",
+    "main.ts",
+    "main.jsx",
+    "main.js",
+    "router.ts",
+    "router.js",
+    "routes.ts",
+    "routes.js",
+}
+AI_RISK_GUARD_KEY_PATH_HINTS = (
+    "src/",
+    "pages/",
+    "views/",
+    "router/",
+    "routes/",
+    "store/",
+    "config/",
+)
+
+
+def _resolve_shared_ai_runtime_config(client_id: str | None) -> dict:
+    flags = _load_client_feature_flags(client_id=client_id)
+    enabled = _to_runtime_bool(flags.get("ai_enabled"), default=TASK_AI_RISK_GUARD_ENABLED)
+    provider = str(flags.get("ai_provider") or TASK_AI_RISK_GUARD_PROVIDER).strip().lower() or TASK_AI_RISK_GUARD_PROVIDER
+    api_url = str(flags.get("ai_api_url") or TASK_AI_RISK_GUARD_API_URL).strip()
+    api_url = _normalize_ai_api_url(api_url)
+    api_key = str(
+        flags.get("ai_api_key")
+        or os.getenv("TASK_AI_RISK_GUARD_API_KEY")
+        or os.getenv("OPENROUTER_API_KEY")
+        or ""
+    ).strip()
+    model = str(flags.get("ai_model") or TASK_AI_RISK_GUARD_MODEL).strip()
+    if not model:
+        model = AI_MODEL_DEFAULT
+    timeout_seconds = _normalize_ai_timeout_seconds(
+        flags.get("ai_timeout_seconds") or TASK_AI_RISK_GUARD_TIMEOUT_SECONDS
+    )
+    site_url = str(os.getenv("OPENROUTER_SITE_URL") or "").strip()
+    app_name = str(os.getenv("OPENROUTER_APP_NAME") or "ConvertAPK-EXE").strip()
+    return {
+        "enabled": enabled,
+        "provider": provider,
+        "api_url": api_url,
+        "api_key": api_key,
+        "model": model,
+        "timeout_seconds": timeout_seconds,
+        "site_url": site_url,
+        "app_name": app_name,
+    }
 
 
 def _normalize_phone(value: str | None) -> str:
@@ -530,13 +726,19 @@ def _normalize_declared_use_case(value: str | None) -> str:
     return re.sub(r"\s+", " ", raw)
 
 
-def _validate_task_compliance_or_raise(compliance_ack: bool, declared_use_case: str) -> None:
+def _validate_task_compliance_or_raise(
+    compliance_ack: bool,
+    declared_use_case: str,
+    client_id: str | None = None,
+) -> None:
     if not bool(compliance_ack):
         raise HTTPException(status_code=400, detail="compliance confirmation is required")
     if len(declared_use_case) < MARKETPLACE_DECLARED_USE_CASE_MIN_LENGTH:
         raise HTTPException(status_code=400, detail="declared use case is required")
     if len(declared_use_case) > MARKETPLACE_DECLARED_USE_CASE_MAX_LENGTH:
         raise HTTPException(status_code=400, detail="declared use case is too long")
+    if client_id:
+        _raise_if_client_frozen_for_build(client_id)
 
 
 def _detect_marketplace_keyword(value: str | None) -> str:
@@ -814,6 +1016,526 @@ def _scan_task_risk_inputs(
     }
 
 
+def _score_ai_risk_key_file(parts: list[str]) -> int:
+    if not parts:
+        return 0
+    lowered_parts = [str(part or "").strip().lower() for part in parts if str(part or "").strip()]
+    if not lowered_parts:
+        return 0
+    if any(part in RISK_SCAN_SKIP_DIRS for part in lowered_parts):
+        return 0
+    filename = lowered_parts[-1]
+    suffix = PurePosixPath(filename).suffix.lower()
+    if suffix not in RISK_SCAN_TEXT_EXTENSIONS:
+        return 0
+
+    score = 0
+    if filename in AI_RISK_GUARD_KEY_FILENAMES:
+        score += 120
+    if any(filename.startswith(prefix) for prefix in ("app.", "main.", "router.", "routes.", "store.", "manifest.")):
+        score += 50
+    for hint in AI_RISK_GUARD_KEY_PATH_HINTS:
+        if hint in "/".join(lowered_parts):
+            score += 25
+            break
+    if suffix in {".tsx", ".jsx", ".vue", ".html"}:
+        score += 30
+    elif suffix in {".ts", ".js", ".json"}:
+        score += 18
+    if "app" in filename or "market" in filename or "store" in filename:
+        score += 12
+    return score
+
+
+def _collect_ai_risk_key_file_snippets_from_zip(zip_path: Path) -> list[dict]:
+    candidates: list[tuple[int, list[str], zipfile.ZipInfo]] = []
+    try:
+        with zipfile.ZipFile(zip_path, "r") as archive:
+            for info, parts in _iter_zip_entries(archive):
+                file_size = int(info.file_size or 0)
+                if file_size <= 0 or file_size > TASK_AI_RISK_GUARD_MAX_FILE_BYTES:
+                    continue
+                score = _score_ai_risk_key_file(parts)
+                if score <= 0:
+                    continue
+                candidates.append((score, parts, info))
+            candidates.sort(key=lambda item: (-item[0], len(item[1]), "/".join(item[1])))
+
+            snippets: list[dict] = []
+            for score, parts, info in candidates:
+                if len(snippets) >= TASK_AI_RISK_GUARD_MAX_KEY_FILES:
+                    break
+                try:
+                    with archive.open(info, "r") as source:
+                        content = source.read(TASK_AI_RISK_GUARD_MAX_FILE_BYTES + 1)
+                    if len(content) > TASK_AI_RISK_GUARD_MAX_FILE_BYTES:
+                        continue
+                    text = content.decode("utf-8", errors="ignore")
+                except Exception:
+                    continue
+                normalized_text = str(text or "").strip()
+                if not normalized_text:
+                    continue
+                snippets.append(
+                    {
+                        "path": str(PurePosixPath(*parts)),
+                        "score": score,
+                        "content": normalized_text[:TASK_AI_RISK_GUARD_MAX_FILE_CHARS],
+                    }
+                )
+            return snippets
+    except zipfile.BadZipFile:
+        raise HTTPException(status_code=400, detail="ZIP format is invalid, please upload again")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to collect AI guard key files: {str(exc)}")
+
+
+def _collect_ai_risk_key_file_snippets_from_html(html_path: Path) -> list[dict]:
+    try:
+        text = html_path.read_text(encoding="utf-8", errors="ignore")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to read HTML file: {str(exc)}")
+    normalized_text = str(text or "").strip()
+    if not normalized_text:
+        return []
+    return [
+        {
+            "path": html_path.name,
+            "score": 120,
+            "content": normalized_text[:TASK_AI_RISK_GUARD_MAX_HTML_CHARS],
+        }
+    ]
+
+
+def _extract_openrouter_message_content(response_data: dict) -> str:
+    choices = response_data.get("choices") or []
+    if isinstance(choices, list) and choices:
+        message = choices[0].get("message") if isinstance(choices[0], dict) else {}
+        if isinstance(message, dict):
+            content = message.get("content")
+            if isinstance(content, str):
+                return content.strip()
+            if isinstance(content, list):
+                text_parts: list[str] = []
+                for item in content:
+                    if isinstance(item, dict):
+                        text_parts.append(str(item.get("text") or item.get("content") or ""))
+                    else:
+                        text_parts.append(str(item))
+                return "".join(text_parts).strip()
+    for key in ("output_text", "text", "content", "result"):
+        value = response_data.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _extract_json_object_from_ai_text(raw_text: str) -> dict:
+    text = str(raw_text or "").strip()
+    if not text:
+        return {}
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        pass
+    match = AI_RISK_GUARD_JSON_PATTERN.search(text)
+    if not match:
+        return {}
+    candidate = str(match.group(0) or "").strip()
+    if not candidate:
+        return {}
+    try:
+        parsed = json.loads(candidate)
+    except Exception:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _normalize_ai_risk_action(value: str | None) -> str:
+    action = str(value or "").strip().lower()
+    if action in {"allow", "review", "block"}:
+        return action
+    if action in {"reject", "deny", "stop"}:
+        return "block"
+    if action in {"warn", "pending"}:
+        return "review"
+    return "allow"
+
+
+def _normalize_ai_risk_confidence(value: str | None) -> str:
+    confidence = str(value or "").strip().lower()
+    if confidence in {"low", "medium", "high"}:
+        return confidence
+    return "medium"
+
+
+def _normalize_ai_risk_guard_result(payload: dict) -> dict:
+    suspected = bool(
+        payload.get("is_marketplace_suspected")
+        or payload.get("suspected")
+        or payload.get("marketplace_suspected")
+    )
+    action = _normalize_ai_risk_action(payload.get("recommended_action") or payload.get("action"))
+    if suspected and action == "allow":
+        action = "review"
+    reason = str(payload.get("reason") or payload.get("summary") or payload.get("message") or "").strip()
+    confidence = _normalize_ai_risk_confidence(payload.get("confidence"))
+    evidence_raw = payload.get("evidence") or payload.get("signals") or []
+    evidence_items: list[str] = []
+    seen: set[str] = set()
+    if isinstance(evidence_raw, (list, tuple)):
+        for item in evidence_raw:
+            text = str(item or "").strip()
+            if not text:
+                continue
+            dedupe_key = text.lower()
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            evidence_items.append(text)
+            if len(evidence_items) >= TASK_AI_RISK_GUARD_MAX_EVIDENCE:
+                break
+    return {
+        "suspected": suspected,
+        "action": action,
+        "confidence": confidence,
+        "reason": reason[:280],
+        "evidence": evidence_items,
+    }
+
+
+def _call_ai_marketplace_guard(
+    *,
+    task_meta: dict,
+    key_file_snippets: list[dict],
+    risk_scan: dict,
+    ai_config: dict | None = None,
+) -> tuple[dict | None, str]:
+    runtime_config = ai_config if isinstance(ai_config, dict) else {}
+    ai_enabled = _to_runtime_bool(runtime_config.get("enabled"), default=TASK_AI_RISK_GUARD_ENABLED)
+    if not ai_enabled:
+        return None, "ai_risk_guard_disabled"
+    api_key = str(runtime_config.get("api_key") or "").strip()
+    if not api_key:
+        return None, "openrouter_api_key_missing"
+    api_url = str(runtime_config.get("api_url") or "").strip()
+    if not api_url:
+        return None, "openrouter_api_url_missing"
+    model = str(runtime_config.get("model") or "").strip()
+    if not model:
+        return None, "openrouter_model_missing"
+
+    safe_risk_scan = risk_scan if isinstance(risk_scan, dict) else {}
+    prompt_payload = {
+        "task_meta": task_meta,
+        "risk_scan_summary": {
+            "field_hits": safe_risk_scan.get("field_hits") or [],
+            "domain_hits": safe_risk_scan.get("domain_hits") or [],
+            "external_domains": safe_risk_scan.get("external_domains") or [],
+        },
+        "key_files": key_file_snippets,
+    }
+
+    system_prompt = (
+        "你是应用安全风控审核助手。"
+        "你的任务是判断项目是否在实现“应用市场/应用商店/应用分发平台/第三方应用下载站”功能。"
+        "必须只输出 JSON，不要输出任何额外文本。"
+    )
+    user_prompt = (
+        "请基于输入信息判断是否存在“应用市场/分发平台”嫌疑，并输出 JSON。\n"
+        "输出字段要求：\n"
+        "1. is_marketplace_suspected: boolean\n"
+        "2. confidence: low | medium | high\n"
+        "3. recommended_action: allow | review | block\n"
+        "4. reason: string\n"
+        "5. evidence: string[]\n\n"
+        "判定规则：\n"
+        "- 仅依据输入事实，不得臆测。\n"
+        "- 若发现应用列表、下载跳转、分发入口、第三方商店导流、批量分发描述等信号，应倾向 review 或 block。\n"
+        "- 若证据不足，可返回 allow。\n\n"
+        f"输入：\n{json.dumps(prompt_payload, ensure_ascii=False)}"
+    )
+
+    request_body = {
+        "model": model,
+        "temperature": 0.1,
+        "max_tokens": 700,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        "response_format": {"type": "json_object"},
+    }
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    site_url = str(runtime_config.get("site_url") or "").strip()
+    app_name = str(runtime_config.get("app_name") or "ConvertAPK-EXE").strip()
+    if site_url:
+        headers["HTTP-Referer"] = site_url
+    if app_name:
+        headers["X-Title"] = app_name
+
+    data_bytes = json.dumps(request_body, ensure_ascii=False).encode("utf-8")
+    request = urllib.request.Request(
+        url=api_url,
+        data=data_bytes,
+        headers=headers,
+        method="POST",
+    )
+
+    try:
+        timeout_seconds = _normalize_ai_timeout_seconds(runtime_config.get("timeout_seconds"))
+        with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
+            payload_text = response.read().decode("utf-8", errors="ignore")
+    except urllib.error.HTTPError as exc:
+        response_text = ""
+        try:
+            response_text = exc.read().decode("utf-8", errors="ignore")
+        except Exception:
+            response_text = ""
+        if response_text:
+            return None, f"openrouter_http_{exc.code}:{response_text[:240]}"
+        return None, f"openrouter_http_{exc.code}"
+    except Exception as exc:
+        return None, f"openrouter_request_failed:{str(exc)}"
+
+    try:
+        response_data = json.loads(payload_text or "{}")
+    except Exception as exc:
+        return None, f"openrouter_response_parse_failed:{str(exc)}"
+
+    content_text = _extract_openrouter_message_content(response_data)
+    parsed_json = _extract_json_object_from_ai_text(content_text)
+    normalized_result = _normalize_ai_risk_guard_result(parsed_json)
+    return normalized_result, ""
+
+
+def _run_ai_marketplace_guard_for_task(
+    *,
+    task_id: str,
+    app_name: str | None,
+    package_name: str | None,
+    declared_use_case: str,
+    web_url: str | None,
+    zip_path: Path | None,
+    html_path: Path | None,
+    risk_scan: dict,
+    ai_config: dict | None = None,
+) -> dict:
+    runtime_config = ai_config if isinstance(ai_config, dict) else {}
+    result = {
+        "enabled": _to_runtime_bool(runtime_config.get("enabled"), default=TASK_AI_RISK_GUARD_ENABLED),
+        "provider": str(runtime_config.get("provider") or TASK_AI_RISK_GUARD_PROVIDER),
+        "model": str(runtime_config.get("model") or TASK_AI_RISK_GUARD_MODEL),
+        "status": "skipped",
+        "suspected": False,
+        "action": "allow",
+        "confidence": "medium",
+        "reason": "",
+        "evidence": [],
+        "error": "",
+        "analyzed_file_count": 0,
+        "analyzed_files": [],
+        "checked_at": datetime.now().isoformat(),
+    }
+    if not result["enabled"]:
+        result["error"] = "ai_risk_guard_disabled"
+        return result
+
+    snippets: list[dict] = []
+    if zip_path and zip_path.exists():
+        snippets = _collect_ai_risk_key_file_snippets_from_zip(zip_path)
+    elif html_path and html_path.exists():
+        snippets = _collect_ai_risk_key_file_snippets_from_html(html_path)
+
+    if not snippets:
+        result["error"] = "no_key_files_for_ai_scan"
+        return result
+
+    analyzed_files = [str(item.get("path") or "").strip() for item in snippets if str(item.get("path") or "").strip()]
+    result["analyzed_file_count"] = len(analyzed_files)
+    result["analyzed_files"] = analyzed_files[:TASK_AI_RISK_GUARD_MAX_KEY_FILES]
+
+    task_meta = {
+        "task_id": task_id,
+        "app_name": str(app_name or ""),
+        "package_name": str(package_name or ""),
+        "declared_use_case": str(declared_use_case or ""),
+        "web_url": str(web_url or ""),
+    }
+    ai_result, ai_error = _call_ai_marketplace_guard(
+        task_meta=task_meta,
+        key_file_snippets=snippets,
+        risk_scan=risk_scan if isinstance(risk_scan, dict) else {},
+        ai_config=runtime_config,
+    )
+    if ai_error:
+        result["status"] = "error"
+        result["error"] = ai_error
+        return result
+    if not isinstance(ai_result, dict):
+        result["status"] = "error"
+        result["error"] = "ai_result_invalid"
+        return result
+
+    result.update(ai_result)
+    result["status"] = "blocked" if (result.get("suspected") and result.get("action") in {"review", "block"}) else "allowed"
+    result["error"] = ""
+    return result
+
+
+def _apply_ai_guard_result_to_risk_scan(base_risk_scan: dict, ai_guard_result: dict) -> dict:
+    risk_scan = dict(base_risk_scan or {})
+    risk_scan["ai_guard"] = ai_guard_result if isinstance(ai_guard_result, dict) else {}
+    if not isinstance(ai_guard_result, dict):
+        return risk_scan
+    ai_blocked = bool(ai_guard_result.get("suspected")) and str(ai_guard_result.get("action") or "") in {"review", "block"}
+    if not ai_blocked:
+        return risk_scan
+
+    current_hit_count = int(risk_scan.get("hit_count") or 0)
+    evidence_count = len(list(ai_guard_result.get("evidence") or []))
+    ai_hit_bonus = max(1, min(4, evidence_count or 1))
+    risk_scan["hit_count"] = current_hit_count + ai_hit_bonus
+    risk_scan["risk_level"] = "high"
+    risk_scan["ai_guard_blocked"] = True
+    risk_scan["ai_guard_hit_bonus"] = ai_hit_bonus
+
+    field_hits = list(risk_scan.get("field_hits") or [])
+    reason = str(ai_guard_result.get("reason") or "AI判定存在应用市场/分发平台风险").strip()
+    field_hits.append(
+        {
+            "field": "ai_guard",
+            "keyword": "marketplace_suspected",
+            "sample": reason[:120],
+        }
+    )
+    risk_scan["field_hits"] = field_hits[:128]
+    return risk_scan
+
+
+def _refresh_task_risk_guard_before_start(task_id: str, task: BuildTask, client_id: str) -> dict:
+    task_input_dir = TASKS_DIR / task_id / "input"
+    ensure_task_input_assets(task_id, task_input_dir)
+    persisted_zip_path = get_persisted_task_asset_path(task_id, "project.zip")
+    persisted_html_path = get_persisted_task_asset_path(task_id, "index.html")
+    zip_path = persisted_zip_path if persisted_zip_path.exists() else _resolve_task_asset_path(task_id, "project.zip")
+    html_path = persisted_html_path if persisted_html_path.exists() else _resolve_task_asset_path(task_id, "index.html")
+    icon_path = _resolve_task_asset_path(task_id, "logo.png")
+
+    base_risk_scan = _scan_task_risk_inputs(
+        client_id=client_id,
+        app_name=getattr(task.config, "app_name", ""),
+        package_name=getattr(task.config, "package_name", ""),
+        declared_use_case=getattr(task, "declared_use_case", ""),
+        web_url=getattr(task, "web_url", None),
+        zip_path=zip_path if zip_path.exists() else None,
+        html_path=html_path if html_path.exists() else None,
+    )
+    ai_runtime_config = _resolve_shared_ai_runtime_config(client_id=client_id)
+    ai_runtime_config, ai_cooldown_remaining = _apply_ai_diag_cooldown_to_runtime_config(
+        client_id,
+        ai_runtime_config,
+        scope="risk_guard_before_start",
+    )
+    ai_guard_result = _run_ai_marketplace_guard_for_task(
+        task_id=task_id,
+        app_name=getattr(task.config, "app_name", ""),
+        package_name=getattr(task.config, "package_name", ""),
+        declared_use_case=getattr(task, "declared_use_case", ""),
+        web_url=getattr(task, "web_url", None),
+        zip_path=zip_path if zip_path.exists() else None,
+        html_path=html_path if html_path.exists() else None,
+        risk_scan=base_risk_scan,
+        ai_config=ai_runtime_config,
+    )
+    if ai_cooldown_remaining > 0:
+        ai_guard_result = dict(ai_guard_result or {})
+        ai_guard_result["cooldown_rule_only"] = True
+        ai_guard_result["cooldown_remaining_seconds"] = ai_cooldown_remaining
+        ai_guard_result["status"] = "rule_only"
+        ai_guard_result["error"] = "ai_rule_only_cooldown"
+
+    risk_scan = _apply_ai_guard_result_to_risk_scan(base_risk_scan, ai_guard_result)
+    ai_guard_status = str(ai_guard_result.get("status") or "").strip().lower()
+    ai_guard_error = str(ai_guard_result.get("error") or "").strip()
+    ai_used = ai_guard_status in {"allowed", "blocked"} and not ai_guard_error
+    if ai_used:
+        _set_client_ai_diag_cooldown(
+            client_id,
+            ttl_seconds=TASK_AI_DIAG_COOLDOWN_SECONDS,
+            task_id=task_id,
+            source="risk_guard_before_start",
+        )
+
+    freeze_record = None
+    if _is_ai_guard_high_risk(ai_guard_result):
+        freeze_record = _freeze_client_by_ai_risk(
+            client_id=client_id,
+            task_id=task_id,
+            reason=str(ai_guard_result.get("reason") or "AI risk guard flagged high risk"),
+            evidence=list(ai_guard_result.get("evidence") or []),
+        )
+        risk_scan = _attach_freeze_alert_to_risk_scan(risk_scan, client_id, freeze_record)
+    else:
+        existing_freeze_record = _get_client_freeze_record(client_id)
+        if existing_freeze_record:
+            freeze_record = existing_freeze_record
+            risk_scan = _attach_freeze_alert_to_risk_scan(risk_scan, client_id, freeze_record)
+
+    risk_level = str(risk_scan.get("risk_level") or "normal").strip().lower()
+    if freeze_record:
+        risk_level = "high"
+        risk_scan["risk_level"] = "high"
+    allowlisted_for_review = _is_risk_review_allowlisted(client_id)
+    review_required = True if freeze_record else _requires_risk_review(client_id, risk_scan)
+    now = datetime.now()
+
+    task.risk_level = risk_level
+    task.risk_scan = risk_scan
+    task.review_required = review_required
+    if review_required:
+        task.review_status = RISK_REVIEW_STATUS_PENDING
+        task.review_requested_at = now
+        task.review_decision_at = None
+        task.review_decision_by = None
+        default_note = str(ai_guard_result.get("reason") or "High-risk signals detected, waiting for admin review").strip()
+        if freeze_record:
+            default_note = str(freeze_record.get("reason") or default_note).strip()
+        task.review_note = default_note[:160] or None
+        if task.status == BuildStatus.PENDING:
+            if freeze_record:
+                task.message = "AI marked this client as high risk and frozen. Please contact developer to unfreeze."
+            else:
+                task.message = "High-risk signals detected. Waiting for admin review."
+    elif risk_level == "high":
+        task.review_status = RISK_REVIEW_STATUS_APPROVED
+        if not task.review_requested_at:
+            task.review_requested_at = now
+        task.review_decision_at = now
+        task.review_decision_by = "allowlist" if allowlisted_for_review else "system"
+        task.review_note = "Risk hit but already in allowlist" if allowlisted_for_review else str(ai_guard_result.get("reason") or "").strip()[:160]
+    else:
+        task.review_status = RISK_REVIEW_STATUS_NOT_REQUIRED
+        task.review_requested_at = None
+        task.review_decision_at = None
+        task.review_decision_by = None
+        task.review_note = None
+
+    task.updated_at = now
+    return {
+        "task_input_dir": task_input_dir,
+        "zip_path": zip_path,
+        "html_path": html_path,
+        "icon_path": icon_path,
+    }
+
 def _is_marketplace_policy_allowlisted(client_id: str | None) -> bool:
     normalized_client_id = str(client_id or "").strip().lower()
     if not normalized_client_id:
@@ -857,6 +1579,11 @@ def _build_task_risk_sync_meta(task: BuildTask) -> dict:
     risk_scan = getattr(task, "risk_scan", {})
     if not isinstance(risk_scan, dict):
         risk_scan = {}
+    client_id = str(getattr(task, "client_id", "") or "")
+    freeze_record = _get_client_freeze_record(client_id)
+    if freeze_record:
+        risk_scan = _attach_freeze_alert_to_risk_scan(risk_scan, client_id, freeze_record)
+    compliance_alert = risk_scan.get("compliance_alert") if isinstance(risk_scan.get("compliance_alert"), dict) else {}
     return {
         "risk_level": str(getattr(task, "risk_level", "normal") or "normal"),
         "review_required": bool(getattr(task, "review_required", False)),
@@ -866,6 +1593,9 @@ def _build_task_risk_sync_meta(task: BuildTask) -> dict:
         "review_decision_by": str(getattr(task, "review_decision_by", "") or ""),
         "review_note": str(getattr(task, "review_note", "") or ""),
         "risk_scan": risk_scan,
+        "client_frozen": bool(freeze_record),
+        "client_freeze": freeze_record or {},
+        "compliance_alert": compliance_alert,
     }
 
 
@@ -982,6 +1712,372 @@ def _extract_request_ip(request: Request | None) -> str:
     if request.client and request.client.host:
         return str(request.client.host).strip() or "unknown"
     return "unknown"
+
+
+def _task_ai_state_redis_key(suffix: str) -> str:
+    return f"{TASK_AI_STATE_REDIS_PREFIX}{suffix}"
+
+
+def _normalize_client_state_key(client_id: str | None) -> str:
+    return _normalize_client_id(client_id).strip().lower()
+
+
+def _get_task_ai_state_redis_client() -> Redis | None:
+    global TASK_AI_STATE_REDIS_CLIENT
+    if not TASK_AI_STATE_REDIS_URL:
+        return None
+    if TASK_AI_STATE_REDIS_CLIENT is not None:
+        return TASK_AI_STATE_REDIS_CLIENT
+    with TASK_AI_STATE_REDIS_LOCK:
+        if TASK_AI_STATE_REDIS_CLIENT is not None:
+            return TASK_AI_STATE_REDIS_CLIENT
+        try:
+            client = Redis.from_url(
+                TASK_AI_STATE_REDIS_URL,
+                decode_responses=True,
+                socket_connect_timeout=2,
+                socket_timeout=2,
+                health_check_interval=30,
+            )
+            client.ping()
+        except Exception:
+            return None
+        TASK_AI_STATE_REDIS_CLIENT = client
+        return client
+
+
+def _normalize_client_freeze_record(value, default_client_id: str = "") -> dict | None:
+    if not isinstance(value, dict):
+        return None
+    client_id = _normalize_client_id(value.get("client_id") or default_client_id)
+    if not client_id:
+        return None
+    reason = str(value.get("reason") or "").strip() or "AI risk guard flagged high risk"
+    source_task_id = str(value.get("source_task_id") or "").strip()
+    source = str(value.get("source") or "ai_risk_guard").strip() or "ai_risk_guard"
+    frozen_at = str(value.get("frozen_at") or datetime.now().isoformat()).strip()
+    operator = str(value.get("operator") or "system").strip() or "system"
+    contact = str(value.get("contact") or TASK_AI_FREEZE_CONTACT).strip() or TASK_AI_FREEZE_CONTACT
+    evidence_raw = value.get("evidence")
+    evidence: list[str] = []
+    if isinstance(evidence_raw, list):
+        for item in evidence_raw:
+            text = str(item or "").strip()
+            if not text:
+                continue
+            if text in evidence:
+                continue
+            evidence.append(text[:200])
+            if len(evidence) >= 8:
+                break
+    return {
+        "client_id": client_id,
+        "frozen": True,
+        "source": source,
+        "source_task_id": source_task_id,
+        "reason": reason[:240],
+        "evidence": evidence,
+        "frozen_at": frozen_at,
+        "operator": operator[:80],
+        "contact": contact[:200],
+    }
+
+
+def _build_client_freeze_compliance_alert(client_id: str, freeze_record: dict | None) -> dict | None:
+    normalized_record = _normalize_client_freeze_record(freeze_record or {}, default_client_id=client_id)
+    if not normalized_record:
+        return None
+    return {
+        "code": "client_frozen_by_ai_risk",
+        "level": "high",
+        "client_id": normalized_record["client_id"],
+        "reason": normalized_record["reason"],
+        "source_task_id": normalized_record["source_task_id"],
+        "frozen_at": normalized_record["frozen_at"],
+        "contact": normalized_record["contact"],
+        "action": "contact_developer_to_unfreeze",
+    }
+
+
+def _get_client_freeze_record(client_id: str | None) -> dict | None:
+    normalized_key = _normalize_client_state_key(client_id)
+    if not normalized_key:
+        return None
+    redis_client = _get_task_ai_state_redis_client()
+    if redis_client is not None:
+        redis_key = _task_ai_state_redis_key(f"client-freeze:{normalized_key}")
+        try:
+            raw = redis_client.get(redis_key)
+        except RedisError:
+            raw = None
+        if raw:
+            parsed = None
+            try:
+                parsed = json.loads(str(raw))
+            except Exception:
+                parsed = {"client_id": normalized_key, "reason": str(raw)}
+            normalized_record = _normalize_client_freeze_record(parsed, default_client_id=normalized_key)
+            if normalized_record:
+                return normalized_record
+    with TASK_AI_STATE_FALLBACK_LOCK:
+        fallback = TASK_AI_CLIENT_FREEZE_FALLBACK.get(normalized_key)
+    if not isinstance(fallback, dict):
+        return None
+    return _normalize_client_freeze_record(fallback, default_client_id=normalized_key)
+
+
+def _list_client_freeze_records(limit: int = 200, keyword: str | None = None) -> list[dict]:
+    safe_limit = max(1, min(int(limit or 200), 1000))
+    keyword_text = str(keyword or "").strip().lower()
+    records: dict[str, dict] = {}
+    redis_client = _get_task_ai_state_redis_client()
+    if redis_client is not None:
+        pattern = _task_ai_state_redis_key("client-freeze:*")
+        try:
+            for redis_key in redis_client.scan_iter(match=pattern, count=200):
+                raw = redis_client.get(redis_key)
+                if not raw:
+                    continue
+                try:
+                    parsed = json.loads(str(raw))
+                except Exception:
+                    parsed = {"client_id": "", "reason": str(raw)}
+                normalized_record = _normalize_client_freeze_record(parsed)
+                if not normalized_record:
+                    normalized_record = _normalize_client_freeze_record(
+                        parsed,
+                        default_client_id=_normalize_client_state_key(redis_key.split("client-freeze:")[-1]),
+                    )
+                if not normalized_record:
+                    continue
+                client_key = _normalize_client_state_key(normalized_record.get("client_id"))
+                if not client_key:
+                    continue
+                records[client_key] = normalized_record
+                if len(records) >= safe_limit * 4:
+                    break
+        except RedisError:
+            pass
+    with TASK_AI_STATE_FALLBACK_LOCK:
+        for key, value in TASK_AI_CLIENT_FREEZE_FALLBACK.items():
+            normalized_record = _normalize_client_freeze_record(value, default_client_id=key)
+            if not normalized_record:
+                continue
+            records[_normalize_client_state_key(normalized_record.get("client_id"))] = normalized_record
+    items = list(records.values())
+    if keyword_text:
+        filtered: list[dict] = []
+        for item in items:
+            token = " ".join(
+                [
+                    str(item.get("client_id") or ""),
+                    str(item.get("reason") or ""),
+                    str(item.get("source_task_id") or ""),
+                ]
+            ).lower()
+            if keyword_text in token:
+                filtered.append(item)
+        items = filtered
+    items.sort(key=lambda item: str(item.get("frozen_at") or ""), reverse=True)
+    return items[:safe_limit]
+
+
+def _freeze_client_by_ai_risk(
+    *,
+    client_id: str,
+    task_id: str,
+    reason: str,
+    evidence: list[str] | None = None,
+    operator: str = "system_ai_guard",
+) -> dict:
+    normalized_client_id = _require_client_id(client_id)
+    reason_text = str(reason or "").strip() or "AI risk guard flagged high risk"
+    evidence_list: list[str] = []
+    if isinstance(evidence, list):
+        for item in evidence:
+            text = str(item or "").strip()
+            if not text:
+                continue
+            if text in evidence_list:
+                continue
+            evidence_list.append(text[:200])
+            if len(evidence_list) >= 8:
+                break
+    record = {
+        "client_id": normalized_client_id,
+        "frozen": True,
+        "source": "ai_risk_guard",
+        "source_task_id": str(task_id or "").strip(),
+        "reason": reason_text[:240],
+        "evidence": evidence_list,
+        "frozen_at": datetime.now().isoformat(),
+        "operator": str(operator or "system_ai_guard").strip() or "system_ai_guard",
+        "contact": TASK_AI_FREEZE_CONTACT,
+    }
+    normalized_key = _normalize_client_state_key(normalized_client_id)
+    redis_client = _get_task_ai_state_redis_client()
+    if redis_client is not None:
+        redis_key = _task_ai_state_redis_key(f"client-freeze:{normalized_key}")
+        try:
+            redis_client.set(redis_key, json.dumps(record, ensure_ascii=False))
+        except RedisError:
+            pass
+    with TASK_AI_STATE_FALLBACK_LOCK:
+        TASK_AI_CLIENT_FREEZE_FALLBACK[normalized_key] = dict(record)
+    return record
+
+
+def _unfreeze_client_by_admin(client_id: str, operator: str = "admin", note: str = "") -> dict:
+    normalized_client_id = _require_client_id(client_id)
+    normalized_key = _normalize_client_state_key(normalized_client_id)
+    existed_record = _get_client_freeze_record(normalized_client_id)
+    removed = False
+    redis_client = _get_task_ai_state_redis_client()
+    if redis_client is not None:
+        redis_key = _task_ai_state_redis_key(f"client-freeze:{normalized_key}")
+        try:
+            removed = bool(redis_client.delete(redis_key)) or removed
+        except RedisError:
+            pass
+    with TASK_AI_STATE_FALLBACK_LOCK:
+        if normalized_key in TASK_AI_CLIENT_FREEZE_FALLBACK:
+            TASK_AI_CLIENT_FREEZE_FALLBACK.pop(normalized_key, None)
+            removed = True
+    return {
+        "client_id": normalized_client_id,
+        "removed": bool(removed),
+        "operator": str(operator or "admin").strip() or "admin",
+        "note": str(note or "").strip(),
+        "previous_record": existed_record or {},
+        "unfrozen_at": datetime.now().isoformat(),
+    }
+
+
+def _set_client_ai_diag_cooldown(
+    client_id: str | None,
+    ttl_seconds: int | None = None,
+    task_id: str | None = None,
+    source: str = "ai",
+) -> None:
+    normalized_key = _normalize_client_state_key(client_id)
+    if not normalized_key:
+        return
+    ttl = max(int(ttl_seconds or TASK_AI_DIAG_COOLDOWN_SECONDS), 60)
+    payload = {
+        "client_id": normalized_key,
+        "task_id": str(task_id or "").strip(),
+        "source": str(source or "ai").strip() or "ai",
+        "set_at": datetime.now().isoformat(),
+    }
+    redis_client = _get_task_ai_state_redis_client()
+    if redis_client is not None:
+        redis_key = _task_ai_state_redis_key(f"diag-cooldown:{normalized_key}")
+        try:
+            redis_client.set(redis_key, json.dumps(payload, ensure_ascii=False), ex=ttl)
+            return
+        except RedisError:
+            pass
+    with TASK_AI_STATE_FALLBACK_LOCK:
+        TASK_AI_DIAG_COOLDOWN_FALLBACK[normalized_key] = time.time() + float(ttl)
+
+
+def _get_client_ai_diag_cooldown_remaining_seconds(client_id: str | None) -> int:
+    normalized_key = _normalize_client_state_key(client_id)
+    if not normalized_key:
+        return 0
+    redis_client = _get_task_ai_state_redis_client()
+    if redis_client is not None:
+        redis_key = _task_ai_state_redis_key(f"diag-cooldown:{normalized_key}")
+        try:
+            ttl = int(redis_client.ttl(redis_key))
+            if ttl > 0:
+                return ttl
+        except RedisError:
+            pass
+    with TASK_AI_STATE_FALLBACK_LOCK:
+        expires_at = float(TASK_AI_DIAG_COOLDOWN_FALLBACK.get(normalized_key, 0.0) or 0.0)
+        if expires_at <= 0:
+            return 0
+        remaining = int(max(0.0, expires_at - time.time()))
+        if remaining <= 0:
+            TASK_AI_DIAG_COOLDOWN_FALLBACK.pop(normalized_key, None)
+            return 0
+        return remaining
+
+
+def _apply_ai_diag_cooldown_to_runtime_config(
+    client_id: str | None,
+    runtime_config: dict | None,
+    scope: str = "",
+) -> tuple[dict, int]:
+    base_config = dict(runtime_config or {})
+    remaining = _get_client_ai_diag_cooldown_remaining_seconds(client_id)
+    if remaining <= 0:
+        return base_config, 0
+    base_config["enabled"] = False
+    base_config["cooldown_rule_only"] = True
+    base_config["cooldown_remaining_seconds"] = remaining
+    base_config["cooldown_scope"] = str(scope or "").strip()
+    return base_config, remaining
+
+
+def _is_ai_guard_high_risk(ai_guard_result: dict | None) -> bool:
+    if not isinstance(ai_guard_result, dict):
+        return False
+    action = str(ai_guard_result.get("action") or "").strip().lower()
+    return bool(ai_guard_result.get("suspected")) and action in {"review", "block"}
+
+
+def _attach_freeze_alert_to_risk_scan(risk_scan: dict | None, client_id: str, freeze_record: dict | None) -> dict:
+    merged = dict(risk_scan or {})
+    alert = _build_client_freeze_compliance_alert(client_id, freeze_record)
+    if alert:
+        merged["compliance_alert"] = alert
+        merged["client_frozen"] = True
+    return merged
+
+
+def _build_client_frozen_error_detail(client_id: str, freeze_record: dict | None = None) -> dict:
+    normalized_client_id = _normalize_client_id(client_id)
+    record = _normalize_client_freeze_record(freeze_record or {}, default_client_id=normalized_client_id)
+    if not record:
+        record = _normalize_client_freeze_record(
+            {
+                "client_id": normalized_client_id,
+                "reason": "AI risk guard flagged high risk",
+                "source": "ai_risk_guard",
+                "source_task_id": "",
+                "frozen_at": datetime.now().isoformat(),
+                "operator": "system",
+                "contact": TASK_AI_FREEZE_CONTACT,
+            },
+            default_client_id=normalized_client_id,
+        ) or {}
+    return {
+        "code": "client_frozen_by_ai_risk",
+        "message": "client is frozen by ai risk guard",
+        "client_id": normalized_client_id,
+        "frozen": True,
+        "reason": str(record.get("reason") or "AI risk guard flagged high risk"),
+        "source_task_id": str(record.get("source_task_id") or ""),
+        "frozen_at": str(record.get("frozen_at") or ""),
+        "contact": str(record.get("contact") or TASK_AI_FREEZE_CONTACT),
+        "action": "contact_developer_to_unfreeze",
+        "cooldown_seconds": int(TASK_AI_DIAG_COOLDOWN_SECONDS),
+    }
+
+
+def _raise_if_client_frozen_for_build(client_id: str | None) -> None:
+    normalized_client_id = _normalize_client_id(client_id)
+    if not normalized_client_id:
+        return
+    record = _get_client_freeze_record(normalized_client_id)
+    if not record:
+        return
+    raise HTTPException(
+        status_code=423,
+        detail=_build_client_frozen_error_detail(normalized_client_id, freeze_record=record),
+    )
 
 
 def _sms_redis_key(suffix: str) -> str:
@@ -2017,13 +3113,25 @@ def _schedule_task_failure_diagnosis(
             return False
         TASK_DIAGNOSIS_RUNNING_IDS.add(task_id)
 
+    client_id = str(getattr(task, "client_id", "") or "")
+    ai_runtime_config = _resolve_shared_ai_runtime_config(client_id=client_id)
+    ai_runtime_config, ai_cooldown_remaining = _apply_ai_diag_cooldown_to_runtime_config(
+        client_id,
+        ai_runtime_config,
+        scope="failure_diagnosis",
+    )
+    diagnosis_runtime = resolve_openrouter_diag_runtime_config(ai_config=ai_runtime_config)
     log_lines = _collect_task_failure_log_lines(task_id, task)
     task.failure_diagnosis = create_running_diagnosis(
-        provider="openrouter" if OPENROUTER_DIAG_ENABLED else "rule",
-        model=OPENROUTER_MODEL if OPENROUTER_DIAG_ENABLED else "",
+        provider="openrouter" if bool(diagnosis_runtime.get("enabled")) else "rule",
+        model=str(diagnosis_runtime.get("model") or "") if bool(diagnosis_runtime.get("enabled")) else "",
         analyzed_log_lines=len(log_lines),
         language=normalized_language,
     )
+    if ai_cooldown_remaining > 0 and isinstance(task.failure_diagnosis, dict):
+        task.failure_diagnosis["cooldown_rule_only"] = True
+        task.failure_diagnosis["cooldown_remaining_seconds"] = ai_cooldown_remaining
+        task.failure_diagnosis["cooldown_seconds"] = int(TASK_AI_DIAG_COOLDOWN_SECONDS)
     task.updated_at = datetime.now()
     try:
         persist_tasks_db(force=True)
@@ -2038,6 +3146,7 @@ def _schedule_task_failure_diagnosis(
                 "output_format": str(getattr(getattr(task, "config", None), "output_format", "apk") or "apk"),
                 "app_name": str(getattr(getattr(task, "config", None), "app_name", "") or ""),
                 "package_name": str(getattr(getattr(task, "config", None), "package_name", "") or ""),
+                "client_id": client_id,
                 "language": normalized_language,
             }
             diagnosis = diagnose_build_failure(
@@ -2045,18 +3154,37 @@ def _schedule_task_failure_diagnosis(
                 failure_message=str(getattr(task, "message", "") or ""),
                 task_meta=task_meta,
                 language=normalized_language,
+                ai_config=ai_runtime_config,
             )
             task.failure_diagnosis = (
                 diagnosis
                 if isinstance(diagnosis, dict)
                 else create_failed_diagnosis("invalid diagnosis payload", language=normalized_language)
             )
+            if isinstance(task.failure_diagnosis, dict):
+                provider = str(task.failure_diagnosis.get("provider") or "").strip().lower()
+                diag_status = str(task.failure_diagnosis.get("status") or "").strip().lower()
+                if provider and provider != "rule" and diag_status == "succeeded":
+                    _set_client_ai_diag_cooldown(
+                        client_id,
+                        ttl_seconds=TASK_AI_DIAG_COOLDOWN_SECONDS,
+                        task_id=task_id,
+                        source="failure_diagnosis",
+                    )
+                if ai_cooldown_remaining > 0:
+                    task.failure_diagnosis["cooldown_rule_only"] = True
+                    task.failure_diagnosis["cooldown_remaining_seconds"] = ai_cooldown_remaining
+                    task.failure_diagnosis["cooldown_seconds"] = int(TASK_AI_DIAG_COOLDOWN_SECONDS)
         except Exception as exc:
             task.failure_diagnosis = create_failed_diagnosis(
                 str(exc),
                 analyzed_log_lines=len(log_lines),
                 language=normalized_language,
             )
+            if ai_cooldown_remaining > 0 and isinstance(task.failure_diagnosis, dict):
+                task.failure_diagnosis["cooldown_rule_only"] = True
+                task.failure_diagnosis["cooldown_remaining_seconds"] = ai_cooldown_remaining
+                task.failure_diagnosis["cooldown_seconds"] = int(TASK_AI_DIAG_COOLDOWN_SECONDS)
         finally:
             task.updated_at = datetime.now()
             with TASK_DIAGNOSIS_LOCK:
@@ -3370,7 +4498,11 @@ async def create_task(task_data: BuildTaskCreate):
     now = datetime.now()
     client_id = _require_client_id(task_data.client_id)
     declared_use_case = _normalize_declared_use_case(task_data.declared_use_case)
-    _validate_task_compliance_or_raise(task_data.compliance_ack, declared_use_case)
+    _validate_task_compliance_or_raise(
+        task_data.compliance_ack,
+        declared_use_case,
+        client_id=client_id,
+    )
 
     mode = (task_data.mode or "convert").strip().lower()
     if mode not in {"convert", "web", "html", "desktop"}:
@@ -3556,7 +4688,7 @@ async def create_task(task_data: BuildTaskCreate):
 
     risk_scan_zip_path = task_input_dir / "project.zip"
     risk_scan_html_path = task_input_dir / "index.html"
-    risk_scan = _scan_task_risk_inputs(
+    base_risk_scan = _scan_task_risk_inputs(
         client_id=client_id,
         app_name=effective_config.app_name,
         package_name=effective_config.package_name,
@@ -3565,9 +4697,63 @@ async def create_task(task_data: BuildTaskCreate):
         zip_path=risk_scan_zip_path if risk_scan_zip_path.exists() else None,
         html_path=risk_scan_html_path if risk_scan_html_path.exists() else None,
     )
+    ai_runtime_config = _resolve_shared_ai_runtime_config(client_id=client_id)
+    ai_runtime_config, ai_cooldown_remaining = _apply_ai_diag_cooldown_to_runtime_config(
+        client_id,
+        ai_runtime_config,
+        scope="risk_guard_task_create",
+    )
+    ai_guard_result = _run_ai_marketplace_guard_for_task(
+        task_id=task_id,
+        app_name=effective_config.app_name,
+        package_name=effective_config.package_name,
+        declared_use_case=declared_use_case,
+        web_url=web_url,
+        zip_path=risk_scan_zip_path if risk_scan_zip_path.exists() else None,
+        html_path=risk_scan_html_path if risk_scan_html_path.exists() else None,
+        risk_scan=base_risk_scan,
+        ai_config=ai_runtime_config,
+    )
+    if ai_cooldown_remaining > 0:
+        ai_guard_result = dict(ai_guard_result or {})
+        ai_guard_result["cooldown_rule_only"] = True
+        ai_guard_result["cooldown_remaining_seconds"] = ai_cooldown_remaining
+        ai_guard_result["status"] = "rule_only"
+        ai_guard_result["error"] = "ai_rule_only_cooldown"
+
+    risk_scan = _apply_ai_guard_result_to_risk_scan(base_risk_scan, ai_guard_result)
+    ai_guard_status = str(ai_guard_result.get("status") or "").strip().lower()
+    ai_guard_error = str(ai_guard_result.get("error") or "").strip()
+    ai_used = ai_guard_status in {"allowed", "blocked"} and not ai_guard_error
+    if ai_used:
+        _set_client_ai_diag_cooldown(
+            client_id,
+            ttl_seconds=TASK_AI_DIAG_COOLDOWN_SECONDS,
+            task_id=task_id,
+            source="risk_guard_task_create",
+        )
+
+    freeze_record = None
+    if _is_ai_guard_high_risk(ai_guard_result):
+        freeze_record = _freeze_client_by_ai_risk(
+            client_id=client_id,
+            task_id=task_id,
+            reason=str(ai_guard_result.get("reason") or "AI risk guard flagged high risk"),
+            evidence=list(ai_guard_result.get("evidence") or []),
+        )
+        risk_scan = _attach_freeze_alert_to_risk_scan(risk_scan, client_id, freeze_record)
+    else:
+        existing_freeze_record = _get_client_freeze_record(client_id)
+        if existing_freeze_record:
+            freeze_record = existing_freeze_record
+            risk_scan = _attach_freeze_alert_to_risk_scan(risk_scan, client_id, freeze_record)
+
     risk_level = str(risk_scan.get("risk_level") or "normal").strip().lower()
+    if freeze_record:
+        risk_level = "high"
+        risk_scan["risk_level"] = "high"
     allowlisted_for_review = _is_risk_review_allowlisted(client_id)
-    review_required = _requires_risk_review(client_id, risk_scan)
+    review_required = True if freeze_record else _requires_risk_review(client_id, risk_scan)
     review_status = (
         RISK_REVIEW_STATUS_PENDING
         if review_required
@@ -3576,8 +4762,19 @@ async def create_task(task_data: BuildTaskCreate):
     review_requested_at = now if review_required else None
     review_decision_at = now if (risk_level == "high" and not review_required) else None
     review_decision_by = "allowlist" if (risk_level == "high" and allowlisted_for_review and not review_required) else None
-    review_note = "风险命中但已在放行名单内" if (risk_level == "high" and allowlisted_for_review and not review_required) else None
-    pending_message = "命中高风险规则，等待管理人员审核放行" if review_required else "等待构建中"
+    if review_required:
+        review_note = str(
+            (freeze_record or {}).get("reason")
+            or ai_guard_result.get("reason")
+            or "High-risk signals detected, waiting for admin review"
+        ).strip()[:160] or None
+    else:
+        review_note = "风险命中但已在放行名单内" if (risk_level == "high" and allowlisted_for_review) else None
+    pending_message = (
+        "AI marked this client as high risk and frozen. Please contact developer to unfreeze."
+        if freeze_record
+        else ("命中高风险规则，等待管理人员审核放行" if review_required else "等待构建中")
+    )
 
     task = BuildTask(
         id=task_id,
@@ -3778,6 +4975,42 @@ async def reject_risk_review_task(task_id: str, request: Request, payload: dict 
     return task
 
 
+@app.get("/api/client-freeze/status")
+async def get_client_freeze_status(client_id: str = None):
+    normalized_client_id = _require_client_id(client_id)
+    record = _get_client_freeze_record(normalized_client_id)
+    return {
+        "client_id": normalized_client_id,
+        "frozen": bool(record),
+        "freeze": record or {},
+        "cooldown_remaining_seconds": _get_client_ai_diag_cooldown_remaining_seconds(normalized_client_id),
+        "cooldown_seconds": int(TASK_AI_DIAG_COOLDOWN_SECONDS),
+    }
+
+
+@app.get("/api/client-freeze/list")
+async def list_client_freeze_records(request: Request, keyword: str | None = None, limit: int = 200):
+    _require_risk_review_admin_access(request)
+    records = _list_client_freeze_records(limit=limit, keyword=keyword)
+    return {
+        "total": len(records),
+        "items": records,
+    }
+
+
+@app.post("/api/client-freeze/unfreeze")
+async def unfreeze_client_freeze_record(request: Request, payload: dict = Body(...)):
+    operator = _require_risk_review_admin_access(request)
+    target_client_id = _require_client_id(payload.get("client_id"))
+    note = str(payload.get("note") or "").strip()
+    result = _unfreeze_client_by_admin(
+        target_client_id,
+        operator=operator,
+        note=note,
+    )
+    return result
+
+
 @app.delete("/api/tasks/{task_id}")
 async def delete_task(task_id: str, client_id: str = None):
     """删除任务"""
@@ -3847,14 +5080,31 @@ async def start_task(task_id: str, client_id: str = None):
     """开始构建任务"""
     if task_id not in tasks_db:
         raise HTTPException(status_code=404, detail="任务不存在")
-    
+
     task = tasks_db[task_id]
     client_id = _require_client_id(client_id)
     _assert_task_owner(task, client_id)
-    
+    _raise_if_client_frozen_for_build(client_id)
+
     if task.status != BuildStatus.PENDING:
         raise HTTPException(status_code=400, detail="任务状态不允许启动")
     if not _is_task_review_approved(task):
+        review_status = str(getattr(task, "review_status", "") or "").strip().lower()
+        if review_status == RISK_REVIEW_STATUS_REJECTED:
+            raise HTTPException(status_code=403, detail="task was rejected by admin risk review")
+        raise HTTPException(status_code=403, detail="task is pending admin risk review")
+
+    risk_guard_context = _refresh_task_risk_guard_before_start(task_id, task, client_id)
+    if not _is_task_review_approved(task):
+        try:
+            persist_tasks_db(force=True)
+        except Exception:
+            pass
+        try:
+            _sync_task_risk_review_to_admin(task_id, task)
+        except Exception:
+            pass
+        _raise_if_client_frozen_for_build(client_id)
         review_status = str(getattr(task, "review_status", "") or "").strip().lower()
         if review_status == RISK_REVIEW_STATUS_REJECTED:
             raise HTTPException(status_code=403, detail="task was rejected by admin risk review")
@@ -3869,8 +5119,7 @@ async def start_task(task_id: str, client_id: str = None):
         elif not status["ready"]:
             detail = status.get("error") or "Build environment is not ready"
             raise HTTPException(status_code=503, detail=detail)
-    
-    # 更新任务状态
+
     task.status = BuildStatus.PROCESSING
     task.progress = 5
     task.message = "正在启动构建..."
@@ -3878,7 +5127,7 @@ async def start_task(task_id: str, client_id: str = None):
     task.updated_at = datetime.now()
 
     try:
-        config_data = task.config.model_dump() if hasattr(task.config, 'model_dump') else task.config.dict()
+        config_data = task.config.model_dump() if hasattr(task.config, "model_dump") else task.config.dict()
     except Exception:
         config_data = {}
     config_data["build_type"] = task.mode
@@ -3886,13 +5135,21 @@ async def start_task(task_id: str, client_id: str = None):
     if task.mode == "web" and task.web_url:
         config_data["web_url"] = task.web_url
     config_data.update(_build_task_risk_sync_meta(task))
-    task_input_dir = TASKS_DIR / task_id / "input"
-    ensure_task_input_assets(task_id, task_input_dir)
-    persisted_zip_path = get_persisted_task_asset_path(task_id, "project.zip")
-    persisted_html_path = get_persisted_task_asset_path(task_id, "index.html")
-    zip_path = persisted_zip_path if persisted_zip_path.exists() else _resolve_task_asset_path(task_id, "project.zip")
-    html_path = persisted_html_path if persisted_html_path.exists() else _resolve_task_asset_path(task_id, "index.html")
-    icon_path = _resolve_task_asset_path(task_id, "logo.png")
+    task_input_dir = risk_guard_context.get("task_input_dir")
+    if not isinstance(task_input_dir, Path):
+        task_input_dir = TASKS_DIR / task_id / "input"
+        ensure_task_input_assets(task_id, task_input_dir)
+    zip_path = risk_guard_context.get("zip_path")
+    if not isinstance(zip_path, Path):
+        persisted_zip_path = get_persisted_task_asset_path(task_id, "project.zip")
+        zip_path = persisted_zip_path if persisted_zip_path.exists() else _resolve_task_asset_path(task_id, "project.zip")
+    html_path = risk_guard_context.get("html_path")
+    if not isinstance(html_path, Path):
+        persisted_html_path = get_persisted_task_asset_path(task_id, "index.html")
+        html_path = persisted_html_path if persisted_html_path.exists() else _resolve_task_asset_path(task_id, "index.html")
+    icon_path = risk_guard_context.get("icon_path")
+    if not isinstance(icon_path, Path):
+        icon_path = _resolve_task_asset_path(task_id, "logo.png")
     zip_info = {
         "build_type": task.mode,
         "risk_level": task.risk_level,
@@ -3902,7 +5159,6 @@ async def start_task(task_id: str, client_id: str = None):
     }
     if zip_path.exists():
         zip_info.update({"name": zip_path.name, "size": zip_path.stat().st_size})
-    report_task_start(task_id, task.client_id or '', task.updated_at.isoformat(), zip_info, config_data)
     upload_task_assets(
         task_id,
         task.client_id or "",
@@ -3915,17 +5171,30 @@ async def start_task(task_id: str, client_id: str = None):
         keystore_path=None,
         keystore_info={},
     )
-    flush_task_assets_queue()
 
-    
-    # 启动后台构建任务
     try:
-        runner = get_task_runner()
-        runner.start_build(task_id)
-    except Exception as e:
+        report_task_start(
+            task_id=task.id,
+            client_id=task.client_id,
+            start_time=task.updated_at.isoformat(),
+            zip_info=zip_info,
+            app_config=config_data
+        )
+    except Exception:
+        pass
+
+    runner = get_task_runner()
+    task_output_dir = TASKS_DIR / task_id / "output"
+    task_keystore_dir = TASKS_DIR / task_id / "keystore"
+    ensure_task_input_assets(task_id, task_input_dir)
+    task_output_dir.mkdir(parents=True, exist_ok=True)
+    task_keystore_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        runner.start_build(task.id)
+    except Exception as exc:
         task.status = BuildStatus.FAILED
-        task.message = f"启动构建失败: {str(e)}"
-        task.failure_diagnosis = create_failed_diagnosis(str(e), analyzed_log_lines=0)
+        task.message = f"启动构建失败: {str(exc)}"
+        task.failure_diagnosis = create_failed_diagnosis(str(exc), analyzed_log_lines=0)
         task.updated_at = datetime.now()
     try:
         persist_tasks_db(force=True)
@@ -3935,7 +5204,6 @@ async def start_task(task_id: str, client_id: str = None):
         _sync_task_risk_review_to_admin(task_id, task)
     except Exception:
         pass
-
     return task
 
 
@@ -4166,6 +5434,7 @@ async def update_task(task_id: str, update_data: UpdateTaskRequest):
     task = tasks_db[task_id]
     client_id = _require_client_id(update_data.client_id)
     _assert_task_owner(task, client_id)
+    _raise_if_client_frozen_for_build(client_id)
     
     if task.status != BuildStatus.SUCCESS:
         raise HTTPException(status_code=400, detail="只能更新已成功的任务")
@@ -4704,3 +5973,5 @@ if __name__ == "__main__":
     print("[Docs] 文档: http://localhost:8000/docs")
     port = int(os.getenv("CONVERTAPK_PORT", "8000"))
     uvicorn.run(app, host="0.0.0.0", port=port)
+
+

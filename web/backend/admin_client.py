@@ -15,6 +15,11 @@ try:
     _FEATURE_FLAGS_TTL = max(0.0, float(os.getenv("ADMIN_FEATURE_FLAGS_CACHE_TTL", "5")))
 except Exception:
     _FEATURE_FLAGS_TTL = 5.0
+_AI_API_URL_DEFAULT = "https://openrouter.ai/api/v1/chat/completions"
+_AI_MODEL_DEFAULT = "qwen/qwen3.5-flash-02-23"
+_AI_TIMEOUT_SECONDS_DEFAULT = 18
+_AI_TIMEOUT_SECONDS_MIN = 8
+_AI_TIMEOUT_SECONDS_MAX = 120
 
 
 def _safe_path_segment(value: str, fallback: str) -> str:
@@ -257,6 +262,12 @@ def fetch_feature_flags(client_id: str = "", force: bool = False) -> Dict[str, A
         "upload_max_size_mb": 200,
         "risk_scan_block_keywords": [],
         "risk_scan_domain_keywords": [],
+        "ai_enabled": True,
+        "ai_provider": "openrouter",
+        "ai_api_url": _AI_API_URL_DEFAULT,
+        "ai_api_key": "",
+        "ai_model": _AI_MODEL_DEFAULT,
+        "ai_timeout_seconds": _AI_TIMEOUT_SECONDS_DEFAULT,
     }
 
     def _normalize_keyword_list(value: Any) -> List[str]:
@@ -279,6 +290,17 @@ def fetch_feature_flags(client_id: str = "", force: bool = False) -> Dict[str, A
             keywords.append(keyword)
         return keywords
 
+    def _normalize_ai_timeout_seconds(value: Any) -> int:
+        try:
+            timeout_seconds = int(value)
+        except Exception:
+            return _AI_TIMEOUT_SECONDS_DEFAULT
+        if timeout_seconds < _AI_TIMEOUT_SECONDS_MIN:
+            return _AI_TIMEOUT_SECONDS_MIN
+        if timeout_seconds > _AI_TIMEOUT_SECONDS_MAX:
+            return _AI_TIMEOUT_SECONDS_MAX
+        return timeout_seconds
+
     if isinstance(data, dict):
         result["web_link_to_apk_enabled"] = bool(data.get("web_link_to_apk_enabled"))
         result["zip_to_desktop_enabled"] = bool(data.get("zip_to_desktop_enabled"))
@@ -300,6 +322,23 @@ def fetch_feature_flags(client_id: str = "", force: bool = False) -> Dict[str, A
             result["risk_scan_block_keywords"] = _normalize_keyword_list(data.get("risk_scan_block_keywords"))
         if "risk_scan_domain_keywords" in data:
             result["risk_scan_domain_keywords"] = _normalize_keyword_list(data.get("risk_scan_domain_keywords"))
+        if "ai_enabled" in data:
+            result["ai_enabled"] = bool(data.get("ai_enabled"))
+        if "ai_provider" in data:
+            ai_provider = str(data.get("ai_provider") or "").strip().lower()
+            result["ai_provider"] = ai_provider or "openrouter"
+        if "ai_api_url" in data:
+            ai_api_url = str(data.get("ai_api_url") or "").strip()
+            if ai_api_url:
+                result["ai_api_url"] = ai_api_url
+        if "ai_api_key" in data:
+            result["ai_api_key"] = str(data.get("ai_api_key") or "").strip()
+        if "ai_model" in data:
+            ai_model = str(data.get("ai_model") or "").strip()
+            if ai_model:
+                result["ai_model"] = ai_model
+        if "ai_timeout_seconds" in data:
+            result["ai_timeout_seconds"] = _normalize_ai_timeout_seconds(data.get("ai_timeout_seconds"))
     _FEATURE_FLAGS_CACHE[cache_key] = {
         "data": result,
         "checked_at": now,

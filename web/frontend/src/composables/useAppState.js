@@ -607,6 +607,15 @@ export const useAppState = () => {
   const taskDeclaredUseCaseMinLength = 6
   const taskDeclaredUseCaseMaxLength = 200
   const previousVersionName = ref('')
+  const clientFreezeState = ref({
+    frozen: false,
+    reason: '',
+    contact: '',
+    source_task_id: '',
+    frozen_at: '',
+    cooldown_remaining_seconds: 0,
+    cooldown_seconds: 600
+  })
 
   const complianceNoticeByLang = {
     en: {
@@ -804,6 +813,11 @@ export const useAppState = () => {
   })
   const normalizedTaskDeclaredUseCase = computed(() => String(taskDeclaredUseCase.value || '').trim().replace(/\s+/g, ' '))
   const taskComplianceError = computed(() => {
+    if (clientFreezeState.value.frozen) {
+      return t('config.clientFrozenByRisk', {
+        reason: clientFreezeState.value.reason || t('config.clientFrozenByRiskDefaultReason')
+      })
+    }
     if (updatingTaskId.value) return ''
     if (!taskComplianceAck.value) return t('config.taskComplianceAckRequired')
     const useCaseLength = normalizedTaskDeclaredUseCase.value.length
@@ -1080,8 +1094,65 @@ export const useAppState = () => {
     }
     showToast(fallback, 'error')
   }
+  const getErrorDetailPayload = (error) => error?.response?.data?.detail
+  const getErrorDetailText = (error) => {
+    const detail = getErrorDetailPayload(error)
+    if (typeof detail === 'string') return detail.trim().toLowerCase()
+    if (detail && typeof detail === 'object') {
+      const code = String(detail?.code || '').trim().toLowerCase()
+      const message = String(detail?.message || '').trim().toLowerCase()
+      const reason = String(detail?.reason || '').trim().toLowerCase()
+      const source = `${code} ${message} ${reason}`.trim()
+      if (source) return source
+    }
+    return String(error?.message || '').trim().toLowerCase()
+  }
+  const normalizeFreezeState = (payload = {}) => {
+    const freeze = payload?.freeze && typeof payload.freeze === 'object' ? payload.freeze : payload
+    const frozen = Boolean(payload?.frozen ?? freeze?.frozen)
+    const reason = String(freeze?.reason || '').trim()
+    const contact = String(freeze?.contact || '').trim()
+    const sourceTaskId = String(freeze?.source_task_id || '').trim()
+    const frozenAt = String(freeze?.frozen_at || '').trim()
+    const cooldownRemainingSeconds = Number(payload?.cooldown_remaining_seconds || freeze?.cooldown_remaining_seconds || 0)
+    const cooldownSeconds = Number(payload?.cooldown_seconds || freeze?.cooldown_seconds || 600)
+    return {
+      frozen,
+      reason,
+      contact,
+      source_task_id: sourceTaskId,
+      frozen_at: frozenAt,
+      cooldown_remaining_seconds: Number.isFinite(cooldownRemainingSeconds) ? Math.max(0, Math.round(cooldownRemainingSeconds)) : 0,
+      cooldown_seconds: Number.isFinite(cooldownSeconds) && cooldownSeconds > 0 ? Math.round(cooldownSeconds) : 600
+    }
+  }
+  const extractClientFrozenDetail = (error) => {
+    const detail = getErrorDetailPayload(error)
+    if (detail && typeof detail === 'object') {
+      const code = String(detail?.code || '').trim().toLowerCase()
+      const message = String(detail?.message || '').trim().toLowerCase()
+      if (code === 'client_frozen_by_ai_risk' || message.includes('client is frozen by ai risk guard')) {
+        return normalizeFreezeState(detail)
+      }
+    }
+    const detailText = getErrorDetailText(error)
+    if (detailText.includes('client is frozen by ai risk guard')) {
+      return normalizeFreezeState({ frozen: true })
+    }
+    return null
+  }
+  const applyClientFreezeState = (payload) => {
+    clientFreezeState.value = normalizeFreezeState(payload || {})
+  }
   const resolveCreateTaskErrorMessage = (error) => {
-    const detail = String(error?.response?.data?.detail || error?.message || '').trim().toLowerCase()
+    const freezeDetail = extractClientFrozenDetail(error)
+    if (freezeDetail && freezeDetail.frozen) {
+      applyClientFreezeState(freezeDetail)
+      return t('config.clientFrozenByRisk', {
+        reason: freezeDetail.reason || t('config.clientFrozenByRiskDefaultReason')
+      })
+    }
+    const detail = getErrorDetailText(error)
     if (!detail) return ''
     if (detail.includes('compliance confirmation is required')) return t('config.taskComplianceAckRequired')
     if (detail.includes('declared use case is required')) {
@@ -1095,12 +1166,70 @@ export const useAppState = () => {
   }
 
   const resolveStartTaskErrorMessage = (error) => {
-    const detail = String(error?.response?.data?.detail || error?.message || '').trim().toLowerCase()
+    const freezeDetail = extractClientFrozenDetail(error)
+    if (freezeDetail && freezeDetail.frozen) {
+      applyClientFreezeState(freezeDetail)
+      return t('config.clientFrozenByRisk', {
+        reason: freezeDetail.reason || t('config.clientFrozenByRiskDefaultReason')
+      })
+    }
+    const detail = getErrorDetailText(error)
     if (!detail) return ''
     if (detail.includes('task is pending admin risk review')) return t('toast.riskReviewPending')
     if (detail.includes('task was rejected by admin risk review')) return t('toast.riskReviewRejected')
     return ''
   }
+
+  const extractRiskReviewReason = (taskLike) => {
+    if (!taskLike || typeof taskLike !== 'object') return ''
+    const aiReason = String(taskLike?.risk_scan?.ai_guard?.reason || '').replace(/\s+/g, ' ').trim()
+    if (aiReason) return aiReason.slice(0, 180)
+    const reviewNote = String(taskLike?.review_note || '').replace(/\s+/g, ' ').trim()
+    if (reviewNote) return reviewNote.slice(0, 180)
+    const fieldHits = Array.isArray(taskLike?.risk_scan?.field_hits) ? taskLike.risk_scan.field_hits : []
+    if (fieldHits.length) {
+      const top = fieldHits
+        .slice(0, 3)
+        .map((item) => {
+          const field = String(item?.field || '').trim()
+          const keyword = String(item?.keyword || '').trim()
+          if (field && keyword) return `${field}: ${keyword}`
+          return keyword || field
+        })
+        .filter(Boolean)
+      if (top.length) return top.join(' | ').slice(0, 180)
+    }
+    const domainHits = Array.isArray(taskLike?.risk_scan?.domain_hits) ? taskLike.risk_scan.domain_hits : []
+    if (domainHits.length) {
+      const topDomains = domainHits
+        .slice(0, 3)
+        .map((item) => String(item?.domain || item?.keyword || '').trim())
+        .filter(Boolean)
+      if (topDomains.length) return topDomains.join(' | ').slice(0, 180)
+    }
+    return ''
+  }
+
+  const extractClientFreezeStateFromTask = (taskLike) => {
+    if (!taskLike || typeof taskLike !== 'object') return null
+    const alert = taskLike?.risk_scan?.compliance_alert
+    if (!alert || typeof alert !== 'object') return null
+    const code = String(alert?.code || '').trim().toLowerCase()
+    if (code !== 'client_frozen_by_ai_risk') return null
+    const reason = String(alert?.reason || extractRiskReviewReason(taskLike) || '').trim()
+    return normalizeFreezeState({
+      frozen: true,
+      freeze: {
+        reason,
+        contact: String(alert?.contact || '').trim(),
+        source_task_id: String(alert?.source_task_id || '').trim(),
+        frozen_at: String(alert?.frozen_at || '').trim(),
+      },
+    })
+  }
+
+  const isRiskReviewPendingError = (error) => getErrorDetailText(error).includes('task is pending admin risk review')
+  const isRiskReviewRejectedError = (error) => getErrorDetailText(error).includes('task was rejected by admin risk review')
 
   const showAuthModal = ref(false)
   const authMode = ref('login')
@@ -1625,6 +1754,9 @@ export const useAppState = () => {
   })
 
   const canCreateTask = computed(() => {
+    if (clientFreezeState.value.frozen) {
+      return false
+    }
     if (mode.value === 'web' && !isWebModeEnabled.value) {
       return false
     }
@@ -2868,6 +3000,9 @@ export const useAppState = () => {
 
   const startTaskDirectly = async (taskId, options = {}) => {
     try {
+      if (options.showRiskReviewingNotice !== false) {
+        showToast(t('toast.aiRiskReviewing'), 'warning')
+      }
       await api.startTask(taskId)
       if (options.notify !== false) {
         showToast(t('toast.taskStarted'), 'success')
@@ -2875,6 +3010,27 @@ export const useAppState = () => {
       await refreshTasks()
       startPolling()
     } catch (error) {
+      if (isRiskReviewPendingError(error)) {
+        let reason = ''
+        try {
+          const latestTask = await api.getTask(taskId)
+          reason = extractRiskReviewReason(latestTask)
+        } catch {
+          reason = ''
+        }
+        if (reason) {
+          showToast(t('toast.riskReviewPendingWithReason', { reason }), 'warning')
+        } else {
+          showToast(t('toast.riskReviewPending'), 'warning')
+        }
+        await refreshTasks()
+        return
+      }
+      if (isRiskReviewRejectedError(error)) {
+        showToast(t('toast.riskReviewRejected'), 'error')
+        await refreshTasks()
+        return
+      }
       const mappedMessage = resolveStartTaskErrorMessage(error)
       if (mappedMessage) {
         showToast(mappedMessage, 'error')
@@ -3119,7 +3275,17 @@ export const useAppState = () => {
         return
       }
     }
-    if (!canCreateTask.value) return
+    if (!canCreateTask.value) {
+      if (clientFreezeState.value.frozen) {
+        showToast(
+          t('config.clientFrozenByRisk', {
+            reason: clientFreezeState.value.reason || t('config.clientFrozenByRiskDefaultReason')
+          }),
+          'error'
+        )
+      }
+      return
+    }
     if (mode.value === 'web' && !isWebModeEnabled.value) {
       showToast('Web（链接）转 APK 模式已关闭', 'error')
       return
@@ -3237,11 +3403,26 @@ export const useAppState = () => {
         const created = await api.createTask(taskData)
         currentStep.value = 3
         showToast(t('toast.taskCreated'), 'success')
+        const freezeState = extractClientFreezeStateFromTask(created)
+        if (freezeState?.frozen) {
+          applyClientFreezeState(freezeState)
+          showToast(
+            t('config.clientFrozenByRisk', {
+              reason: freezeState.reason || t('config.clientFrozenByRiskDefaultReason')
+            }),
+            'warning'
+          )
+        }
         const reviewRequired = Boolean(created?.review_required)
         const reviewStatus = String(created?.review_status || '').trim().toLowerCase()
         const requiresManualReview = reviewRequired && reviewStatus !== 'approved'
         if (requiresManualReview) {
-          showToast(t('toast.riskReviewPending'), 'error')
+          const reason = extractRiskReviewReason(created)
+          if (reason) {
+            showToast(t('toast.riskReviewPendingWithReason', { reason }), 'warning')
+          } else {
+            showToast(t('toast.riskReviewPending'), 'warning')
+          }
           await refreshTasks()
         } else {
           const canStartBuild = await requestRewardAdBeforeBuild()
@@ -3426,6 +3607,14 @@ export const useAppState = () => {
   }
 
   const closeSettings = () => (showSettings.value = false)
+  const refreshClientFreezeStatus = async () => {
+    try {
+      const result = await api.getClientFreezeStatus()
+      applyClientFreezeState(result || {})
+    } catch {
+      // ignore
+    }
+  }
   const fetchAdminFeatures = async () => {
     try {
       const result = await api.getAdminFeatures()
@@ -3470,6 +3659,7 @@ export const useAppState = () => {
       authSmsSending.value = false
       stopAuthSmsCountdown()
     }
+    await refreshClientFreezeStatus()
   }
   const fetchAnnouncements = async () => {
     try {

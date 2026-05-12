@@ -2097,6 +2097,7 @@ html.light-theme .html-editor-toolbar {
 }
 .toast.success { border-left: 4px solid var(--success-start); }
 .toast.error { border-left: 4px solid var(--error-start); }
+.toast.warning { border-left: 4px solid var(--warning-start); }
 
 @keyframes slideUp {
   from { transform: translateY(100px); opacity: 0; }
