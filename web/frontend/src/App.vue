@@ -910,21 +910,7 @@
                   <input type="checkbox" v-model="taskComplianceAck" />
                   {{ t('config.taskComplianceAckLabel') }}
                 </label>
-                <div class="form-group" style="margin-bottom: 0;">
-                  <label class="form-label">{{ t('config.taskUseCaseLabel') }}</label>
-                  <input
-                    v-model.trim="taskDeclaredUseCase"
-                    type="text"
-                    class="form-input"
-                    :class="{ 'input-error': taskComplianceError }"
-                    :maxlength="taskDeclaredUseCaseMaxLength"
-                    :placeholder="t('config.taskUseCasePlaceholder')"
-                  />
-                  <div class="task-compliance-counter">
-                    {{ normalizedTaskDeclaredUseCase.length }} / {{ taskDeclaredUseCaseMaxLength }}
-                  </div>
-                  <div v-if="taskComplianceError" class="form-error">{{ taskComplianceError }}</div>
-                </div>
+                <div v-if="taskComplianceError" class="form-error">{{ taskComplianceError }}</div>
               </div>
 
               <button

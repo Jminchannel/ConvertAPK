@@ -603,9 +603,6 @@ export const useAppState = () => {
   const donationAutoDisabled = ref(localStorage.getItem('apk_builder_donation_hide') === '1')
   const showComplianceNotice = ref(true)
   const taskComplianceAck = ref(false)
-  const taskDeclaredUseCase = ref('')
-  const taskDeclaredUseCaseMinLength = 6
-  const taskDeclaredUseCaseMaxLength = 200
   const previousVersionName = ref('')
   const clientFreezeState = ref({
     frozen: false,
@@ -619,189 +616,191 @@ export const useAppState = () => {
 
   const complianceNoticeByLang = {
     en: {
-      title: 'User Service Agreement',
+      title: 'User Agreement and Terms of Service',
       effectiveDateLabel: 'Effective date',
-      effectiveDate: '2026-04-10',
+      effectiveDate: '2026-05-13',
       intro:
         'Please read this agreement carefully before using the client and related services. By clicking "Agree and Continue", you confirm that you have read, understood, and accepted all terms.',
       sections: [
         {
           title: '1. Scope and Acceptance',
           lines: [
-            'This agreement applies to all features provided by this client, including upload, packaging, build, download, and log viewing.',
+            'This agreement applies to upload, packaging, build, download, log viewing, and all related functions.',
             'If you do not agree with any term, please stop using the service immediately.'
           ]
         },
         {
-          title: '2. Account and Security',
+          title: '2. Lawful Use and Authorization',
           lines: [
-            'You are responsible for your account, verification code, device, and operation security.',
-            'You must not lend, rent, sell, or share your account with others.'
+            'You must ensure all uploaded code, assets, names, package identifiers, and domains are lawful and authorized.',
+            'You must not submit content that violates laws, regulations, third-party rights, or platform security policies.'
           ]
         },
         {
-          title: '3. Service Rules',
+          title: '3. Prohibited App Categories',
           lines: [
-            'Services are provided on an "as is" basis and may be interrupted due to maintenance, upgrades, or force majeure.',
-            'We may adjust features, usage limits, or service availability when necessary for compliance and security.'
+            'The platform strictly prohibits building or distributing apps related to: fake finance and loans, fake government or authority channels, fake customer service and support, gambling and betting.',
+            'The platform strictly prohibits pyramid schemes and referral fraud, phishing login and credential theft, remote control abuse, spyware, trojans, cracking tools, piracy, and unauthorized distribution.',
+            'The platform strictly prohibits creating unlicensed app stores, fake application marketplaces, or deceptive app distribution centers.'
           ]
         },
         {
-          title: '4. User Conduct',
+          title: '4. Automated Risk Control and Blocking',
           lines: [
-            'Do not publish illegal, infringing, fraudulent, malicious, or harmful content.',
-            'You must ensure you have lawful rights or authorization for all uploaded materials.',
-            'Do not attack, reverse-engineer, or abuse the platform in any way.'
+            'Your app metadata, package identifiers, use-case statement, source files, HTML content, external links, and permission combinations may be scanned by rules and AI models.',
+            'If high-risk indicators are detected, the platform may block task creation or build execution immediately and record the reason for compliance review.'
           ]
         },
         {
-          title: '5. Intellectual Property',
+          title: '5. Consequences of Violations',
           lines: [
-            'The software, interface, and related technical materials of this client are protected by law.',
-            'You remain responsible for the legality and ownership of the content you upload or generate.'
+            'For confirmed or strongly suspected violations, we may suspend tasks, freeze the client_id, restrict features, reject builds, terminate service, and preserve evidence.',
+            'For serious cases, we may report relevant records to regulators or law enforcement according to applicable laws.'
           ]
         },
         {
-          title: '6. Liability and Remedies',
+          title: '6. False Positive Appeal and Unfreeze',
           lines: [
-            'If your violation causes claims, penalties, or losses, you shall bear corresponding legal liability.',
-            'For suspected violations, we may suspend tasks, restrict features, or terminate service according to law.'
+            'If your task is blocked by mistake, submit an appeal through the feedback channel with app purpose, ownership or authorization proof, domain ownership proof, and key code explanations.',
+            'Appeals are usually reviewed within 1 to 3 business days. After approval, risk tags can be corrected and frozen client_id can be unfrozen by administrators.'
           ]
         },
         {
-          title: '7. Updates and Disputes',
+          title: '7. Updates and Contact',
           lines: [
-            'We may update this agreement and notify you by announcement, dialog, or system notice.',
+            'We may update this agreement based on legal, policy, or security requirements and notify users by announcement, dialog, or system notice.',
             'Continued use after update means you accept the revised terms.'
           ]
         }
       ],
       legalReferences:
-        'Contact email: 2952299066@qq.com. If you have any questions about this agreement, please contact us by email.',
+        'Contact email: 2952299066@qq.com. If you have questions or need compliance appeal support, please contact us by email.',
       acceptButton: 'Agree and Continue',
       rejectButton: 'Decline and Exit'
     },
     'zh-CN': {
-      title: '用户使用协议',
+      title: '用户使用协议与服务条款',
       effectiveDateLabel: '生效日期',
-      effectiveDate: '2026-04-10',
+      effectiveDate: '2026-05-13',
       intro:
-        '在你使用本客户端及相关服务前，请完整阅读并充分理解本协议。你点击“同意并继续”或实际使用本服务，即视为你与平台就本协议达成具有法律约束力的合意。',
+        '在你使用本客户端及相关服务前，请完整阅读并充分理解本协议。你点击“同意并继续”或继续使用本服务，即视为你已阅读、理解并接受全部条款。',
       sections: [
         {
-          title: '一、协议效力与适用范围',
+          title: '一、适用范围与协议生效',
           lines: [
-            '本协议适用于本客户端提供的全部功能与服务，并对你与平台均具有法律约束力。',
-            '你不同意本协议任何内容的，应立即停止使用并卸载客户端。'
+            '本协议适用于上传、打包、构建、下载、日志查看等全部功能与服务。',
+            '若你不同意本协议任一条款，请立即停止使用本服务。'
           ]
         },
         {
-          title: '二、账号义务与安全责任',
+          title: '二、合法使用与授权义务',
           lines: [
-            '你必须提供真实、准确、合法的信息，并持续保持信息有效。',
-            '你应妥善保管账号与设备，因账号被盗用、泄露或借用产生的一切后果由你自行承担。'
+            '你应确保上传的源码、素材、应用名称、包名、域名等信息真实、合法并已取得必要授权。',
+            '你不得提交任何违反法律法规、侵犯第三方权益或危害平台安全的内容。'
           ]
         },
         {
-          title: '三、合规使用与禁止行为',
+          title: '三、明确禁止的应用类别',
           lines: [
-            '严禁制作、上传、传播违法违规、侵权、诈骗、恶意程序或危害网络安全的内容。',
-            '严禁攻击、破解、逆向、绕过安全策略、批量滥用或以任何方式干扰平台正常运行。'
+            '严禁制作或分发以下应用：假冒金融理财/贷款、假冒政府或权威机构、假冒客服、赌博博彩类应用。',
+            '严禁制作或分发以下应用：传销拉新返利诈骗、钓鱼登录盗号、远程控制滥用、间谍木马、破解盗版、绕过授权分发工具。',
+            '严禁制作或分发三无应用商店、仿冒应用市场、诱导下载中心等高风险分发类应用。'
           ]
         },
         {
-          title: '四、内容权利与授权保证',
+          title: '四、风控扫描与自动阻断',
           lines: [
-            '你保证对上传、生成、发布内容享有合法权利或已取得充分授权，不得侵犯第三方合法权益。',
-            '因内容侵权、违法或违约引发的投诉、索赔、处罚及损失，全部由你承担并赔偿。'
+            '平台会对应用名称、包名、用途说明、源码关键文件、HTML 文本、外链域名及权限组合进行规则与 AI 合规扫描。',
+            '一旦命中高风险规则，平台可立即阻断任务创建或构建执行，并将风险原因记录至合规审核。'
           ]
         },
         {
-          title: '五、平台处置权',
+          title: '五、违规后果',
           lines: [
-            '对涉嫌违规或存在安全风险的行为，平台有权立即采取删除内容、中止任务、限制功能、封禁账号、终止服务等措施。',
-            '平台有权保存并向监管、司法机关提供必要记录和证据，你不得以任何理由要求豁免责任。'
+            '对已确认或高度疑似违规的任务，平台有权执行中止任务、冻结 client_id、限制功能、拒绝构建、终止服务并保留证据。',
+            '情节严重的，平台将依法向监管或司法机构提供必要记录。'
           ]
         },
         {
-          title: '六、免责与责任限制',
+          title: '六、误杀申诉与解冻流程',
           lines: [
-            '本服务按“现状”提供，平台不对服务不中断、无错误、完全满足你需求作任何明示或默示担保。',
-            '因不可抗力、网络故障、第三方原因、系统维护或你自身原因造成的损失，平台在法律允许范围内不承担责任。'
+            '若你认为被误判，可通过反馈入口提交申诉，并提供用途说明、权属或授权证明、域名归属证明及关键代码说明。',
+            '申诉一般在 1-3 个工作日内处理。审核通过后，管理员可纠正风险标记并解除对应 client_id 冻结状态。'
           ]
         },
         {
-          title: '七、协议变更与争议解决',
+          title: '七、条款更新与联系方式',
           lines: [
-            '平台有权根据业务与法律法规变化单方更新本协议，并通过公告、弹窗或系统通知方式发布。',
-            '你在协议更新后继续使用服务的，视为无条件接受更新条款；争议适用中国大陆法律并提交平台所在地有管辖权法院处理。'
+            '平台可根据法律、政策或安全要求更新本条款，并通过公告、弹窗或系统通知发布。',
+            '你在条款更新后继续使用服务，视为接受更新后的条款。'
           ]
         }
       ],
       legalReferences:
-        '联系方式：2952299066@qq.com。你可通过该邮箱联系平台。',
+        '联系邮箱：2952299066@qq.com。如需条款咨询或合规申诉支持，请通过该邮箱联系平台。',
       acceptButton: '同意并继续',
       rejectButton: '拒绝并退出'
     },
     'zh-TW': {
-      title: '使用者服務協議',
+      title: '使用者協議與服務條款',
       effectiveDateLabel: '生效日期',
-      effectiveDate: '2026-04-10',
+      effectiveDate: '2026-05-13',
       intro:
-        '在你使用本客戶端及相關服務前，請完整閱讀並充分理解本協議。你點擊「同意並繼續」或實際使用本服務，即視為你與平台就本協議達成具法律約束力之合意。',
+        '在你使用本客戶端及相關服務前，請完整閱讀並充分理解本協議。你點擊「同意並繼續」或繼續使用本服務，即視為你已閱讀、理解並接受全部條款。',
       sections: [
         {
-          title: '一、協議效力與適用範圍',
+          title: '一、適用範圍與協議生效',
           lines: [
-            '本協議適用於本客戶端提供之全部功能與服務，對你與平台均具有法律約束力。',
-            '你不同意本協議任何內容者，應立即停止使用並解除安裝客戶端。'
+            '本協議適用於上傳、打包、構建、下載、日誌查看等全部功能與服務。',
+            '若你不同意本協議任一條款，請立即停止使用本服務。'
           ]
         },
         {
-          title: '二、帳號義務與安全責任',
+          title: '二、合法使用與授權義務',
           lines: [
-            '你必須提供真實、準確、合法之資訊，並持續保持資訊有效。',
-            '你應妥善保管帳號與設備；因帳號遭盜用、洩漏或借用所生之一切後果，均由你自行承擔。'
+            '你應確保上傳的原始碼、素材、應用名稱、包名、網域等資訊真實、合法並已取得必要授權。',
+            '你不得提交任何違反法律法規、侵犯第三方權益或危害平台安全的內容。'
           ]
         },
         {
-          title: '三、合規使用與禁止行為',
+          title: '三、明確禁止的應用類別',
           lines: [
-            '嚴禁製作、上傳、傳播違法違規、侵權、詐騙、惡意程式或危害網路安全之內容。',
-            '嚴禁攻擊、破解、逆向、繞過安全策略、批量濫用或以任何方式干擾平台正常運行。'
+            '嚴禁製作或散佈以下應用：假冒金融理財或貸款、假冒政府或權威機構、假冒客服、賭博博彩類應用。',
+            '嚴禁製作或散佈以下應用：傳銷拉新返利詐騙、釣魚登入盜號、遠端控制濫用、間諜木馬、破解盜版、繞過授權分發工具。',
+            '嚴禁製作或散佈三無應用商店、仿冒應用市場、誘導下載中心等高風險分發類應用。'
           ]
         },
         {
-          title: '四、內容權利與授權保證',
+          title: '四、風控掃描與自動阻斷',
           lines: [
-            '你保證對上傳、生成、發布內容享有合法權利或已取得充分授權，不得侵害第三方合法權益。',
-            '因內容侵權、違法或違約所生之投訴、索賠、處罰及損失，概由你承擔並賠償。'
+            '平台會對應用名稱、包名、用途說明、原始碼關鍵檔案、HTML 文字、外鏈網域及權限組合進行規則與 AI 合規掃描。',
+            '一旦命中高風險規則，平台可立即阻斷任務建立或構建執行，並將風險原因記錄至合規審核。'
           ]
         },
         {
-          title: '五、平台處置權',
+          title: '五、違規後果',
           lines: [
-            '對涉嫌違規或存在安全風險之行為，平台有權立即採取刪除內容、中止任務、限制功能、封禁帳號、終止服務等措施。',
-            '平台有權保存並向監管、司法機關提供必要紀錄與證據，你不得以任何理由主張免責。'
+            '對已確認或高度疑似違規的任務，平台有權執行中止任務、凍結 client_id、限制功能、拒絕構建、終止服務並保留證據。',
+            '情節嚴重者，平台將依法向監管或司法機構提供必要紀錄。'
           ]
         },
         {
-          title: '六、免責與責任限制',
+          title: '六、誤殺申訴與解凍流程',
           lines: [
-            '本服務按「現狀」提供，平台不對服務不中斷、無錯誤或完全符合你需求作任何明示或默示擔保。',
-            '因不可抗力、網路故障、第三方原因、系統維護或你自身原因造成之損失，平台於法律允許範圍內不承擔責任。'
+            '若你認為被誤判，可透過回饋入口提交申訴，並提供用途說明、權屬或授權證明、網域歸屬證明及關鍵程式碼說明。',
+            '申訴通常於 1-3 個工作日內處理。審核通過後，管理員可更正風險標記並解除對應 client_id 凍結狀態。'
           ]
         },
         {
-          title: '七、協議變更與爭議解決',
+          title: '七、條款更新與聯絡方式',
           lines: [
-            '平台有權因業務與法律法規變化單方更新本協議，並透過公告、彈窗或系統通知方式發布。',
-            '你於協議更新後繼續使用服務者，視為無條件接受更新條款；爭議適用中國大陸法律並提交平台所在地有管轄權法院處理。'
+            '平台可依法律、政策或安全需求更新本條款，並透過公告、彈窗或系統通知發布。',
+            '你於條款更新後繼續使用服務，視為接受更新後條款。'
           ]
         }
       ],
       legalReferences:
-        '聯絡方式：2952299066@qq.com。你可透過該電子郵件聯絡平台。',
+        '聯絡信箱：2952299066@qq.com。如需條款諮詢或合規申訴支援，請透過該信箱聯絡平台。',
       acceptButton: '同意並繼續',
       rejectButton: '拒絕並退出'
     }
@@ -811,7 +810,6 @@ export const useAppState = () => {
     if (currentLang.value === 'zh-TW') return complianceNoticeByLang['zh-TW']
     return complianceNoticeByLang.en
   })
-  const normalizedTaskDeclaredUseCase = computed(() => String(taskDeclaredUseCase.value || '').trim().replace(/\s+/g, ' '))
   const taskComplianceError = computed(() => {
     if (clientFreezeState.value.frozen) {
       return t('config.clientFrozenByRisk', {
@@ -820,11 +818,6 @@ export const useAppState = () => {
     }
     if (updatingTaskId.value) return ''
     if (!taskComplianceAck.value) return t('config.taskComplianceAckRequired')
-    const useCaseLength = normalizedTaskDeclaredUseCase.value.length
-    if (useCaseLength < taskDeclaredUseCaseMinLength) {
-      return t('config.taskUseCaseRequired', { min: taskDeclaredUseCaseMinLength })
-    }
-    if (useCaseLength > taskDeclaredUseCaseMaxLength) return t('config.taskUseCaseTooLong', { max: taskDeclaredUseCaseMaxLength })
     return ''
   })
 
@@ -1131,12 +1124,16 @@ export const useAppState = () => {
     if (detail && typeof detail === 'object') {
       const code = String(detail?.code || '').trim().toLowerCase()
       const message = String(detail?.message || '').trim().toLowerCase()
-      if (code === 'client_frozen_by_ai_risk' || message.includes('client is frozen by ai risk guard')) {
+      if (
+        code === 'client_frozen_by_ai_risk' ||
+        message.includes('client is frozen by ai risk guard') ||
+        message.includes('client is frozen by risk guard')
+      ) {
         return normalizeFreezeState(detail)
       }
     }
     const detailText = getErrorDetailText(error)
-    if (detailText.includes('client is frozen by ai risk guard')) {
+    if (detailText.includes('client is frozen by ai risk guard') || detailText.includes('client is frozen by risk guard')) {
       return normalizeFreezeState({ frozen: true })
     }
     return null
@@ -1155,10 +1152,6 @@ export const useAppState = () => {
     const detail = getErrorDetailText(error)
     if (!detail) return ''
     if (detail.includes('compliance confirmation is required')) return t('config.taskComplianceAckRequired')
-    if (detail.includes('declared use case is required')) {
-      return t('config.taskUseCaseRequired', { min: taskDeclaredUseCaseMinLength })
-    }
-    if (detail.includes('declared use case is too long')) return t('config.taskUseCaseTooLong', { max: taskDeclaredUseCaseMaxLength })
     if (detail.includes('task blocked by policy')) return t('config.marketplaceBlocked')
     if (detail.includes('task is pending admin risk review')) return t('toast.riskReviewPending')
     if (detail.includes('task was rejected by admin risk review')) return t('toast.riskReviewRejected')
@@ -3369,7 +3362,6 @@ export const useAppState = () => {
           quick_generate: isQuickGenerate,
           mode: mode.value,
           compliance_ack: Boolean(taskComplianceAck.value),
-          declared_use_case: normalizedTaskDeclaredUseCase.value,
           web_url: mode.value === 'web' ? normalizedWebUrl : null,
           ad_config: mode.value === 'web' && enableAds.value ? adConfig.value : null,
           filename: (mode.value === 'convert' || mode.value === 'desktop') ? uploadedFile.value.filename : null,
@@ -3485,7 +3477,6 @@ export const useAppState = () => {
       quickGenerateStash.value = null
     }
     taskComplianceAck.value = false
-    taskDeclaredUseCase.value = ''
     previousVersionName.value = ''
     config.value = {
       app_name: '',
@@ -4081,10 +4072,6 @@ export const useAppState = () => {
     donationAutoDisabled,
     showComplianceNotice,
     taskComplianceAck,
-    taskDeclaredUseCase,
-    taskDeclaredUseCaseMinLength,
-    taskDeclaredUseCaseMaxLength,
-    normalizedTaskDeclaredUseCase,
     taskComplianceError,
     complianceNotice,
     previousVersionName,

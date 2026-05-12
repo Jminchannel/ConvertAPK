@@ -474,7 +474,6 @@ MARKETPLACE_POLICY_ALLOWLIST_CLIENT_IDS = {
     for item in MARKETPLACE_POLICY_ALLOWLIST_CLIENT_IDS_RAW.split(",")
     if str(item or "").strip()
 }
-MARKETPLACE_DECLARED_USE_CASE_MIN_LENGTH = 6
 MARKETPLACE_DECLARED_USE_CASE_MAX_LENGTH = 200
 MARKETPLACE_BLOCK_KEYWORDS = (
     "app store",
@@ -543,6 +542,155 @@ RISK_SCAN_DOMAIN_KEYWORDS = (
     "apk-dl",
 )
 
+RISK_COMBO_TEXT_CATEGORIES: dict[str, tuple[str, ...]] = {
+    "fake_finance": (
+        "bank",
+        "wallet",
+        "exchange",
+        "usdt",
+        "seed phrase",
+        "mnemonic",
+        "withdraw",
+        "deposit",
+        "\u94f6\u884c",
+        "\u94b1\u5305",
+        "\u4ea4\u6613\u6240",
+        "\u52a9\u8bb0\u8bcd",
+        "\u5145\u503c",
+        "\u63d0\u73b0",
+        "\u6536\u6b3e\u7801",
+    ),
+    "fake_authority": (
+        "police",
+        "court",
+        "warrant",
+        "freeze funds",
+        "bail",
+        "\u516c\u5b89",
+        "\u6cd5\u9662",
+        "\u4f20\u7968",
+        "\u51bb\u7ed3\u8d44\u91d1",
+        "\u4fdd\u8bc1\u91d1",
+    ),
+    "fake_customer_service": (
+        "customer service",
+        "refund",
+        "order anomaly",
+        "verify code",
+        "\u5ba2\u670d",
+        "\u9000\u6b3e",
+        "\u8ba2\u5355\u5f02\u5e38",
+        "\u9a8c\u8bc1\u7801",
+        "\u98ce\u63a7\u89e3\u9664",
+    ),
+    "gambling": (
+        "bet",
+        "casino",
+        "lottery",
+        "jackpot",
+        "odds",
+        "\u8d4c\u535a",
+        "\u4e0b\u6ce8",
+        "\u5f00\u5956",
+        "\u8fd4\u6c34",
+        "\u4f53\u5f69",
+        "\u798f\u5f69",
+    ),
+    "mlm_fraud": (
+        "high yield",
+        "daily return",
+        "referral reward",
+        "commission",
+        "investment plan",
+        "\u5237\u5355",
+        "\u8fd4\u5229",
+        "\u9ad8\u6536\u76ca",
+        "\u9080\u8bf7\u8fd4\u4f63",
+        "\u8d44\u91d1\u76d8",
+    ),
+    "phishing_login": (
+        "login verify",
+        "account abnormal",
+        "re-auth",
+        "otp",
+        "\u767b\u5f55\u9a8c\u8bc1",
+        "\u8d26\u53f7\u5f02\u5e38",
+        "\u91cd\u65b0\u8ba4\u8bc1",
+        "\u9a8c\u8bc1\u7801\u767b\u5f55",
+    ),
+    "remote_control": (
+        "remote control",
+        "screen share",
+        "device management",
+        "accessibility",
+        "\u8fdc\u7a0b\u63a7\u5236",
+        "\u5c4f\u5e55\u5171\u4eab",
+        "\u65e0\u969c\u788d",
+        "\u8bbe\u5907\u7ba1\u7406",
+    ),
+    "spyware_trojan": (
+        "keylogger",
+        "silent install",
+        "background monitor",
+        "read sms",
+        "read contacts",
+        "\u6728\u9a6c",
+        "\u76d1\u542c",
+        "\u901a\u8baf\u5f55",
+        "\u77ed\u4fe1",
+        "\u540e\u53f0\u76d1\u63a7",
+    ),
+    "cracking_abuse": (
+        "mod apk",
+        "crack",
+        "patch",
+        "script",
+        "\u7834\u89e3",
+        "\u514d\u5e7f\u544a",
+        "\u6fc0\u6d3b\u7801",
+        "\u5916\u6302",
+        "\u5237\u91cf",
+    ),
+    "illegal_distribution": (
+        "app store",
+        "application store",
+        "app market",
+        "download center",
+        "third-party app market",
+        "\u5e94\u7528\u5e02\u573a",
+        "\u5e94\u7528\u5546\u5e97",
+        "\u5206\u53d1\u5e73\u53f0",
+        "\u4e0b\u8f7d\u4e2d\u5fc3",
+        "\u4e00\u952e\u5b89\u88c5",
+        "\u8d44\u6e90\u805a\u5408",
+    ),
+}
+
+RISK_COMBO_PERMISSION_SETS: dict[str, tuple[str, ...]] = {
+    "overlay_silent_install": (
+        "android.permission.system_alert_window",
+        "android.permission.request_install_packages",
+    ),
+    "sms_intercept": (
+        "android.permission.read_sms",
+        "android.permission.receive_sms",
+    ),
+    "contacts_call_phishing": (
+        "android.permission.read_contacts",
+        "android.permission.call_phone",
+        "android.permission.read_phone_state",
+    ),
+    "spyware_data_exfiltration": (
+        "android.permission.read_external_storage",
+        "android.permission.write_external_storage",
+        "android.permission.read_phone_state",
+        "android.permission.record_audio",
+    ),
+}
+
+RISK_COMBO_CATEGORY_MAX_HITS = 8
+RISK_COMBO_CORPUS_MAX_CHARS = 200000
+
 
 def _normalize_runtime_keywords(raw_keywords, fallback_keywords: tuple[str, ...]) -> tuple[str, ...]:
     if not isinstance(raw_keywords, (list, tuple)):
@@ -574,6 +722,111 @@ def _resolve_risk_scan_keyword_sets(client_id: str | None) -> tuple[tuple[str, .
         RISK_SCAN_DOMAIN_KEYWORDS,
     )
     return block_keywords, domain_keywords
+
+
+def _normalize_permission_items(permissions: list[str] | None) -> set[str]:
+    normalized: set[str] = set()
+    if not isinstance(permissions, list):
+        return normalized
+    for item in permissions:
+        permission = str(item or "").strip().lower()
+        if not permission:
+            continue
+        if "." not in permission:
+            permission = f"android.permission.{permission}"
+        normalized.add(permission)
+    return normalized
+
+
+def _collect_permission_combo_hits(permissions: list[str] | None) -> list[dict]:
+    normalized_permissions = _normalize_permission_items(permissions)
+    if not normalized_permissions:
+        return []
+    hits: list[dict] = []
+    for combo_name, required_permissions in RISK_COMBO_PERMISSION_SETS.items():
+        required_set = {str(item or "").strip().lower() for item in required_permissions if str(item or "").strip()}
+        if not required_set:
+            continue
+        if not required_set.issubset(normalized_permissions):
+            continue
+        hits.append(
+            {
+                "combo": combo_name,
+                "permissions": sorted(required_set),
+            }
+        )
+    hits.sort(key=lambda item: str(item.get("combo") or ""))
+    return hits[:32]
+
+
+def _collect_combo_category_hits(corpus_text: str) -> list[dict]:
+    text = str(corpus_text or "").strip()
+    if not text:
+        return []
+    hits: list[dict] = []
+    for category_name, keywords in RISK_COMBO_TEXT_CATEGORIES.items():
+        matched_keywords = _collect_risk_keyword_hits(
+            text,
+            tuple(str(item) for item in keywords),
+            max_hits=RISK_COMBO_CATEGORY_MAX_HITS,
+        )
+        if not matched_keywords:
+            continue
+        hits.append(
+            {
+                "category": category_name,
+                "keywords": matched_keywords[:RISK_COMBO_CATEGORY_MAX_HITS],
+            }
+        )
+    hits.sort(key=lambda item: str(item.get("category") or ""))
+    return hits[:64]
+
+
+def _build_combo_corpus_text(
+    *,
+    app_name: str | None,
+    package_name: str | None,
+    declared_use_case: str,
+    web_url: str | None,
+    external_domains: list[str],
+    zip_path: Path | None,
+    html_path: Path | None,
+    scan_errors: list[str],
+) -> str:
+    corpus_parts: list[str] = [
+        str(app_name or ""),
+        str(package_name or ""),
+        str(declared_use_case or ""),
+        str(web_url or ""),
+    ]
+    corpus_parts.extend(str(item or "") for item in list(external_domains or []))
+
+    snippets: list[dict] = []
+    if zip_path and zip_path.exists():
+        try:
+            snippets = _collect_ai_risk_key_file_snippets_from_zip(zip_path)
+        except HTTPException as exc:
+            scan_errors.append(f"combo_scan_zip_failed:{str(exc.detail or exc)}")
+        except Exception as exc:
+            scan_errors.append(f"combo_scan_zip_failed:{str(exc)}")
+    elif html_path and html_path.exists():
+        try:
+            snippets = _collect_ai_risk_key_file_snippets_from_html(html_path)
+        except HTTPException as exc:
+            scan_errors.append(f"combo_scan_html_failed:{str(exc.detail or exc)}")
+        except Exception as exc:
+            scan_errors.append(f"combo_scan_html_failed:{str(exc)}")
+
+    for snippet in snippets:
+        content_text = str(snippet.get("content") or "").strip()
+        if not content_text:
+            continue
+        corpus_parts.append(content_text[:4000])
+
+    merged = "\n".join(item for item in corpus_parts if str(item or "").strip())
+    if len(merged) > RISK_COMBO_CORPUS_MAX_CHARS:
+        return merged[:RISK_COMBO_CORPUS_MAX_CHARS]
+    return merged
 
 
 RISK_SCAN_TEXT_EXTENSIONS = {
@@ -733,8 +986,6 @@ def _validate_task_compliance_or_raise(
 ) -> None:
     if not bool(compliance_ack):
         raise HTTPException(status_code=400, detail="compliance confirmation is required")
-    if len(declared_use_case) < MARKETPLACE_DECLARED_USE_CASE_MIN_LENGTH:
-        raise HTTPException(status_code=400, detail="declared use case is required")
     if len(declared_use_case) > MARKETPLACE_DECLARED_USE_CASE_MAX_LENGTH:
         raise HTTPException(status_code=400, detail="declared use case is too long")
     if client_id:
@@ -923,6 +1174,7 @@ def _scan_task_risk_inputs(
     package_name: str | None,
     declared_use_case: str,
     web_url: str | None,
+    permissions: list[str] | None = None,
     zip_path: Path | None = None,
     html_path: Path | None = None,
 ) -> dict:
@@ -995,7 +1247,49 @@ def _scan_task_risk_inputs(
                 "keyword": keyword,
             })
 
+    combo_corpus_text = _build_combo_corpus_text(
+        app_name=app_name,
+        package_name=package_name,
+        declared_use_case=declared_use_case,
+        web_url=web_url,
+        external_domains=external_domains,
+        zip_path=zip_path,
+        html_path=html_path,
+        scan_errors=scan_errors,
+    )
+    combo_category_hits = _collect_combo_category_hits(combo_corpus_text)
+    permission_combo_hits = _collect_permission_combo_hits(permissions)
+    combo_blocked = bool(combo_category_hits and permission_combo_hits)
+    combo_hits: list[dict] = []
+    for item in combo_category_hits:
+        combo_hits.append(
+            {
+                "type": "text_category",
+                "category": str(item.get("category") or ""),
+                "keywords": [str(value) for value in list(item.get("keywords") or []) if str(value or "").strip()][:RISK_COMBO_CATEGORY_MAX_HITS],
+            }
+        )
+    for item in permission_combo_hits:
+        combo_hits.append(
+            {
+                "type": "permission_combo",
+                "combo": str(item.get("combo") or ""),
+                "permissions": [str(value) for value in list(item.get("permissions") or []) if str(value or "").strip()][:12],
+            }
+        )
+
     risk_hit_count = len(field_hits) + len(text_hits) + len(domain_hits)
+    if combo_blocked:
+        combo_hit_bonus = max(2, min(8, len(combo_hits)))
+        risk_hit_count += combo_hit_bonus
+        field_hits.append(
+            {
+                "field": "combo_rule",
+                "keyword": "high_risk_text_plus_permission",
+                "sample": f"categories={len(combo_category_hits)}, permission_combos={len(permission_combo_hits)}",
+            }
+        )
+
     high_risk = risk_hit_count > 0 or bool(scan_errors)
     return {
         "risk_level": "high" if high_risk else "normal",
@@ -1011,6 +1305,10 @@ def _scan_task_risk_inputs(
             if str(item.get("url") or "").strip()
         ],
         "scanned_text_files": scanned_text_files,
+        "combo_blocked": combo_blocked,
+        "combo_hits": combo_hits[:128],
+        "combo_category_hits": combo_category_hits[:64],
+        "permission_combo_hits": permission_combo_hits[:64],
         "scan_errors": scan_errors[:32],
         "scanned_at": datetime.now().isoformat(),
     }
@@ -1175,6 +1473,8 @@ def _normalize_ai_risk_confidence(value: str | None) -> str:
 
 def _normalize_ai_risk_guard_result(payload: dict) -> dict:
     suspected = bool(
+        payload.get("is_high_risk_suspected")
+        or
         payload.get("is_marketplace_suspected")
         or payload.get("suspected")
         or payload.get("marketplace_suspected")
@@ -1199,12 +1499,27 @@ def _normalize_ai_risk_guard_result(payload: dict) -> dict:
             evidence_items.append(text)
             if len(evidence_items) >= TASK_AI_RISK_GUARD_MAX_EVIDENCE:
                 break
+    risk_categories_raw = payload.get("risk_categories") or payload.get("categories") or []
+    risk_categories: list[str] = []
+    if isinstance(risk_categories_raw, (list, tuple)):
+        for item in risk_categories_raw:
+            name = str(item or "").strip().lower()
+            if not name or name in risk_categories:
+                continue
+            risk_categories.append(name[:64])
+            if len(risk_categories) >= 16:
+                break
+    if risk_categories and not suspected:
+        suspected = True
+        if action == "allow":
+            action = "review"
     return {
         "suspected": suspected,
         "action": action,
         "confidence": confidence,
         "reason": reason[:280],
         "evidence": evidence_items,
+        "risk_categories": risk_categories,
     }
 
 
@@ -1234,30 +1549,48 @@ def _call_ai_marketplace_guard(
         "task_meta": task_meta,
         "risk_scan_summary": {
             "field_hits": safe_risk_scan.get("field_hits") or [],
+            "html_hits": safe_risk_scan.get("html_hits") or [],
             "domain_hits": safe_risk_scan.get("domain_hits") or [],
             "external_domains": safe_risk_scan.get("external_domains") or [],
+            "combo_blocked": bool(safe_risk_scan.get("combo_blocked")),
+            "combo_hits": safe_risk_scan.get("combo_hits") or [],
+            "permission_combo_hits": safe_risk_scan.get("permission_combo_hits") or [],
         },
         "key_files": key_file_snippets,
     }
 
     system_prompt = (
-        "你是应用安全风控审核助手。"
-        "你的任务是判断项目是否在实现“应用市场/应用商店/应用分发平台/第三方应用下载站”功能。"
-        "必须只输出 JSON，不要输出任何额外文本。"
+        "You are an app security compliance reviewer. "
+        "Decide whether the submitted app has high-risk malicious intent, including phishing, fraud, spyware, "
+        "gambling, cracking abuse, or illegal app distribution. "
+        "Output JSON only."
     )
     user_prompt = (
-        "请基于输入信息判断是否存在“应用市场/分发平台”嫌疑，并输出 JSON。\n"
-        "输出字段要求：\n"
-        "1. is_marketplace_suspected: boolean\n"
+        "Analyze metadata, permission combinations, risk summary, and source snippets.\n"
+        "If risky behavior combinations are present, recommend review or block.\n"
+        "Required JSON fields:\n"
+        "1. is_high_risk_suspected: boolean\n"
         "2. confidence: low | medium | high\n"
         "3. recommended_action: allow | review | block\n"
         "4. reason: string\n"
-        "5. evidence: string[]\n\n"
-        "判定规则：\n"
-        "- 仅依据输入事实，不得臆测。\n"
-        "- 若发现应用列表、下载跳转、分发入口、第三方商店导流、批量分发描述等信号，应倾向 review 或 block。\n"
-        "- 若证据不足，可返回 allow。\n\n"
-        f"输入：\n{json.dumps(prompt_payload, ensure_ascii=False)}"
+        "5. evidence: string[]\n"
+        "6. risk_categories: string[]\n\n"
+        "Risk categories:\n"
+        "- fake_finance\n"
+        "- fake_authority\n"
+        "- fake_customer_service\n"
+        "- gambling\n"
+        "- mlm_fraud\n"
+        "- phishing_login\n"
+        "- remote_control\n"
+        "- spyware_trojan\n"
+        "- cracking_abuse\n"
+        "- illegal_distribution\n\n"
+        "Blocking guidance:\n"
+        "- If text risk category and dangerous permission combo are both present, prefer block.\n"
+        "- If phishing/trojan/illegal-distribution evidence is strong, prefer block.\n"
+        "- If evidence is weak, use review instead of allow.\n\n"
+        f"Input JSON:\n{json.dumps(prompt_payload, ensure_ascii=False)}"
     )
 
     request_body = {
@@ -1323,6 +1656,7 @@ def _run_ai_marketplace_guard_for_task(
     package_name: str | None,
     declared_use_case: str,
     web_url: str | None,
+    permissions: list[str] | None,
     zip_path: Path | None,
     html_path: Path | None,
     risk_scan: dict,
@@ -1339,6 +1673,7 @@ def _run_ai_marketplace_guard_for_task(
         "confidence": "medium",
         "reason": "",
         "evidence": [],
+        "risk_categories": [],
         "error": "",
         "analyzed_file_count": 0,
         "analyzed_files": [],
@@ -1368,6 +1703,7 @@ def _run_ai_marketplace_guard_for_task(
         "package_name": str(package_name or ""),
         "declared_use_case": str(declared_use_case or ""),
         "web_url": str(web_url or ""),
+        "permissions": [str(item or "") for item in list(permissions or []) if str(item or "").strip()],
     }
     ai_result, ai_error = _call_ai_marketplace_guard(
         task_meta=task_meta,
@@ -1435,6 +1771,7 @@ def _refresh_task_risk_guard_before_start(task_id: str, task: BuildTask, client_
         package_name=getattr(task.config, "package_name", ""),
         declared_use_case=getattr(task, "declared_use_case", ""),
         web_url=getattr(task, "web_url", None),
+        permissions=list(getattr(task.config, "permissions", []) or []),
         zip_path=zip_path if zip_path.exists() else None,
         html_path=html_path if html_path.exists() else None,
     )
@@ -1450,6 +1787,7 @@ def _refresh_task_risk_guard_before_start(task_id: str, task: BuildTask, client_
         package_name=getattr(task.config, "package_name", ""),
         declared_use_case=getattr(task, "declared_use_case", ""),
         web_url=getattr(task, "web_url", None),
+        permissions=list(getattr(task.config, "permissions", []) or []),
         zip_path=zip_path if zip_path.exists() else None,
         html_path=html_path if html_path.exists() else None,
         risk_scan=base_risk_scan,
@@ -2052,6 +2390,28 @@ def _build_freeze_reason_and_evidence(ai_guard_result: dict | None, risk_scan: d
 
     merged_risk_scan = risk_scan if isinstance(risk_scan, dict) else {}
     evidence: list[str] = []
+
+    for hit in list(merged_risk_scan.get("combo_hits") or []):
+        if not isinstance(hit, dict):
+            continue
+        hit_type = str(hit.get("type") or "").strip()
+        if hit_type == "text_category":
+            category_name = str(hit.get("category") or "").strip()
+            keywords = [str(item or "").strip() for item in list(hit.get("keywords") or []) if str(item or "").strip()]
+            keyword_text = ",".join(keywords[:6])
+            text = f"combo_category={category_name}, keywords={keyword_text}".strip().strip(",")
+        elif hit_type == "permission_combo":
+            combo_name = str(hit.get("combo") or "").strip()
+            permissions = [str(item or "").strip() for item in list(hit.get("permissions") or []) if str(item or "").strip()]
+            permission_text = ",".join(permissions[:6])
+            text = f"permission_combo={combo_name}, permissions={permission_text}".strip().strip(",")
+        else:
+            text = ""
+        if not text or text in evidence:
+            continue
+        evidence.append(text[:200])
+        if len(evidence) >= 8:
+            break
 
     for hit in list(merged_risk_scan.get("field_hits") or []):
         if not isinstance(hit, dict):
@@ -4808,6 +5168,7 @@ async def create_task(task_data: BuildTaskCreate):
         package_name=effective_config.package_name,
         declared_use_case=declared_use_case,
         web_url=web_url,
+        permissions=list(getattr(effective_config, "permissions", []) or []),
         zip_path=risk_scan_zip_path if risk_scan_zip_path.exists() else None,
         html_path=risk_scan_html_path if risk_scan_html_path.exists() else None,
     )
@@ -4823,6 +5184,7 @@ async def create_task(task_data: BuildTaskCreate):
         package_name=effective_config.package_name,
         declared_use_case=declared_use_case,
         web_url=web_url,
+        permissions=list(getattr(effective_config, "permissions", []) or []),
         zip_path=risk_scan_zip_path if risk_scan_zip_path.exists() else None,
         html_path=risk_scan_html_path if risk_scan_html_path.exists() else None,
         risk_scan=base_risk_scan,
@@ -5697,6 +6059,7 @@ async def update_task(task_id: str, update_data: UpdateTaskRequest):
         task.cdn_localize_select_all = False
         task.cdn_localize_preprocessed = False
 
+    freeze_record = None
     if RISK_REVIEW_ENABLED:
         risk_scan_zip_path = task_input_dir / "project.zip"
         risk_scan_html_path = task_input_dir / "index.html"
@@ -5706,12 +6069,25 @@ async def update_task(task_id: str, update_data: UpdateTaskRequest):
             package_name=getattr(task.config, "package_name", ""),
             declared_use_case=getattr(task, "declared_use_case", ""),
             web_url=getattr(task, "web_url", None),
+            permissions=list(getattr(task.config, "permissions", []) or []),
             zip_path=risk_scan_zip_path if risk_scan_zip_path.exists() else None,
             html_path=risk_scan_html_path if risk_scan_html_path.exists() else None,
         )
+        freeze_record = _freeze_client_when_risk_blocked(
+            client_id=client_id,
+            task_id=task_id,
+            risk_scan=risk_scan,
+            ai_guard_result=None,
+        )
+        if freeze_record:
+            risk_scan = _attach_freeze_alert_to_risk_scan(risk_scan, client_id, freeze_record)
+
         risk_level = str(risk_scan.get("risk_level") or "normal").strip().lower()
+        if freeze_record:
+            risk_level = "high"
+            risk_scan["risk_level"] = "high"
         allowlisted_for_review = _is_risk_review_allowlisted(client_id)
-        review_required = _requires_risk_review(client_id, risk_scan)
+        review_required = True if freeze_record else _requires_risk_review(client_id, risk_scan)
         task.risk_level = risk_level
         task.risk_scan = risk_scan
         task.review_required = review_required
@@ -5739,9 +6115,13 @@ async def update_task(task_id: str, update_data: UpdateTaskRequest):
     task.status = BuildStatus.PENDING
     task.progress = 0
     task.message = (
-        "命中高风险规则，等待管理人员审核放行"
-        if bool(getattr(task, "review_required", False))
-        else f"版本更新至 {update_data.version_name}，等待构建"
+        "Risk guard marked this client as high risk and frozen. Please contact developer to unfreeze."
+        if freeze_record
+        else (
+            "命中高风险规则，等待管理人员审核放行"
+            if bool(getattr(task, "review_required", False))
+            else f"版本更新至 {update_data.version_name}，等待构建"
+        )
     )
     task.logs = []
     task.failure_diagnosis = create_idle_diagnosis()

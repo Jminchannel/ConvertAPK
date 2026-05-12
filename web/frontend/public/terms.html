@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="ConvertAPK terms of service covering acceptable use, ownership requirements, prohibited content, and build artifact responsibility.">
+  <meta name="description" content="ConvertAPK 服务条款，包含可接受使用范围、违规应用类别、风控拦截规则、违规后果与误判申诉流程。">
   <title>服务条款 - ConvertAPK</title>
   <link rel="stylesheet" href="/legal.css">
 </head>
@@ -21,59 +21,69 @@
     <section class="hero">
       <div class="eyebrow">Terms of Service</div>
       <h1>服务条款</h1>
-      <p class="lead">使用 ConvertAPK 即表示你同意仅在合法、授权、透明的范围内创建安装包和构建产物。</p>
+      <p class="lead">使用 ConvertAPK 即表示你同意仅在合法、授权、透明的范围内创建安装包与构建产物。</p>
     </section>
 
     <div class="content">
       <aside class="summary">
         <strong>目录</strong>
         <a href="#allowed">允许的使用</a>
-        <a href="#prohibited">禁止的内容</a>
-        <a href="#ownership">权属与授权</a>
-        <a href="#outputs">产物责任</a>
-        <a href="#changes">变更与联系</a>
+        <a href="#prohibited">禁止的应用类别</a>
+        <a href="#scan">风控扫描与阻断</a>
+        <a href="#penalty">违规后果</a>
+        <a href="#appeal">误杀申诉与解冻</a>
+        <a href="#changes">条款更新与联系</a>
       </aside>
 
       <div class="sections">
         <section id="allowed" class="section">
           <h2>允许的使用</h2>
-          <p>你可以使用本服务将自己拥有或已获授权的 Web 项目、HTML 文件、网站资源和应用素材构建为 APK、AAB 或桌面端产物。</p>
-          <p>你应确保上传内容、包名、图标、应用名称、证书和分发渠道均符合当地法律及第三方平台规则。</p>
+          <p>你可以使用本服务将你拥有合法权利或已获授权的 Web 项目、HTML 文件、网站资源与应用素材构建为 APK、AAB 或桌面端产物。</p>
+          <p>你应确保上传内容、包名、图标、应用名称、证书与分发渠道符合法律法规及第三方平台规则。</p>
         </section>
 
         <section id="prohibited" class="section">
-          <h2>禁止的内容</h2>
+          <h2>禁止的应用类别</h2>
           <ul>
-            <li>恶意软件、间谍软件、钓鱼页面、隐蔽下载器或会损害设备和网络安全的内容。</li>
-            <li>盗版、破解、绕过授权、规避付费、侵犯版权或商标的应用与素材。</li>
-            <li>伪装官方应用、误导用户来源、篡改用户设置或未经明确同意安装额外软件的内容。</li>
-            <li>成人违法内容、仇恨内容、欺诈内容或其他违反广告平台与应用平台政策的内容。</li>
+            <li>假冒金融理财/贷款、假冒政府或权威机构、假冒客服与售后渠道。</li>
+            <li>赌博博彩、传销拉新返利诈骗、钓鱼登录盗号等诱导欺诈类应用。</li>
+            <li>远程控制滥用、间谍木马、恶意下载器、破解盗版、绕过授权分发工具。</li>
+            <li>三无应用商店、仿冒应用市场、诱导下载安装中心及其他高风险分发类应用。</li>
           </ul>
         </section>
 
-        <section id="ownership" class="section">
-          <h2>权属与授权</h2>
-          <p>你保留对自己上传内容的权利，同时授予本服务在完成构建、缓存、日志诊断和安全检查所需范围内处理这些内容的权限。</p>
-          <p>如果你代表公司或团队使用本服务，你应确认自己有权上传相关文件并创建构建产物。</p>
+        <section id="scan" class="section">
+          <h2>风控扫描与阻断</h2>
+          <p>平台会在任务创建和构建执行前，对应用名称、包名、用途说明、源码关键文件、HTML 文本、外链域名与权限组合进行规则与 AI 合规扫描。</p>
+          <p class="notice">若命中高风险特征，系统将立即阻断任务并写入管理端“高风险审核”，待人工复核后再决定是否放行。</p>
         </section>
 
-        <section id="outputs" class="section">
-          <h2>产物责任</h2>
-          <p>构建产物由你上传的文件和配置生成。你需要自行测试安装包、安全性、签名、权限声明、隐私披露和应用商店合规性。</p>
-          <p class="notice">本服务不会保证构建产物一定通过 Google Play、应用市场、安全软件或广告平台审核。</p>
+        <section id="penalty" class="section">
+          <h2>违规后果</h2>
+          <ul>
+            <li>中止任务、拒绝构建、限制功能或终止服务。</li>
+            <li>冻结对应 client_id，需人工审核后方可恢复。</li>
+            <li>保留日志、配置与风险证据；情节严重时依法向监管或司法机构提供记录。</li>
+          </ul>
+        </section>
+
+        <section id="appeal" class="section">
+          <h2>误杀申诉与解冻</h2>
+          <p>如果你认为被误判，请通过客户端反馈入口提交申诉，并提供用途说明、权属或授权证明、域名归属证明与关键代码说明。</p>
+          <p>平台通常会在 1-3 个工作日内完成复核。审核通过后，管理员会更正风险标记并解除对应 client_id 的冻结状态。</p>
         </section>
 
         <section id="changes" class="section">
-          <h2>变更与联系</h2>
-          <p>我们可能根据功能、法律或平台政策变化更新本条款。继续使用本服务代表你接受更新后的条款。</p>
-          <p>如需反馈问题，请返回首页通过反馈入口提交，或查看关于页面中的联系方式。</p>
+          <h2>条款更新与联系</h2>
+          <p>平台可根据法律法规、监管政策和安全要求更新本条款。更新后将通过公告、弹窗或系统通知发布，继续使用即视为接受更新条款。</p>
+          <p>如需合规咨询或申诉支持，请联系：<a href="mailto:2952299066@qq.com">2952299066@qq.com</a></p>
         </section>
       </div>
     </div>
 
     <footer class="footer">
       <a class="back-link" href="/">返回 ConvertAPK</a>
-      <p>最后更新：2026-04-29</p>
+      <p>最后更新：2026-05-13</p>
     </footer>
   </main>
 </body>
