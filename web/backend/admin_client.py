@@ -20,6 +20,9 @@ _AI_MODEL_DEFAULT = "qwen/qwen3.5-flash-02-23"
 _AI_TIMEOUT_SECONDS_DEFAULT = 18
 _AI_TIMEOUT_SECONDS_MIN = 8
 _AI_TIMEOUT_SECONDS_MAX = 120
+_DONATION_POPUP_PROBABILITY_DEFAULT = 10
+_DONATION_POPUP_PROBABILITY_MIN = 0
+_DONATION_POPUP_PROBABILITY_MAX = 100
 
 
 def _safe_path_segment(value: str, fallback: str) -> str:
@@ -256,6 +259,8 @@ def fetch_feature_flags(client_id: str = "", force: bool = False) -> Dict[str, A
         "web_link_to_apk_enabled": False,
         "zip_to_desktop_enabled": False,
         "rewarded_build_ads_enabled": False,
+        "donation_popup_probability": _DONATION_POPUP_PROBABILITY_DEFAULT,
+        "donation_popup_message": "",
         "client_login_enabled": True,
         "client_sms_login_enabled": False,
         "client_register_enabled": True,
@@ -301,10 +306,28 @@ def fetch_feature_flags(client_id: str = "", force: bool = False) -> Dict[str, A
             return _AI_TIMEOUT_SECONDS_MAX
         return timeout_seconds
 
+    def _normalize_donation_popup_probability(value: Any) -> int:
+        try:
+            parsed = int(value)
+        except Exception:
+            return _DONATION_POPUP_PROBABILITY_DEFAULT
+        if parsed < _DONATION_POPUP_PROBABILITY_MIN:
+            return _DONATION_POPUP_PROBABILITY_MIN
+        if parsed > _DONATION_POPUP_PROBABILITY_MAX:
+            return _DONATION_POPUP_PROBABILITY_MAX
+        return parsed
+
     if isinstance(data, dict):
         result["web_link_to_apk_enabled"] = bool(data.get("web_link_to_apk_enabled"))
         result["zip_to_desktop_enabled"] = bool(data.get("zip_to_desktop_enabled"))
         result["rewarded_build_ads_enabled"] = bool(data.get("rewarded_build_ads_enabled"))
+        if "donation_popup_probability" in data:
+            result["donation_popup_probability"] = _normalize_donation_popup_probability(
+                data.get("donation_popup_probability")
+            )
+        if "donation_popup_message" in data:
+            message = str(data.get("donation_popup_message") or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+            result["donation_popup_message"] = message
         if "client_login_enabled" in data:
             result["client_login_enabled"] = bool(data.get("client_login_enabled"))
         if "client_sms_login_enabled" in data:

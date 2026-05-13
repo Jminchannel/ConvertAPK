@@ -1719,8 +1719,8 @@
             <button class="donation-close-btn" @click="closeDonation" aria-label="Close">✕</button>
           </div>
           <div class="donation-dialog-body">
-            <div class="donation-message">{{ t('donation.message') }}</div>
-            <div class="donation-sub">{{ t('donation.subMessage') }}</div>
+            <div class="donation-message">{{ donationDialogPrimaryText }}</div>
+            <div v-if="donationDialogSecondaryText" class="donation-sub">{{ donationDialogSecondaryText }}</div>
             <div class="donation-qr-grid">
               <div class="donation-qr-card">
                 <div class="donation-qr-title">{{ t('donation.alipay') }}</div>

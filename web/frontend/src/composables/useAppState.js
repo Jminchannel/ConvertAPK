@@ -130,6 +130,8 @@ export const useAppState = () => {
     web_link_to_apk_enabled: false,
     zip_to_desktop_enabled: false,
     rewarded_build_ads_enabled: false,
+    donation_popup_probability: 10,
+    donation_popup_message: '',
     client_login_enabled: true,
     client_sms_login_enabled: false,
     client_register_enabled: true,
@@ -141,6 +143,18 @@ export const useAppState = () => {
   const isClientSmsLoginEnabled = computed(() => featureFlags.value.client_sms_login_enabled === true)
   const isClientRegisterEnabled = computed(() => featureFlags.value.client_register_enabled !== false)
   const isAuthEntryEnabled = computed(() => isClientLoginEnabled.value || isClientRegisterEnabled.value)
+  const normalizeDonationPopupProbability = (value) => {
+    const num = Number(value)
+    if (!Number.isFinite(num)) return 10
+    if (num < 0) return 0
+    if (num > 100) return 100
+    return Math.round(num)
+  }
+  const donationPopupProbability = computed(() => normalizeDonationPopupProbability(featureFlags.value.donation_popup_probability))
+  const donationPopupMessage = computed(() => {
+    const text = String(featureFlags.value.donation_popup_message || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim()
+    return text
+  })
   const desktopPortMin = 1024
   const desktopPortMax = 65535
   const desktopPortDefaultMin = 20000
@@ -601,6 +615,22 @@ export const useAppState = () => {
   const showDonation = ref(false)
   const donationHideChecked = ref(false)
   const donationAutoDisabled = ref(localStorage.getItem('apk_builder_donation_hide') === '1')
+  const donationDialogPrimaryText = computed(() => {
+    const customText = donationPopupMessage.value
+    if (!customText) return t('donation.message')
+    const [firstLine] = customText.split('\n')
+    return String(firstLine || '').trim() || t('donation.message')
+  })
+  const donationDialogSecondaryText = computed(() => {
+    const customText = donationPopupMessage.value
+    if (!customText) return t('donation.subMessage')
+    const lines = customText
+      .split('\n')
+      .map((line) => String(line || '').trim())
+      .filter((line) => line)
+    if (lines.length <= 1) return ''
+    return lines.slice(1).join(' ')
+  })
   const showComplianceNotice = ref(true)
   const taskComplianceAck = ref(false)
   const previousVersionName = ref('')
@@ -3613,6 +3643,8 @@ export const useAppState = () => {
         web_link_to_apk_enabled: Boolean(result?.web_link_to_apk_enabled),
         zip_to_desktop_enabled: Boolean(result?.zip_to_desktop_enabled),
         rewarded_build_ads_enabled: Boolean(result?.rewarded_build_ads_enabled),
+        donation_popup_probability: normalizeDonationPopupProbability(result?.donation_popup_probability),
+        donation_popup_message: String(result?.donation_popup_message || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n'),
         client_login_enabled: result?.client_login_enabled === undefined ? true : Boolean(result?.client_login_enabled),
         client_sms_login_enabled: result?.client_sms_login_enabled === true,
         client_register_enabled: result?.client_register_enabled === undefined ? true : Boolean(result?.client_register_enabled),
@@ -3622,6 +3654,8 @@ export const useAppState = () => {
         web_link_to_apk_enabled: false,
         zip_to_desktop_enabled: false,
         rewarded_build_ads_enabled: false,
+        donation_popup_probability: 10,
+        donation_popup_message: '',
         client_login_enabled: true,
         client_sms_login_enabled: false,
         client_register_enabled: true,
@@ -3769,7 +3803,12 @@ export const useAppState = () => {
   }
   const taskStatusCache = ref(new Map())
   const taskStatusReady = ref(false)
-  const shouldAutoShowDonation = () => Math.random() < 0.1
+  const shouldAutoShowDonation = () => {
+    const probabilityPercent = donationPopupProbability.value
+    if (probabilityPercent <= 0) return false
+    if (probabilityPercent >= 100) return true
+    return Math.random() < (probabilityPercent / 100)
+  }
   watch(
     tasks,
     (next) => {
@@ -4070,6 +4109,8 @@ export const useAppState = () => {
     showDonation,
     donationHideChecked,
     donationAutoDisabled,
+    donationDialogPrimaryText,
+    donationDialogSecondaryText,
     showComplianceNotice,
     taskComplianceAck,
     taskComplianceError,
