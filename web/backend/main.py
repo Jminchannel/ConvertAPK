@@ -118,6 +118,15 @@ AI_TIMEOUT_SECONDS_MAX = 120
 DONATION_POPUP_PROBABILITY_DEFAULT = 10
 DONATION_POPUP_PROBABILITY_MIN = 0
 DONATION_POPUP_PROBABILITY_MAX = 100
+TASK_LOG_LINES_DEFAULT = 220
+TASK_LOG_LINES_MIN = 20
+TASK_LOG_LINES_MAX = 1000
+TASK_LOG_MAX_LINE_CHARS_DEFAULT = 1400
+TASK_LOG_MAX_LINE_CHARS_MIN = 200
+TASK_LOG_MAX_LINE_CHARS_MAX = 20000
+TASK_LOG_TAIL_READ_MIN_BYTES = 128 * 1024
+TASK_LOG_TAIL_READ_MAX_BYTES = 8 * 1024 * 1024
+TASK_LOG_ESTIMATED_LINE_BYTES = 320
 
 
 def _normalize_upload_max_size_mb(value) -> int:
@@ -4029,6 +4038,66 @@ def _append_task_log(task: BuildTask, message: str) -> None:
     task.logs = logs
 
 
+def _normalize_task_log_lines(lines: int) -> int:
+    """标准化日志行数请求，避免一次拉取过大导致卡顿。"""
+    try:
+        requested = int(lines)
+    except (TypeError, ValueError):
+        requested = TASK_LOG_LINES_DEFAULT
+    return max(TASK_LOG_LINES_MIN, min(TASK_LOG_LINES_MAX, requested))
+
+
+def _normalize_task_log_max_line_chars(max_line_chars: int) -> int:
+    """标准化单行日志最大字符长度。"""
+    try:
+        requested = int(max_line_chars)
+    except (TypeError, ValueError):
+        requested = TASK_LOG_MAX_LINE_CHARS_DEFAULT
+    return max(TASK_LOG_MAX_LINE_CHARS_MIN, min(TASK_LOG_MAX_LINE_CHARS_MAX, requested))
+
+
+def _truncate_task_log_line(line: str, max_line_chars: int) -> str:
+    """截断超长日志行，避免前端渲染长字符串造成卡顿。"""
+    text = str(line).rstrip("\r\n")
+    if len(text) <= max_line_chars:
+        return text
+    omitted = len(text) - max_line_chars
+    return f"{text[:max_line_chars]} ...(已截断 {omitted} 字符)"
+
+
+def _read_log_tail_lines_fast(log_file: Path, lines: int) -> tuple[list[str], bool]:
+    """优先从文件尾部读取日志，减少超大日志文件的读取耗时。"""
+    if lines <= 0:
+        return [], False
+
+    estimated_bytes = lines * TASK_LOG_ESTIMATED_LINE_BYTES
+    tail_bytes = max(TASK_LOG_TAIL_READ_MIN_BYTES, min(TASK_LOG_TAIL_READ_MAX_BYTES, estimated_bytes))
+
+    try:
+        with open(log_file, "rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            file_size = handle.tell()
+            if file_size <= 0:
+                return [], False
+            read_size = min(file_size, tail_bytes)
+            handle.seek(-read_size, os.SEEK_END)
+            raw_bytes = handle.read(read_size)
+    except OSError:
+        return [], False
+
+    text = raw_bytes.decode("utf-8", errors="ignore")
+    lines_buffer = text.splitlines()
+
+    # 尾部读取不是从文件起点开始时，丢弃第一行残片，避免乱码半行影响展示。
+    if read_size < file_size and lines_buffer:
+        lines_buffer = lines_buffer[1:]
+
+    has_more = read_size < file_size or len(lines_buffer) > lines
+    if len(lines_buffer) > lines:
+        lines_buffer = lines_buffer[-lines:]
+    return lines_buffer, has_more
+
+
 def _collect_task_failure_log_lines(task_id: str, task: BuildTask, max_lines: int = 240) -> list[str]:
     """收集任务失败日志，优先使用内存日志，回退到日志文件。"""
     lines: list[str] = []
@@ -6713,7 +6782,12 @@ async def update_task(task_id: str, update_data: UpdateTaskRequest):
 
 
 @app.get("/api/tasks/{task_id}/logs")
-async def get_task_logs(task_id: str, lines: int = 100, client_id: str = None):
+async def get_task_logs(
+    task_id: str,
+    lines: int = TASK_LOG_LINES_DEFAULT,
+    max_line_chars: int = TASK_LOG_MAX_LINE_CHARS_DEFAULT,
+    client_id: str = None,
+):
     """获取任务日志"""
     if task_id not in tasks_db:
         raise HTTPException(status_code=404, detail="任务不存在")
@@ -6721,21 +6795,34 @@ async def get_task_logs(task_id: str, lines: int = 100, client_id: str = None):
     task = tasks_db[task_id]
     client_id = _require_client_id(client_id)
     _assert_task_owner(task, client_id)
+    normalized_lines = _normalize_task_log_lines(lines)
+    normalized_max_line_chars = _normalize_task_log_max_line_chars(max_line_chars)
     
     # 优先从内存中获取日志
     if hasattr(task, 'logs') and task.logs:
-        logs = task.logs[-lines:] if len(task.logs) > lines else task.logs
-        return {"logs": logs, "total": len(task.logs)}
+        all_logs = task.logs if isinstance(task.logs, list) else []
+        sliced_logs = all_logs[-normalized_lines:] if len(all_logs) > normalized_lines else all_logs
+        logs = [_truncate_task_log_line(line, normalized_max_line_chars) for line in sliced_logs]
+        return {
+            "logs": logs,
+            "total": len(all_logs),
+            "returned": len(logs),
+            "has_more": len(all_logs) > len(logs),
+        }
     
     # 如果内存中没有，尝试从日志文件读取
     log_file = LOGS_DIR / f"{task_id}.log"
     if log_file.exists():
-        with open(log_file, "r", encoding="utf-8") as f:
-            all_logs = f.readlines()
-            logs = [line.strip() for line in all_logs[-lines:]]
-            return {"logs": logs, "total": len(all_logs)}
+        tail_lines, has_more = _read_log_tail_lines_fast(log_file, normalized_lines)
+        logs = [_truncate_task_log_line(line, normalized_max_line_chars) for line in tail_lines]
+        return {
+            "logs": logs,
+            "total": None,
+            "returned": len(logs),
+            "has_more": has_more,
+        }
     
-    return {"logs": [], "total": 0}
+    return {"logs": [], "total": 0, "returned": 0, "has_more": False}
 
 
 @app.get("/api/tasks/{task_id}/diagnosis")

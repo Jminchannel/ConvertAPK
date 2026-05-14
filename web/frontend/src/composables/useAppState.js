@@ -872,6 +872,11 @@ export const useAppState = () => {
   const taskLogs = ref([])
   const currentLogTaskId = ref(null)
   const logsContainer = ref(null)
+  const taskLogsTotal = ref(0)
+  const taskLogsHasMore = ref(false)
+  const logsLoading = ref(false)
+  const taskLogFetchLines = 220
+  const taskLogMaxLineChars = 1400
   const taskDiagnosis = ref(null)
   const taskDiagnosisLoading = ref(false)
   const taskDiagnosisError = ref('')
@@ -3721,20 +3726,50 @@ export const useAppState = () => {
     showLogs.value = false
     currentLogTaskId.value = null
     taskLogs.value = []
+    taskLogsTotal.value = 0
+    taskLogsHasMore.value = false
+    logsLoading.value = false
     taskDiagnosis.value = null
     taskDiagnosisLoading.value = false
     taskDiagnosisError.value = ''
   }
+  const shouldReplaceTaskLogs = (currentLogs, nextLogs) => {
+    if (!Array.isArray(currentLogs) || !Array.isArray(nextLogs)) return true
+    if (currentLogs.length !== nextLogs.length) return true
+    if (currentLogs.length === 0) return false
+    const currentLast = currentLogs[currentLogs.length - 1]
+    const nextLast = nextLogs[nextLogs.length - 1]
+    if (currentLast !== nextLast) return true
+    const currentFirst = currentLogs[0]
+    const nextFirst = nextLogs[0]
+    return currentFirst !== nextFirst
+  }
   const refreshLogs = async () => {
-    if (!currentLogTaskId.value) return
+    if (!currentLogTaskId.value || logsLoading.value) return
+    logsLoading.value = true
     try {
-      const result = await api.getTaskLogs(currentLogTaskId.value, 500)
-      taskLogs.value = result.logs || []
-      setTimeout(() => {
-        if (logsContainer.value) logsContainer.value.scrollTop = logsContainer.value.scrollHeight
-      }, 50)
+      const result = await api.getTaskLogs(currentLogTaskId.value, {
+        lines: taskLogFetchLines,
+        maxLineChars: taskLogMaxLineChars
+      })
+      const nextLogs = Array.isArray(result?.logs) ? result.logs : []
+      const replaced = shouldReplaceTaskLogs(taskLogs.value, nextLogs)
+      if (replaced) {
+        taskLogs.value = nextLogs
+        await nextTick()
+        if (logsContainer.value) {
+          logsContainer.value.scrollTop = logsContainer.value.scrollHeight
+        }
+      }
+      const totalRaw = Number(result?.total)
+      taskLogsTotal.value = Number.isFinite(totalRaw) && totalRaw >= 0 ? totalRaw : nextLogs.length
+      taskLogsHasMore.value = Boolean(result?.has_more) || taskLogsTotal.value > nextLogs.length
     } catch {
       taskLogs.value = []
+      taskLogsTotal.value = 0
+      taskLogsHasMore.value = false
+    } finally {
+      logsLoading.value = false
     }
     await refreshTaskDiagnosis(false)
   }
@@ -4313,6 +4348,9 @@ export const useAppState = () => {
     previousVersionName,
     showLogs,
     taskLogs,
+    taskLogsTotal,
+    taskLogsHasMore,
+    logsLoading,
     taskDiagnosis,
     taskDiagnosisLoading,
     taskDiagnosisError,

@@ -296,6 +296,7 @@ export const messages = {
     logs: {
       title: 'Build Logs',
       taskId: 'Task ID',
+      loading: 'Loading logs...',
       noLogs: 'No log records',
       close: 'Close'
     },
@@ -730,6 +731,7 @@ export const messages = {
     logs: {
       title: '构建日志',
       taskId: '任务ID',
+      loading: '日志加载中...',
       noLogs: '暂无日志记录',
       close: '关闭'
     },
@@ -1161,6 +1163,7 @@ export const messages = {
     logs: {
       title: '建構日誌',
       taskId: '任務ID',
+      loading: '日誌載入中...',
       noLogs: '暫無日誌記錄',
       refreshLogs: '重新整理日誌',
       logCount: '共 {count} 條日誌',

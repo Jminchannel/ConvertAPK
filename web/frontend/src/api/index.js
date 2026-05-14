@@ -286,9 +286,18 @@ export const updateTask = async (taskId, updateData) => {
 }
 
 // 获取指定任务的运行日志
-export const getTaskLogs = async (taskId, lines = 100) => {
+export const getTaskLogs = async (taskId, options = {}) => {
   const clientId = getClientId()
-  const response = await api.get(`/tasks/${taskId}/logs`, { params: { lines, client_id: clientId } })
+  const isLegacyNumber = typeof options === 'number'
+  const lines = isLegacyNumber
+    ? options
+    : Number.isFinite(Number(options?.lines)) ? Number(options.lines) : 100
+  const maxLineChars = isLegacyNumber
+    ? 1400
+    : Number.isFinite(Number(options?.maxLineChars)) ? Number(options.maxLineChars) : 1400
+  const response = await api.get(`/tasks/${taskId}/logs`, {
+    params: { lines, max_line_chars: maxLineChars, client_id: clientId }
+  })
   return response.data
 }
 
