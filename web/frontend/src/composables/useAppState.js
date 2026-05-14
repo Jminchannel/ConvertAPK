@@ -655,6 +655,9 @@ export const useAppState = () => {
     contact: '',
     source_task_id: '',
     frozen_at: '',
+    freeze_expires_at: '',
+    freeze_remaining_seconds: 0,
+    freeze_seconds: 600,
     cooldown_remaining_seconds: 0,
     cooldown_seconds: 600
   })
@@ -857,9 +860,7 @@ export const useAppState = () => {
   })
   const taskComplianceError = computed(() => {
     if (clientFreezeState.value.frozen) {
-      return t('config.clientFrozenByRisk', {
-        reason: clientFreezeState.value.reason || t('config.clientFrozenByRiskDefaultReason')
-      })
+      return buildClientFrozenMessage(clientFreezeState.value)
     }
     if (updatingTaskId.value) return ''
     if (!taskComplianceAck.value) return t('config.taskComplianceAckRequired')
@@ -1152,6 +1153,15 @@ export const useAppState = () => {
     const contact = String(freeze?.contact || '').trim()
     const sourceTaskId = String(freeze?.source_task_id || '').trim()
     const frozenAt = String(freeze?.frozen_at || '').trim()
+    const freezeExpiresAt = String(
+      payload?.freeze_expires_at || freeze?.freeze_expires_at || freeze?.expires_at || ''
+    ).trim()
+    const freezeRemainingSeconds = Number(
+      payload?.freeze_remaining_seconds || freeze?.freeze_remaining_seconds || freeze?.remaining_seconds || 0
+    )
+    const freezeSeconds = Number(
+      payload?.freeze_seconds || freeze?.freeze_seconds || 0
+    )
     const cooldownRemainingSeconds = Number(payload?.cooldown_remaining_seconds || freeze?.cooldown_remaining_seconds || 0)
     const cooldownSeconds = Number(payload?.cooldown_seconds || freeze?.cooldown_seconds || 600)
     return {
@@ -1160,10 +1170,36 @@ export const useAppState = () => {
       contact,
       source_task_id: sourceTaskId,
       frozen_at: frozenAt,
+      freeze_expires_at: freezeExpiresAt,
+      freeze_remaining_seconds: Number.isFinite(freezeRemainingSeconds) ? Math.max(0, Math.round(freezeRemainingSeconds)) : 0,
+      freeze_seconds: Number.isFinite(freezeSeconds) && freezeSeconds > 0 ? Math.round(freezeSeconds) : 600,
       cooldown_remaining_seconds: Number.isFinite(cooldownRemainingSeconds) ? Math.max(0, Math.round(cooldownRemainingSeconds)) : 0,
       cooldown_seconds: Number.isFinite(cooldownSeconds) && cooldownSeconds > 0 ? Math.round(cooldownSeconds) : 600
     }
   }
+
+  const formatFreezeUnfreezeTime = (rawValue) => {
+    const text = String(rawValue || '').trim()
+    if (!text) return ''
+    const parsed = new Date(text)
+    if (Number.isNaN(parsed.getTime())) return ''
+    const pad = (num) => String(num).padStart(2, '0')
+    const year = parsed.getFullYear()
+    const month = pad(parsed.getMonth() + 1)
+    const day = pad(parsed.getDate())
+    const hour = pad(parsed.getHours())
+    const minute = pad(parsed.getMinutes())
+    const second = pad(parsed.getSeconds())
+    return `${year}-${month}-${day} ${hour}:${minute}:${second}`
+  }
+
+  const buildClientFrozenMessage = (freezeLike = {}) => {
+    const freezeState = normalizeFreezeState(freezeLike)
+    const reason = freezeState.reason || t('config.clientFrozenByRiskDefaultReason')
+    const unfreezeAt = formatFreezeUnfreezeTime(freezeState.freeze_expires_at) || t('config.clientFrozenByRiskUnknownUnfreezeTime')
+    return t('config.clientFrozenByRisk', { reason, unfreezeAt })
+  }
+
   const extractClientFrozenDetail = (error) => {
     const detail = getErrorDetailPayload(error)
     if (detail && typeof detail === 'object') {
@@ -1190,9 +1226,7 @@ export const useAppState = () => {
     const freezeDetail = extractClientFrozenDetail(error)
     if (freezeDetail && freezeDetail.frozen) {
       applyClientFreezeState(freezeDetail)
-      return t('config.clientFrozenByRisk', {
-        reason: freezeDetail.reason || t('config.clientFrozenByRiskDefaultReason')
-      })
+      return buildClientFrozenMessage(freezeDetail)
     }
     const detail = getErrorDetailText(error)
     if (!detail) return ''
@@ -1207,9 +1241,7 @@ export const useAppState = () => {
     const freezeDetail = extractClientFrozenDetail(error)
     if (freezeDetail && freezeDetail.frozen) {
       applyClientFreezeState(freezeDetail)
-      return t('config.clientFrozenByRisk', {
-        reason: freezeDetail.reason || t('config.clientFrozenByRiskDefaultReason')
-      })
+      return buildClientFrozenMessage(freezeDetail)
     }
     const detail = getErrorDetailText(error)
     if (!detail) return ''
@@ -1274,6 +1306,9 @@ export const useAppState = () => {
         contact: String(alert?.contact || '').trim(),
         source_task_id: String(alert?.source_task_id || '').trim(),
         frozen_at: String(alert?.frozen_at || '').trim(),
+        freeze_expires_at: String(alert?.freeze_expires_at || '').trim(),
+        freeze_seconds: Number(alert?.freeze_seconds || 0),
+        freeze_remaining_seconds: Number(alert?.freeze_remaining_seconds || 0),
       },
     })
   }
@@ -3329,12 +3364,7 @@ export const useAppState = () => {
     }
     if (!canCreateTask.value) {
       if (clientFreezeState.value.frozen) {
-        showToast(
-          t('config.clientFrozenByRisk', {
-            reason: clientFreezeState.value.reason || t('config.clientFrozenByRiskDefaultReason')
-          }),
-          'error'
-        )
+        showToast(buildClientFrozenMessage(clientFreezeState.value), 'error')
       }
       return
     }
@@ -3457,12 +3487,7 @@ export const useAppState = () => {
         const freezeState = extractClientFreezeStateFromTask(created)
         if (freezeState?.frozen) {
           applyClientFreezeState(freezeState)
-          showToast(
-            t('config.clientFrozenByRisk', {
-              reason: freezeState.reason || t('config.clientFrozenByRiskDefaultReason')
-            }),
-            'warning'
-          )
+          showToast(buildClientFrozenMessage(freezeState), 'warning')
         }
         const reviewRequired = Boolean(created?.review_required)
         const reviewStatus = String(created?.review_status || '').trim().toLowerCase()

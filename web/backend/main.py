@@ -105,6 +105,9 @@ UPLOAD_MAX_SIZE_MB_MAX = 10240
 RISK_SCAN_HIGH_RISK_HIT_THRESHOLD_DEFAULT = 3
 RISK_SCAN_HIGH_RISK_HIT_THRESHOLD_MIN = 1
 RISK_SCAN_HIGH_RISK_HIT_THRESHOLD_MAX = 200
+RISK_FREEZE_MINUTES_DEFAULT = 10
+RISK_FREEZE_MINUTES_MIN = 1
+RISK_FREEZE_MINUTES_MAX = 1440
 UPLOAD_STREAM_CHUNK_SIZE = 1024 * 1024
 AI_PROVIDER_DEFAULT = "openrouter"
 AI_API_URL_DEFAULT = "https://openrouter.ai/api/v1/chat/completions"
@@ -139,6 +142,18 @@ def _normalize_risk_scan_high_risk_hit_threshold(value) -> int:
     if threshold > RISK_SCAN_HIGH_RISK_HIT_THRESHOLD_MAX:
         return RISK_SCAN_HIGH_RISK_HIT_THRESHOLD_MAX
     return threshold
+
+
+def _normalize_risk_freeze_minutes(value) -> int:
+    try:
+        minutes = int(value)
+    except Exception:
+        return RISK_FREEZE_MINUTES_DEFAULT
+    if minutes < RISK_FREEZE_MINUTES_MIN:
+        return RISK_FREEZE_MINUTES_MIN
+    if minutes > RISK_FREEZE_MINUTES_MAX:
+        return RISK_FREEZE_MINUTES_MAX
+    return minutes
 
 
 def _normalize_ai_timeout_seconds(value) -> int:
@@ -211,6 +226,9 @@ def _load_client_feature_flags(client_id: str | None = None) -> dict:
             os.getenv("RISK_SCAN_MIN_HIT_COUNT_FOR_HIGH")
             or RISK_SCAN_HIGH_RISK_HIT_THRESHOLD_DEFAULT
         ),
+        "risk_freeze_minutes": _normalize_risk_freeze_minutes(
+            (int(TASK_AI_FREEZE_SECONDS) + 59) // 60 if int(TASK_AI_FREEZE_SECONDS) > 0 else RISK_FREEZE_MINUTES_DEFAULT
+        ),
         "ai_enabled": _env_bool("TASK_AI_RISK_GUARD_ENABLED", default=True),
         "ai_provider": str(os.getenv("TASK_AI_PROVIDER") or AI_PROVIDER_DEFAULT).strip().lower() or AI_PROVIDER_DEFAULT,
         "ai_api_url": str(
@@ -273,6 +291,8 @@ def _load_client_feature_flags(client_id: str | None = None) -> dict:
             flags["risk_scan_high_risk_hit_threshold"] = _normalize_risk_scan_high_risk_hit_threshold(
                 data.get("risk_scan_high_risk_hit_threshold")
             )
+        if "risk_freeze_minutes" in data:
+            flags["risk_freeze_minutes"] = _normalize_risk_freeze_minutes(data.get("risk_freeze_minutes"))
         if "ai_enabled" in data:
             flags["ai_enabled"] = _to_runtime_bool(data.get("ai_enabled"), default=flags["ai_enabled"])
         if "ai_provider" in data:
@@ -600,17 +620,18 @@ MARKETPLACE_BLOCK_KEYWORDS = (
     "app store",
     "application store",
     "apk store",
+    "app market",
     "app marketplace",
+    "software store",
     "download center",
     "应用商店",
     "应用市场",
     "软件商店",
     "软件市场",
-    "应用中心",
-    "下载中心",
-    "应用分发",
+    "应用分发平台",
     "分发平台",
 )
+RISK_MARKETPLACE_ONLY_MODE = _env_bool("RISK_MARKETPLACE_ONLY_MODE", default=True)
 RISK_REVIEW_ENABLED = _env_bool("TASK_RISK_REVIEW_ENABLED", default=True)
 RISK_REVIEW_ALLOWLIST_CLIENT_IDS_RAW = str(
     os.getenv("TASK_RISK_REVIEW_ALLOWLIST_CLIENT_IDS") or ""
@@ -633,17 +654,8 @@ RISK_SCAN_BLOCK_KEYWORDS = tuple(
     dict.fromkeys(
         (
             *MARKETPLACE_BLOCK_KEYWORDS,
-            "app center",
-            "software store",
-            "app mall",
-            "distribution channel",
             "third-party app market",
-            "mod apk",
-            "cracked apk",
-            "应用商城",
-            "应用下载站",
-            "渠道分发",
-            "下载平台",
+            "第三方应用市场",
         )
     )
 )
@@ -664,153 +676,75 @@ RISK_SCAN_DOMAIN_KEYWORDS = (
 )
 
 RISK_COMBO_TEXT_CATEGORIES: dict[str, tuple[str, ...]] = {
-    "fake_finance": (
-        "bank",
-        "wallet",
-        "exchange",
-        "usdt",
-        "seed phrase",
-        "mnemonic",
-        "withdraw",
-        "deposit",
-        "\u94f6\u884c",
-        "\u94b1\u5305",
-        "\u4ea4\u6613\u6240",
-        "\u52a9\u8bb0\u8bcd",
-        "\u5145\u503c",
-        "\u63d0\u73b0",
-        "\u6536\u6b3e\u7801",
-    ),
-    "fake_authority": (
-        "police",
-        "court",
-        "warrant",
-        "freeze funds",
-        "bail",
-        "\u516c\u5b89",
-        "\u6cd5\u9662",
-        "\u4f20\u7968",
-        "\u51bb\u7ed3\u8d44\u91d1",
-        "\u4fdd\u8bc1\u91d1",
-    ),
-    "fake_customer_service": (
-        "customer service",
-        "refund",
-        "order anomaly",
-        "verify code",
-        "\u5ba2\u670d",
-        "\u9000\u6b3e",
-        "\u8ba2\u5355\u5f02\u5e38",
-        "\u9a8c\u8bc1\u7801",
-        "\u98ce\u63a7\u89e3\u9664",
-    ),
-    "gambling": (
-        "bet",
-        "casino",
-        "lottery",
-        "jackpot",
-        "odds",
-        "\u8d4c\u535a",
-        "\u4e0b\u6ce8",
-        "\u5f00\u5956",
-        "\u8fd4\u6c34",
-        "\u4f53\u5f69",
-        "\u798f\u5f69",
-    ),
-    "mlm_fraud": (
-        "high yield",
-        "daily return",
-        "referral reward",
-        "commission",
-        "investment plan",
-        "\u5237\u5355",
-        "\u8fd4\u5229",
-        "\u9ad8\u6536\u76ca",
-        "\u9080\u8bf7\u8fd4\u4f63",
-        "\u8d44\u91d1\u76d8",
-    ),
-    "phishing_login": (
-        "login verify",
-        "account abnormal",
-        "re-auth",
-        "otp",
-        "\u767b\u5f55\u9a8c\u8bc1",
-        "\u8d26\u53f7\u5f02\u5e38",
-        "\u91cd\u65b0\u8ba4\u8bc1",
-        "\u9a8c\u8bc1\u7801\u767b\u5f55",
-    ),
-    "remote_control": (
-        "remote control",
-        "screen share",
-        "device management",
-        "accessibility",
-        "\u8fdc\u7a0b\u63a7\u5236",
-        "\u5c4f\u5e55\u5171\u4eab",
-        "\u65e0\u969c\u788d",
-        "\u8bbe\u5907\u7ba1\u7406",
-    ),
-    "spyware_trojan": (
-        "keylogger",
-        "silent install",
-        "background monitor",
-        "read sms",
-        "read contacts",
-        "\u6728\u9a6c",
-        "\u76d1\u542c",
-        "\u901a\u8baf\u5f55",
-        "\u77ed\u4fe1",
-        "\u540e\u53f0\u76d1\u63a7",
-    ),
-    "cracking_abuse": (
-        "mod apk",
-        "crack",
-        "patch",
-        "script",
-        "\u7834\u89e3",
-        "\u514d\u5e7f\u544a",
-        "\u6fc0\u6d3b\u7801",
-        "\u5916\u6302",
-        "\u5237\u91cf",
-    ),
     "illegal_distribution": (
         "app store",
         "application store",
+        "apk store",
         "app market",
+        "app marketplace",
         "download center",
         "third-party app market",
+        "software store",
         "\u5e94\u7528\u5e02\u573a",
         "\u5e94\u7528\u5546\u5e97",
+        "\u8f6f\u4ef6\u5e02\u573a",
+        "\u8f6f\u4ef6\u5546\u5e97",
+        "\u5e94\u7528\u5206\u53d1\u5e73\u53f0",
         "\u5206\u53d1\u5e73\u53f0",
         "\u4e0b\u8f7d\u4e2d\u5fc3",
-        "\u4e00\u952e\u5b89\u88c5",
-        "\u8d44\u6e90\u805a\u5408",
     ),
 }
 
-RISK_COMBO_PERMISSION_SETS: dict[str, tuple[str, ...]] = {
-    "overlay_silent_install": (
-        "android.permission.system_alert_window",
-        "android.permission.request_install_packages",
-    ),
-    "sms_intercept": (
-        "android.permission.read_sms",
-        "android.permission.receive_sms",
-    ),
-    "contacts_call_phishing": (
-        "android.permission.read_contacts",
-        "android.permission.call_phone",
-        "android.permission.read_phone_state",
-    ),
-    "spyware_data_exfiltration": (
-        "android.permission.read_external_storage",
-        "android.permission.write_external_storage",
-        "android.permission.read_phone_state",
-        "android.permission.record_audio",
-    ),
-}
+RISK_COMBO_PERMISSION_SETS: dict[str, tuple[str, ...]] = {}
 
 RISK_COMBO_CATEGORY_MAX_HITS = 8
 RISK_COMBO_CORPUS_MAX_CHARS = 200000
+MARKETPLACE_TEXT_HINT_KEYWORDS = (
+    "app store",
+    "application store",
+    "apk store",
+    "app market",
+    "app marketplace",
+    "software store",
+    "third-party app market",
+    "download center",
+    "应用商店",
+    "应用市场",
+    "软件商店",
+    "软件市场",
+    "应用分发",
+    "分发平台",
+    "下载中心",
+)
+MARKETPLACE_DOMAIN_HINT_KEYWORDS = (
+    "apk",
+    "appstore",
+    "appmarket",
+    "market",
+    "store",
+    "download",
+    "apkpure",
+    "apkcombo",
+    "apkmirror",
+    "uptodown",
+    "coolapk",
+    "taptap",
+    "wandoujia",
+    "appchina",
+    "yingyongbao",
+    "appgallery",
+    "getapps",
+    "9apps",
+)
+MARKETPLACE_AI_ALLOWED_CATEGORIES = {
+    "illegal_distribution",
+    "marketplace_distribution",
+    "app_marketplace",
+    "app_store_distribution",
+    "app_store",
+    "application_market",
+    "distribution_platform",
+}
 
 
 def _normalize_runtime_keywords(raw_keywords, fallback_keywords: tuple[str, ...]) -> tuple[str, ...]:
@@ -832,6 +766,70 @@ def _normalize_runtime_keywords(raw_keywords, fallback_keywords: tuple[str, ...]
     return tuple(normalized)
 
 
+def _is_marketplace_text_keyword(keyword: str) -> bool:
+    text = str(keyword or "").strip().lower()
+    if not text:
+        return False
+    if _detect_marketplace_keyword(text):
+        return True
+    for hint in MARKETPLACE_TEXT_HINT_KEYWORDS:
+        hint_text = str(hint or "").strip().lower()
+        if hint_text and hint_text in text:
+            return True
+    return False
+
+
+def _is_marketplace_domain_keyword(keyword: str) -> bool:
+    text = str(keyword or "").strip().lower()
+    if not text:
+        return False
+    if _detect_marketplace_keyword(text):
+        return True
+    for hint in MARKETPLACE_DOMAIN_HINT_KEYWORDS:
+        hint_text = str(hint or "").strip().lower()
+        if hint_text and hint_text in text:
+            return True
+    return False
+
+
+def _filter_marketplace_runtime_keywords(
+    keywords: tuple[str, ...],
+    fallback_keywords: tuple[str, ...],
+    *,
+    domain_mode: bool,
+) -> tuple[str, ...]:
+    matched: list[str] = []
+    seen: set[str] = set()
+    checker = _is_marketplace_domain_keyword if domain_mode else _is_marketplace_text_keyword
+    for item in keywords:
+        keyword = str(item or "").strip()
+        if not keyword:
+            continue
+        if not checker(keyword):
+            continue
+        dedupe_key = keyword.lower()
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        matched.append(keyword)
+    if matched:
+        return tuple(matched)
+    fallback_matched: list[str] = []
+    seen_fallback: set[str] = set()
+    for item in fallback_keywords:
+        keyword = str(item or "").strip()
+        if not keyword:
+            continue
+        if not checker(keyword):
+            continue
+        dedupe_key = keyword.lower()
+        if dedupe_key in seen_fallback:
+            continue
+        seen_fallback.add(dedupe_key)
+        fallback_matched.append(keyword)
+    return tuple(fallback_matched) if fallback_matched else tuple(fallback_keywords)
+
+
 def _resolve_risk_scan_keyword_sets(client_id: str | None) -> tuple[tuple[str, ...], tuple[str, ...]]:
     flags = _load_client_feature_flags(client_id=client_id)
     block_keywords = _normalize_runtime_keywords(
@@ -842,6 +840,17 @@ def _resolve_risk_scan_keyword_sets(client_id: str | None) -> tuple[tuple[str, .
         flags.get("risk_scan_domain_keywords"),
         RISK_SCAN_DOMAIN_KEYWORDS,
     )
+    if RISK_MARKETPLACE_ONLY_MODE:
+        block_keywords = _filter_marketplace_runtime_keywords(
+            block_keywords,
+            MARKETPLACE_BLOCK_KEYWORDS,
+            domain_mode=False,
+        )
+        domain_keywords = _filter_marketplace_runtime_keywords(
+            domain_keywords,
+            RISK_SCAN_DOMAIN_KEYWORDS,
+            domain_mode=True,
+        )
     return block_keywords, domain_keywords
 
 
@@ -1325,14 +1334,7 @@ def _scan_task_risk_inputs(
     html_path: Path | None = None,
 ) -> dict:
     client_flags = _load_client_feature_flags(client_id=client_id)
-    block_keywords = _normalize_runtime_keywords(
-        client_flags.get("risk_scan_block_keywords"),
-        RISK_SCAN_BLOCK_KEYWORDS,
-    )
-    domain_keywords = _normalize_runtime_keywords(
-        client_flags.get("risk_scan_domain_keywords"),
-        RISK_SCAN_DOMAIN_KEYWORDS,
-    )
+    block_keywords, domain_keywords = _resolve_risk_scan_keyword_sets(client_id)
     high_risk_hit_threshold = _normalize_risk_scan_high_risk_hit_threshold(
         client_flags.get("risk_scan_high_risk_hit_threshold")
     )
@@ -1635,8 +1637,19 @@ def _normalize_ai_risk_confidence(value: str | None) -> str:
     return "medium"
 
 
+def _is_marketplace_ai_category(value: str | None) -> bool:
+    category = str(value or "").strip().lower()
+    if not category:
+        return False
+    if category in MARKETPLACE_AI_ALLOWED_CATEGORIES:
+        return True
+    if "market" in category or "store" in category or "distribution" in category:
+        return True
+    return False
+
+
 def _normalize_ai_risk_guard_result(payload: dict) -> dict:
-    suspected = bool(
+    raw_suspected = bool(
         payload.get("is_high_risk_suspected")
         or
         payload.get("is_marketplace_suspected")
@@ -1644,8 +1657,6 @@ def _normalize_ai_risk_guard_result(payload: dict) -> dict:
         or payload.get("marketplace_suspected")
     )
     action = _normalize_ai_risk_action(payload.get("recommended_action") or payload.get("action"))
-    if suspected and action == "allow":
-        action = "review"
     reason = str(payload.get("reason") or payload.get("summary") or payload.get("message") or "").strip()
     confidence = _normalize_ai_risk_confidence(payload.get("confidence"))
     evidence_raw = payload.get("evidence") or payload.get("signals") or []
@@ -1670,13 +1681,25 @@ def _normalize_ai_risk_guard_result(payload: dict) -> dict:
             name = str(item or "").strip().lower()
             if not name or name in risk_categories:
                 continue
+            if not _is_marketplace_ai_category(name):
+                continue
             risk_categories.append(name[:64])
             if len(risk_categories) >= 16:
                 break
+    has_marketplace_reason = _is_marketplace_text_keyword(reason) or _is_marketplace_domain_keyword(reason)
+    has_marketplace_evidence = any(
+        _is_marketplace_text_keyword(item) or _is_marketplace_domain_keyword(item)
+        for item in evidence_items
+    )
+    suspected = bool(raw_suspected and (risk_categories or has_marketplace_reason or has_marketplace_evidence))
     if risk_categories and not suspected:
         suspected = True
-        if action == "allow":
-            action = "review"
+    if not suspected and (has_marketplace_reason or has_marketplace_evidence) and action in {"review", "block"}:
+        suspected = True
+    if suspected and action == "allow":
+        action = "review"
+    if not suspected:
+        action = "allow"
     return {
         "suspected": suspected,
         "action": action,
@@ -1724,14 +1747,14 @@ def _call_ai_marketplace_guard(
     }
 
     system_prompt = (
-        "You are an app security compliance reviewer. "
-        "Decide whether the submitted app has high-risk malicious intent, including phishing, fraud, spyware, "
-        "gambling, cracking abuse, or illegal app distribution. "
+        "You are an app compliance reviewer focused only on marketplace-style distribution risk. "
+        "Decide whether the submitted app appears to be an unauthorized app store, app marketplace, or deceptive download/distribution center. "
+        "Ignore unrelated risks such as finance, gambling, phishing, spyware, or cracking abuse in this task. "
         "Output JSON only."
     )
     user_prompt = (
-        "Analyze metadata, permission combinations, risk summary, and source snippets.\n"
-        "If risky behavior combinations are present, recommend review or block.\n"
+        "Analyze metadata, risk summary, and source snippets.\n"
+        "Only judge app-marketplace/distribution suspicion. Do not flag unrelated categories.\n"
         "Required JSON fields:\n"
         "1. is_high_risk_suspected: boolean\n"
         "2. confidence: low | medium | high\n"
@@ -1740,20 +1763,11 @@ def _call_ai_marketplace_guard(
         "5. evidence: string[]\n"
         "6. risk_categories: string[]\n\n"
         "Risk categories:\n"
-        "- fake_finance\n"
-        "- fake_authority\n"
-        "- fake_customer_service\n"
-        "- gambling\n"
-        "- mlm_fraud\n"
-        "- phishing_login\n"
-        "- remote_control\n"
-        "- spyware_trojan\n"
-        "- cracking_abuse\n"
         "- illegal_distribution\n\n"
         "Blocking guidance:\n"
-        "- If text risk category and dangerous permission combo are both present, prefer block.\n"
-        "- If phishing/trojan/illegal-distribution evidence is strong, prefer block.\n"
-        "- If evidence is weak, use review instead of allow.\n\n"
+        "- If strong evidence indicates app-store/app-marketplace/distribution-center intent, use block.\n"
+        "- If evidence is ambiguous but still related to marketplace intent, use review.\n"
+        "- If not related to marketplace intent, use allow.\n\n"
         f"Input JSON:\n{json.dumps(prompt_payload, ensure_ascii=False)}"
     )
 
@@ -2274,6 +2288,19 @@ def _parse_iso_datetime_to_timestamp(raw_value: str | None) -> float:
         return 0.0
 
 
+def _resolve_client_freeze_seconds(client_id: str | None = None) -> int:
+    default_freeze_seconds = max(int(TASK_AI_FREEZE_SECONDS), 60)
+    try:
+        client_flags = _load_client_feature_flags(client_id=client_id)
+    except Exception:
+        client_flags = {}
+    freeze_minutes = _normalize_risk_freeze_minutes(
+        client_flags.get("risk_freeze_minutes") if isinstance(client_flags, dict) else None
+    )
+    resolved_seconds = max(int(freeze_minutes) * 60, 60)
+    return resolved_seconds if resolved_seconds > 0 else default_freeze_seconds
+
+
 def _resolve_client_freeze_timing(value: dict) -> tuple[float, int]:
     freeze_seconds = TASK_AI_FREEZE_SECONDS
     try:
@@ -2347,6 +2374,7 @@ def _build_client_freeze_compliance_alert(client_id: str, freeze_record: dict | 
     normalized_record = _normalize_client_freeze_record(freeze_record or {}, default_client_id=client_id)
     if not normalized_record:
         return None
+    fallback_freeze_seconds = _resolve_client_freeze_seconds(client_id)
     return {
         "code": "client_frozen_by_ai_risk",
         "level": "high",
@@ -2355,7 +2383,7 @@ def _build_client_freeze_compliance_alert(client_id: str, freeze_record: dict | 
         "source_task_id": normalized_record["source_task_id"],
         "frozen_at": normalized_record["frozen_at"],
         "freeze_expires_at": normalized_record["expires_at"],
-        "freeze_seconds": int(normalized_record.get("freeze_seconds") or TASK_AI_FREEZE_SECONDS),
+        "freeze_seconds": int(normalized_record.get("freeze_seconds") or fallback_freeze_seconds),
         "freeze_remaining_seconds": int(normalized_record.get("remaining_seconds") or 0),
         "contact": normalized_record["contact"],
         "action": "contact_developer_to_unfreeze",
@@ -2486,7 +2514,7 @@ def _freeze_client_by_ai_risk(
 ) -> dict:
     normalized_client_id = _require_client_id(client_id)
     reason_text = str(reason or "").strip() or "AI risk guard flagged high risk"
-    freeze_seconds = max(int(TASK_AI_FREEZE_SECONDS), 60)
+    freeze_seconds = _resolve_client_freeze_seconds(normalized_client_id)
     frozen_at = datetime.now()
     expires_at_ts = time.time() + float(freeze_seconds)
     evidence_list: list[str] = []
@@ -2837,6 +2865,7 @@ def _attach_freeze_alert_to_risk_scan(risk_scan: dict | None, client_id: str, fr
 
 def _build_client_frozen_error_detail(client_id: str, freeze_record: dict | None = None) -> dict:
     normalized_client_id = _normalize_client_id(client_id)
+    fallback_freeze_seconds = _resolve_client_freeze_seconds(normalized_client_id)
     record = _normalize_client_freeze_record(freeze_record or {}, default_client_id=normalized_client_id)
     if not record:
         record = _normalize_client_freeze_record(
@@ -2846,7 +2875,7 @@ def _build_client_frozen_error_detail(client_id: str, freeze_record: dict | None
                 "source": "ai_risk_guard",
                 "source_task_id": "",
                 "frozen_at": datetime.now().isoformat(),
-                "freeze_seconds": int(TASK_AI_FREEZE_SECONDS),
+                "freeze_seconds": int(fallback_freeze_seconds),
                 "operator": "system",
                 "contact": TASK_AI_FREEZE_CONTACT,
             },
@@ -2861,7 +2890,7 @@ def _build_client_frozen_error_detail(client_id: str, freeze_record: dict | None
         "source_task_id": str(record.get("source_task_id") or ""),
         "frozen_at": str(record.get("frozen_at") or ""),
         "freeze_expires_at": str(record.get("expires_at") or ""),
-        "freeze_seconds": int(record.get("freeze_seconds") or TASK_AI_FREEZE_SECONDS),
+        "freeze_seconds": int(record.get("freeze_seconds") or fallback_freeze_seconds),
         "freeze_remaining_seconds": int(record.get("remaining_seconds") or 0),
         "contact": str(record.get("contact") or TASK_AI_FREEZE_CONTACT),
         "action": "contact_developer_to_unfreeze",
@@ -5789,12 +5818,13 @@ async def reject_risk_review_task(task_id: str, request: Request, payload: dict 
 async def get_client_freeze_status(client_id: str = None):
     normalized_client_id = _require_client_id(client_id)
     record = _get_client_freeze_record(normalized_client_id)
+    configured_freeze_seconds = _resolve_client_freeze_seconds(normalized_client_id)
     return {
         "client_id": normalized_client_id,
         "frozen": bool(record),
         "freeze": record or {},
         "freeze_remaining_seconds": int((record or {}).get("remaining_seconds") or 0),
-        "freeze_seconds": int((record or {}).get("freeze_seconds") or TASK_AI_FREEZE_SECONDS),
+        "freeze_seconds": int((record or {}).get("freeze_seconds") or configured_freeze_seconds),
         "freeze_expires_at": str((record or {}).get("expires_at") or ""),
         "cooldown_remaining_seconds": _get_client_ai_diag_cooldown_remaining_seconds(normalized_client_id),
         "cooldown_seconds": int(TASK_AI_DIAG_COOLDOWN_SECONDS),

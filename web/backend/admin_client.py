@@ -26,6 +26,9 @@ _DONATION_POPUP_PROBABILITY_MAX = 100
 _RISK_SCAN_HIGH_RISK_HIT_THRESHOLD_DEFAULT = 3
 _RISK_SCAN_HIGH_RISK_HIT_THRESHOLD_MIN = 1
 _RISK_SCAN_HIGH_RISK_HIT_THRESHOLD_MAX = 200
+_RISK_FREEZE_MINUTES_DEFAULT = 10
+_RISK_FREEZE_MINUTES_MIN = 1
+_RISK_FREEZE_MINUTES_MAX = 1440
 _BUILD_QUOTA_CONTEXT_CACHE: dict = {}
 try:
     _BUILD_QUOTA_CONTEXT_TTL = max(0.0, float(os.getenv("ADMIN_BUILD_QUOTA_CONTEXT_CACHE_TTL", "3")))
@@ -276,6 +279,7 @@ def fetch_feature_flags(client_id: str = "", force: bool = False) -> Dict[str, A
         "risk_scan_block_keywords": [],
         "risk_scan_domain_keywords": [],
         "risk_scan_high_risk_hit_threshold": _RISK_SCAN_HIGH_RISK_HIT_THRESHOLD_DEFAULT,
+        "risk_freeze_minutes": _RISK_FREEZE_MINUTES_DEFAULT,
         "ai_enabled": True,
         "ai_provider": "openrouter",
         "ai_api_url": _AI_API_URL_DEFAULT,
@@ -337,6 +341,17 @@ def fetch_feature_flags(client_id: str = "", force: bool = False) -> Dict[str, A
             return _RISK_SCAN_HIGH_RISK_HIT_THRESHOLD_MAX
         return parsed
 
+    def _normalize_risk_freeze_minutes(value: Any) -> int:
+        try:
+            parsed = int(value)
+        except Exception:
+            return _RISK_FREEZE_MINUTES_DEFAULT
+        if parsed < _RISK_FREEZE_MINUTES_MIN:
+            return _RISK_FREEZE_MINUTES_MIN
+        if parsed > _RISK_FREEZE_MINUTES_MAX:
+            return _RISK_FREEZE_MINUTES_MAX
+        return parsed
+
     if isinstance(data, dict):
         result["web_link_to_apk_enabled"] = bool(data.get("web_link_to_apk_enabled"))
         result["zip_to_desktop_enabled"] = bool(data.get("zip_to_desktop_enabled"))
@@ -368,6 +383,10 @@ def fetch_feature_flags(client_id: str = "", force: bool = False) -> Dict[str, A
         if "risk_scan_high_risk_hit_threshold" in data:
             result["risk_scan_high_risk_hit_threshold"] = _normalize_risk_scan_high_risk_hit_threshold(
                 data.get("risk_scan_high_risk_hit_threshold")
+            )
+        if "risk_freeze_minutes" in data:
+            result["risk_freeze_minutes"] = _normalize_risk_freeze_minutes(
+                data.get("risk_freeze_minutes")
             )
         if "ai_enabled" in data:
             result["ai_enabled"] = bool(data.get("ai_enabled"))
