@@ -1710,6 +1710,90 @@ def _normalize_ai_risk_guard_result(payload: dict) -> dict:
     }
 
 
+def _is_quick_generate_default_distribution_profile(
+    package_name: str | None,
+    permissions: list[str] | None,
+) -> bool:
+    default_package_name = str(globals().get("QUICK_GENERATE_PACKAGE_NAME") or "").strip().lower()
+    if not default_package_name:
+        return False
+    normalized_package_name = str(package_name or "").strip().lower()
+    if normalized_package_name != default_package_name:
+        return False
+    normalized_permissions = {
+        str(item or "").strip().upper()
+        for item in list(permissions or [])
+        if str(item or "").strip()
+    }
+    return "REQUEST_INSTALL_PACKAGES" in normalized_permissions
+
+
+def _is_quick_generate_default_only_ai_hit(
+    *,
+    quick_generate: bool,
+    package_name: str | None,
+    permissions: list[str] | None,
+    risk_scan: dict | None,
+    ai_guard_result: dict | None,
+) -> bool:
+    if not quick_generate:
+        return False
+    if not _is_ai_guard_high_risk(ai_guard_result):
+        return False
+    if not _is_quick_generate_default_distribution_profile(package_name, permissions):
+        return False
+    merged_risk_scan = risk_scan if isinstance(risk_scan, dict) else {}
+    if bool(merged_risk_scan.get("combo_blocked")):
+        return False
+    if list(merged_risk_scan.get("html_hits") or []):
+        return False
+    if list(merged_risk_scan.get("domain_hits") or []):
+        return False
+    evidence_text_items: list[str] = []
+    reason_text = str((ai_guard_result or {}).get("reason") or "").strip()
+    if reason_text:
+        evidence_text_items.append(reason_text)
+    for item in list((ai_guard_result or {}).get("evidence") or []):
+        text = str(item or "").strip()
+        if text:
+            evidence_text_items.append(text)
+    if not evidence_text_items:
+        return False
+    merged_text = " ".join(evidence_text_items).lower()
+    default_package_name = str(globals().get("QUICK_GENERATE_PACKAGE_NAME") or "").strip().lower()
+    has_default_marker = "request_install_packages" in merged_text
+    if default_package_name:
+        has_default_marker = has_default_marker or default_package_name in merged_text
+    if not has_default_marker:
+        return False
+    if _detect_marketplace_keyword(merged_text):
+        return False
+    strong_domain_keywords = tuple(
+        keyword
+        for keyword in RISK_SCAN_DOMAIN_KEYWORDS
+        if str(keyword or "").strip().lower() not in {"apk", "appstore", "appmarket", "market", "store", "download"}
+    )
+    strong_domain_hits = _collect_risk_keyword_hits(merged_text, strong_domain_keywords, max_hits=3)
+    if strong_domain_hits:
+        return False
+    return True
+
+
+def _downgrade_ai_guard_for_quick_generate_defaults(ai_guard_result: dict | None) -> dict:
+    downgraded_result = dict(ai_guard_result or {})
+    note = "识别为快捷生成默认包名与权限，不执行仅由AI触发的冻结。"
+    original_reason = str(downgraded_result.get("reason") or "").strip()
+    downgraded_result["suspected"] = False
+    downgraded_result["action"] = "allow"
+    downgraded_result["status"] = "allowed"
+    downgraded_result["quick_generate_default_tolerated"] = True
+    if original_reason:
+        downgraded_result["reason"] = f"{original_reason} | {note}"[:280]
+    else:
+        downgraded_result["reason"] = note[:280]
+    return downgraded_result
+
+
 def _call_ai_marketplace_guard(
     *,
     task_meta: dict,
@@ -1977,8 +2061,18 @@ def _refresh_task_risk_guard_before_start(task_id: str, task: BuildTask, client_
         ai_guard_result["cooldown_remaining_seconds"] = ai_cooldown_remaining
         ai_guard_result["status"] = "rule_only"
         ai_guard_result["error"] = "ai_rule_only_cooldown"
+    if _is_quick_generate_default_only_ai_hit(
+        quick_generate=bool(getattr(task, "quick_generate", False)),
+        package_name=getattr(task.config, "package_name", ""),
+        permissions=list(getattr(task.config, "permissions", []) or []),
+        risk_scan=base_risk_scan,
+        ai_guard_result=ai_guard_result,
+    ):
+        ai_guard_result = _downgrade_ai_guard_for_quick_generate_defaults(ai_guard_result)
 
     risk_scan = _apply_ai_guard_result_to_risk_scan(base_risk_scan, ai_guard_result)
+    if bool(ai_guard_result.get("quick_generate_default_tolerated")):
+        risk_scan["quick_generate_default_tolerated"] = True
     ai_guard_status = str(ai_guard_result.get("status") or "").strip().lower()
     ai_guard_error = str(ai_guard_result.get("error") or "").strip()
     ai_used = ai_guard_status in {"allowed", "blocked"} and not ai_guard_error
@@ -5553,8 +5647,18 @@ async def create_task(task_data: BuildTaskCreate):
         ai_guard_result["cooldown_remaining_seconds"] = ai_cooldown_remaining
         ai_guard_result["status"] = "rule_only"
         ai_guard_result["error"] = "ai_rule_only_cooldown"
+    if _is_quick_generate_default_only_ai_hit(
+        quick_generate=quick_generate,
+        package_name=effective_config.package_name,
+        permissions=list(getattr(effective_config, "permissions", []) or []),
+        risk_scan=base_risk_scan,
+        ai_guard_result=ai_guard_result,
+    ):
+        ai_guard_result = _downgrade_ai_guard_for_quick_generate_defaults(ai_guard_result)
 
     risk_scan = _apply_ai_guard_result_to_risk_scan(base_risk_scan, ai_guard_result)
+    if bool(ai_guard_result.get("quick_generate_default_tolerated")):
+        risk_scan["quick_generate_default_tolerated"] = True
     ai_guard_status = str(ai_guard_result.get("status") or "").strip().lower()
     ai_guard_error = str(ai_guard_result.get("error") or "").strip()
     ai_used = ai_guard_status in {"allowed", "blocked"} and not ai_guard_error
