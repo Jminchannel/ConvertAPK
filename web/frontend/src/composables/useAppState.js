@@ -1234,6 +1234,45 @@ export const useAppState = () => {
     if (detail.includes('task blocked by policy')) return t('config.marketplaceBlocked')
     if (detail.includes('task is pending admin risk review')) return t('toast.riskReviewPending')
     if (detail.includes('task was rejected by admin risk review')) return t('toast.riskReviewRejected')
+    if (
+      detail.includes('filename is required for zip-based mode')
+      || detail.includes('uploaded zip file not found')
+      || detail.includes('zip file not found')
+      || detail.includes('zip文件不存在')
+    ) {
+      return '未检测到可用 ZIP 文件，请重新上传后再试'
+    }
+    if (
+      detail.includes('html_filename is required for html mode')
+      || detail.includes('uploaded html file not found')
+      || detail.includes('html文件不存在')
+    ) {
+      return '未检测到可用 HTML 文件，请重新上传后再试'
+    }
+    if (
+      detail.includes('zip format is invalid')
+      || detail.includes('failed to inspect zip')
+      || detail.includes('index.html was not found in zip')
+    ) {
+      return '上传的 ZIP 无法识别，请确认项目结构后重试'
+    }
+    if (
+      detail.includes('request failed with status code 422')
+      || detail.includes('desktop_port must be')
+      || detail.includes('package_name must be')
+    ) {
+      return '构建参数校验失败，请检查包名、版本号和端口配置'
+    }
+    if (detail.includes('request failed with status code 413')) {
+      return '上传文件过大，请压缩后重试'
+    }
+    if (
+      detail.includes('request failed with status code 503')
+      || detail.includes('service unavailable')
+      || detail.includes('admin_unavailable')
+    ) {
+      return '服务暂时不可用，请稍后重试'
+    }
     return ''
   }
 
@@ -2283,6 +2322,24 @@ export const useAppState = () => {
     if (task?.status !== 'processing') return false
     return String(task?.message || '').includes('排队')
   }
+  const normalizeTaskReviewStatus = (task) => {
+    const directStatus = String(task?.review_status || '').trim().toLowerCase()
+    if (directStatus) return directStatus
+    const configStatus = String(task?.config?.review_status || '').trim().toLowerCase()
+    if (configStatus) return configStatus
+    const metaStatus = String(task?.zip_meta?.review_status || '').trim().toLowerCase()
+    return metaStatus
+  }
+  const isRiskReviewReleasedPendingTask = (task) => {
+    if (!task || task.status !== 'pending') return false
+    const reviewRequired = Boolean(
+      task?.review_required
+      ?? task?.config?.review_required
+      ?? task?.zip_meta?.review_required
+    )
+    if (!reviewRequired) return false
+    return normalizeTaskReviewStatus(task) === 'approved'
+  }
   const isCancelableTask = (task) => task?.status === 'pending' || task?.status === 'processing'
 
   const resetCdnLocalizationState = (enabled = false) => {
@@ -3132,11 +3189,17 @@ export const useAppState = () => {
     if (!canStartBuild) return
     await startTaskDirectly(taskId)
   }
-  const retryTask = async (taskId) => {
+  const retryTask = async (taskId, options = {}) => {
+    const autoStart = Boolean(options?.autoStart)
     try {
       await api.retryTask(taskId)
       showToast(t('toast.taskRetried'), 'success')
       await refreshTasks()
+      if (autoStart) {
+        const canStartBuild = await requestRewardAdBeforeBuild()
+        if (!canStartBuild) return
+        await startTaskDirectly(taskId, { notify: false, showRiskReviewingNotice: false })
+      }
     } catch (error) {
       showErrorToast('toast.retryFailed', error)
     }
@@ -4322,6 +4385,7 @@ export const useAppState = () => {
     getKeystoreUrl,
     downloadTaskArtifact,
     isQueuedTask,
+    isRiskReviewReleasedPendingTask,
     isCancelableTask,
     resetCdnLocalizationState,
     selectAllCdnLinks,

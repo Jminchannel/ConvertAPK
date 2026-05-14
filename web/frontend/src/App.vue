@@ -984,7 +984,7 @@
                 <div class="task-status" :class="task.status">{{ getStatusText(task.status) }}</div>
                 <div class="task-actions">
                   <button
-                    v-if="task.status === 'pending'"
+                    v-if="task.status === 'pending' && !isRiskReviewReleasedPendingTask(task)"
                     class="btn btn-primary btn-sm"
                     @click="startTask(task.id)"
                     :disabled="nativeAdRequesting"
@@ -1021,9 +1021,9 @@
                     🔄
                   </button>
                   <button
-                    v-if="task.status === 'failed'"
+                    v-if="task.status === 'failed' || isRiskReviewReleasedPendingTask(task)"
                     class="btn btn-warning btn-sm"
-                    @click="retryTask(task.id)"
+                    @click="retryTask(task.id, { autoStart: isRiskReviewReleasedPendingTask(task) })"
                     :title="t('tasks.retry')"
                   >
                     🔄

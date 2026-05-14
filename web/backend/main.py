@@ -2084,26 +2084,28 @@ def _refresh_task_risk_guard_before_start(task_id: str, task: BuildTask, client_
             source="risk_guard_before_start",
         )
 
+    manual_review_released = _is_task_review_released_by_admin(task)
     freeze_record = None
-    if _is_ai_guard_high_risk(ai_guard_result):
-        freeze_reason, freeze_evidence, freeze_source = _build_freeze_reason_and_evidence(ai_guard_result, risk_scan)
-        freeze_record = _freeze_client_by_ai_risk(
-            client_id=client_id,
-            task_id=task_id,
-            reason=freeze_reason,
-            evidence=freeze_evidence,
-            source=freeze_source,
-        )
-        risk_scan = _attach_freeze_alert_to_risk_scan(risk_scan, client_id, freeze_record)
-    else:
-        freeze_record = _freeze_client_when_risk_blocked(
-            client_id=client_id,
-            task_id=task_id,
-            risk_scan=risk_scan,
-            ai_guard_result=ai_guard_result,
-        )
-        if freeze_record:
+    if not manual_review_released:
+        if _is_ai_guard_high_risk(ai_guard_result):
+            freeze_reason, freeze_evidence, freeze_source = _build_freeze_reason_and_evidence(ai_guard_result, risk_scan)
+            freeze_record = _freeze_client_by_ai_risk(
+                client_id=client_id,
+                task_id=task_id,
+                reason=freeze_reason,
+                evidence=freeze_evidence,
+                source=freeze_source,
+            )
             risk_scan = _attach_freeze_alert_to_risk_scan(risk_scan, client_id, freeze_record)
+        else:
+            freeze_record = _freeze_client_when_risk_blocked(
+                client_id=client_id,
+                task_id=task_id,
+                risk_scan=risk_scan,
+                ai_guard_result=ai_guard_result,
+            )
+            if freeze_record:
+                risk_scan = _attach_freeze_alert_to_risk_scan(risk_scan, client_id, freeze_record)
 
     risk_level = str(risk_scan.get("risk_level") or "normal").strip().lower()
     if freeze_record:
@@ -2111,12 +2113,24 @@ def _refresh_task_risk_guard_before_start(task_id: str, task: BuildTask, client_
         risk_scan["risk_level"] = "high"
     allowlisted_for_review = _is_risk_review_allowlisted(client_id)
     review_required = True if freeze_record else _requires_risk_review(client_id, risk_scan)
+    if manual_review_released and risk_level == "high":
+        review_required = True
     now = datetime.now()
 
     task.risk_level = risk_level
     task.risk_scan = risk_scan
     task.review_required = review_required
-    if review_required:
+    if manual_review_released and review_required:
+        task.review_status = RISK_REVIEW_STATUS_APPROVED
+        if not task.review_requested_at:
+            task.review_requested_at = now
+        if not task.review_decision_at:
+            task.review_decision_at = now
+        if not str(task.review_decision_by or "").strip():
+            task.review_decision_by = "admin"
+        if task.status == BuildStatus.PENDING:
+            task.message = "高风险任务已由管理员放行，可继续构建。"
+    elif review_required:
         task.review_status = RISK_REVIEW_STATUS_PENDING
         task.review_requested_at = now
         task.review_decision_at = None
@@ -2992,13 +3006,32 @@ def _build_client_frozen_error_detail(client_id: str, freeze_record: dict | None
     }
 
 
-def _raise_if_client_frozen_for_build(client_id: str | None) -> None:
+def _is_task_review_released_by_admin(task: BuildTask | None) -> bool:
+    if task is None:
+        return False
+    if not bool(getattr(task, "review_required", False)):
+        return False
+    review_status = str(getattr(task, "review_status", "") or "").strip().lower()
+    if review_status != RISK_REVIEW_STATUS_APPROVED:
+        return False
+    decision_by = str(getattr(task, "review_decision_by", "") or "").strip().lower()
+    if not decision_by:
+        return False
+    return decision_by not in {"system", "allowlist"}
+
+
+def _raise_if_client_frozen_for_build(client_id: str | None, task: BuildTask | None = None) -> None:
     normalized_client_id = _normalize_client_id(client_id)
     if not normalized_client_id:
         return
     record = _get_client_freeze_record(normalized_client_id)
     if not record:
         return
+    if task is not None and _is_task_review_released_by_admin(task):
+        freeze_source_task_id = str(record.get("source_task_id") or "").strip()
+        current_task_id = str(getattr(task, "id", "") or "").strip()
+        if not freeze_source_task_id or freeze_source_task_id == current_task_id:
+            return
     raise HTTPException(
         status_code=423,
         detail=_build_client_frozen_error_detail(normalized_client_id, freeze_record=record),
@@ -6043,7 +6076,7 @@ async def start_task(task_id: str, client_id: str = None):
     task = tasks_db[task_id]
     client_id = _require_client_id(client_id)
     _assert_task_owner(task, client_id)
-    _raise_if_client_frozen_for_build(client_id)
+    _raise_if_client_frozen_for_build(client_id, task=task)
 
     if task.status != BuildStatus.PENDING:
         raise HTTPException(status_code=400, detail="任务状态不允许启动")
@@ -6063,7 +6096,7 @@ async def start_task(task_id: str, client_id: str = None):
             _sync_task_risk_review_to_admin(task_id, task)
         except Exception:
             pass
-        _raise_if_client_frozen_for_build(client_id)
+        _raise_if_client_frozen_for_build(client_id, task=task)
         review_status = str(getattr(task, "review_status", "") or "").strip().lower()
         if review_status == RISK_REVIEW_STATUS_REJECTED:
             raise HTTPException(status_code=403, detail="task was rejected by admin risk review")
@@ -6389,18 +6422,23 @@ async def download_keystore(task_id: str, client_id: str = None):
 
 @app.post("/api/tasks/{task_id}/retry", response_model=BuildTaskResponse)
 async def retry_task(task_id: str, client_id: str = None):
-    """重试失败的构建任务"""
+    """重试构建任务。"""
     if task_id not in tasks_db:
         raise HTTPException(status_code=404, detail="任务不存在")
-    
+
     task = tasks_db[task_id]
     client_id = _require_client_id(client_id)
     _assert_task_owner(task, client_id)
-    
-    if task.status not in [BuildStatus.FAILED, BuildStatus.SUCCESS]:
-        raise HTTPException(status_code=400, detail="只能重试失败或已完成的任务")
-    
-    # 重置任务状态
+
+    if task.status not in [BuildStatus.FAILED, BuildStatus.SUCCESS, BuildStatus.PENDING]:
+        raise HTTPException(status_code=400, detail="仅支持重试失败/成功/待构建任务")
+    if task.status == BuildStatus.PENDING and not _is_task_review_approved(task):
+        review_status = str(getattr(task, "review_status", "") or "").strip().lower()
+        if review_status == RISK_REVIEW_STATUS_REJECTED:
+            raise HTTPException(status_code=403, detail="task was rejected by admin risk review")
+        raise HTTPException(status_code=403, detail="task is pending admin risk review")
+
+    # 重置任务状态，等待用户再次启动构建。
     previous_output_filename = task.output_filename
     task.status = BuildStatus.PENDING
     task.progress = 0
@@ -6429,7 +6467,6 @@ async def retry_task(task_id: str, client_id: str = None):
         pass
 
     return task
-
 
 @app.put("/api/tasks/{task_id}", response_model=BuildTaskResponse)
 async def update_task(task_id: str, update_data: UpdateTaskRequest):
