@@ -54,10 +54,13 @@ from builder import (
 )
 import env_setup
 from admin_client import (
+    consume_build_quota,
     report_task_start,
     fetch_announcements,
+    fetch_build_quota_context,
     check_update,
     fetch_feature_flags,
+    redeem_build_code,
     submit_feedback,
     upload_task_assets,
     flush_task_assets_queue,
@@ -99,6 +102,9 @@ _github_repo_stats_cache = {
 UPLOAD_MAX_SIZE_MB_DEFAULT = 200
 UPLOAD_MAX_SIZE_MB_MIN = 1
 UPLOAD_MAX_SIZE_MB_MAX = 10240
+RISK_SCAN_HIGH_RISK_HIT_THRESHOLD_DEFAULT = 3
+RISK_SCAN_HIGH_RISK_HIT_THRESHOLD_MIN = 1
+RISK_SCAN_HIGH_RISK_HIT_THRESHOLD_MAX = 200
 UPLOAD_STREAM_CHUNK_SIZE = 1024 * 1024
 AI_PROVIDER_DEFAULT = "openrouter"
 AI_API_URL_DEFAULT = "https://openrouter.ai/api/v1/chat/completions"
@@ -121,6 +127,18 @@ def _normalize_upload_max_size_mb(value) -> int:
     if size_mb > UPLOAD_MAX_SIZE_MB_MAX:
         return UPLOAD_MAX_SIZE_MB_MAX
     return size_mb
+
+
+def _normalize_risk_scan_high_risk_hit_threshold(value) -> int:
+    try:
+        threshold = int(value)
+    except Exception:
+        return RISK_SCAN_HIGH_RISK_HIT_THRESHOLD_DEFAULT
+    if threshold < RISK_SCAN_HIGH_RISK_HIT_THRESHOLD_MIN:
+        return RISK_SCAN_HIGH_RISK_HIT_THRESHOLD_MIN
+    if threshold > RISK_SCAN_HIGH_RISK_HIT_THRESHOLD_MAX:
+        return RISK_SCAN_HIGH_RISK_HIT_THRESHOLD_MAX
+    return threshold
 
 
 def _normalize_ai_timeout_seconds(value) -> int:
@@ -189,6 +207,10 @@ def _load_client_feature_flags(client_id: str | None = None) -> dict:
         "upload_max_size_mb": UPLOAD_MAX_SIZE_MB_DEFAULT,
         "risk_scan_block_keywords": [],
         "risk_scan_domain_keywords": [],
+        "risk_scan_high_risk_hit_threshold": _normalize_risk_scan_high_risk_hit_threshold(
+            os.getenv("RISK_SCAN_MIN_HIT_COUNT_FOR_HIGH")
+            or RISK_SCAN_HIGH_RISK_HIT_THRESHOLD_DEFAULT
+        ),
         "ai_enabled": _env_bool("TASK_AI_RISK_GUARD_ENABLED", default=True),
         "ai_provider": str(os.getenv("TASK_AI_PROVIDER") or AI_PROVIDER_DEFAULT).strip().lower() or AI_PROVIDER_DEFAULT,
         "ai_api_url": str(
@@ -247,6 +269,10 @@ def _load_client_feature_flags(client_id: str | None = None) -> dict:
                 for item in data.get("risk_scan_domain_keywords")
                 if str(item or "").strip()
             ]
+        if "risk_scan_high_risk_hit_threshold" in data:
+            flags["risk_scan_high_risk_hit_threshold"] = _normalize_risk_scan_high_risk_hit_threshold(
+                data.get("risk_scan_high_risk_hit_threshold")
+            )
         if "ai_enabled" in data:
             flags["ai_enabled"] = _to_runtime_bool(data.get("ai_enabled"), default=flags["ai_enabled"])
         if "ai_provider" in data:
@@ -297,6 +323,69 @@ def _is_client_sms_login_enabled(client_id: str | None = None) -> bool:
 def _get_upload_max_size_mb(client_id: str | None = None) -> int:
     flags = _load_client_feature_flags(client_id=client_id)
     return _normalize_upload_max_size_mb(flags.get("upload_max_size_mb"))
+
+
+def _normalize_build_quota_mode(value: str | None) -> str:
+    mode = str(value or "").strip().lower()
+    if mode in {"free_unlimited", "free_quota", "code_only", "free_plus_code"}:
+        return mode
+    return "free_unlimited"
+
+
+def _load_client_build_quota_context(
+    client_id: str | None = None,
+    user_id: str | None = None,
+    force: bool = False,
+) -> dict:
+    normalized_client_id = _normalize_client_id(client_id)
+    normalized_user_id = str(user_id or "").strip()
+    fallback = {
+        "build_code_enabled": False,
+        "build_quota_mode": "free_unlimited",
+        "effective_build_quota_mode": "free_unlimited",
+        "free_build_quota_default": 0,
+        "quota_require_login": False,
+        "subject_type": None,
+        "subject_id": None,
+        "remaining_balance": None,
+        "consumed_total": None,
+        "is_unlimited": True,
+    }
+    try:
+        data = fetch_build_quota_context(
+            client_id=normalized_client_id,
+            user_id=normalized_user_id,
+            force=force,
+        )
+    except Exception:
+        data = None
+    if not isinstance(data, dict):
+        return fallback
+    result = dict(fallback)
+    result["build_code_enabled"] = bool(data.get("build_code_enabled"))
+    result["build_quota_mode"] = _normalize_build_quota_mode(data.get("build_quota_mode"))
+    result["effective_build_quota_mode"] = _normalize_build_quota_mode(
+        data.get("effective_build_quota_mode") or result["build_quota_mode"]
+    )
+    try:
+        result["free_build_quota_default"] = max(0, int(data.get("free_build_quota_default") or 0))
+    except Exception:
+        result["free_build_quota_default"] = 0
+    result["quota_require_login"] = bool(data.get("quota_require_login"))
+    result["subject_type"] = str(data.get("subject_type") or "").strip() or None
+    result["subject_id"] = str(data.get("subject_id") or "").strip() or None
+    try:
+        remaining_value = data.get("remaining_balance")
+        result["remaining_balance"] = int(remaining_value) if remaining_value is not None else None
+    except Exception:
+        result["remaining_balance"] = None
+    try:
+        consumed_value = data.get("consumed_total")
+        result["consumed_total"] = int(consumed_value) if consumed_value is not None else None
+    except Exception:
+        result["consumed_total"] = None
+    result["is_unlimited"] = bool(data.get("is_unlimited"))
+    return result
 
 
 def _fetch_github_repo_stats() -> dict:
@@ -479,6 +568,14 @@ try:
     )
 except ValueError:
     TASK_AI_DIAG_COOLDOWN_SECONDS = 600
+TASK_AI_FREEZE_SECONDS = 600
+try:
+    TASK_AI_FREEZE_SECONDS = max(
+        int(os.getenv("TASK_AI_FREEZE_SECONDS", "600") or "600"),
+        60,
+    )
+except ValueError:
+    TASK_AI_FREEZE_SECONDS = 600
 TASK_AI_FREEZE_CONTACT = str(
     os.getenv("TASK_AI_FREEZE_CONTACT")
     or "请联系开发者处理高风险预警并解除冻结"
@@ -871,6 +968,31 @@ RISK_SCAN_SKIP_DIRS = {"node_modules", ".git", "android", "__macosx", ".gradle"}
 RISK_SCAN_MAX_FILE_BYTES = 2 * 1024 * 1024
 RISK_SCAN_MAX_FILES_PER_ARCHIVE = 1200
 RISK_SCAN_MAX_MATCHES_PER_SOURCE = 24
+RISK_SCAN_MIN_HIT_COUNT_FOR_HIGH = 3
+try:
+    RISK_SCAN_MIN_HIT_COUNT_FOR_HIGH = max(
+        int(os.getenv("RISK_SCAN_MIN_HIT_COUNT_FOR_HIGH", "3") or "3"),
+        1,
+    )
+except ValueError:
+    RISK_SCAN_MIN_HIT_COUNT_FOR_HIGH = 3
+RISK_SCAN_MIN_HIT_COUNT_FOR_REVIEW = 4
+try:
+    RISK_SCAN_MIN_HIT_COUNT_FOR_REVIEW = max(
+        int(os.getenv("RISK_SCAN_MIN_HIT_COUNT_FOR_REVIEW", "4") or "4"),
+        RISK_SCAN_MIN_HIT_COUNT_FOR_HIGH,
+    )
+except ValueError:
+    RISK_SCAN_MIN_HIT_COUNT_FOR_REVIEW = max(4, RISK_SCAN_MIN_HIT_COUNT_FOR_HIGH)
+RISK_SCAN_MIN_HIT_COUNT_FOR_FREEZE = 6
+try:
+    RISK_SCAN_MIN_HIT_COUNT_FOR_FREEZE = max(
+        int(os.getenv("RISK_SCAN_MIN_HIT_COUNT_FOR_FREEZE", "6") or "6"),
+        RISK_SCAN_MIN_HIT_COUNT_FOR_REVIEW,
+    )
+except ValueError:
+    RISK_SCAN_MIN_HIT_COUNT_FOR_FREEZE = max(6, RISK_SCAN_MIN_HIT_COUNT_FOR_REVIEW)
+RISK_SCAN_SCAN_ERRORS_FORCE_HIGH_RISK = _env_bool("RISK_SCAN_SCAN_ERRORS_FORCE_HIGH_RISK", default=False)
 TASK_AI_RISK_GUARD_ENABLED = _env_bool("TASK_AI_RISK_GUARD_ENABLED", default=True)
 TASK_AI_RISK_GUARD_PROVIDER = "openrouter"
 TASK_AI_RISK_GUARD_API_URL = str(
@@ -1202,7 +1324,18 @@ def _scan_task_risk_inputs(
     zip_path: Path | None = None,
     html_path: Path | None = None,
 ) -> dict:
-    block_keywords, domain_keywords = _resolve_risk_scan_keyword_sets(client_id)
+    client_flags = _load_client_feature_flags(client_id=client_id)
+    block_keywords = _normalize_runtime_keywords(
+        client_flags.get("risk_scan_block_keywords"),
+        RISK_SCAN_BLOCK_KEYWORDS,
+    )
+    domain_keywords = _normalize_runtime_keywords(
+        client_flags.get("risk_scan_domain_keywords"),
+        RISK_SCAN_DOMAIN_KEYWORDS,
+    )
+    high_risk_hit_threshold = _normalize_risk_scan_high_risk_hit_threshold(
+        client_flags.get("risk_scan_high_risk_hit_threshold")
+    )
     field_hits: list[dict] = []
     text_hits: list[dict] = []
     domain_hits: list[dict] = []
@@ -1302,7 +1435,8 @@ def _scan_task_risk_inputs(
             }
         )
 
-    risk_hit_count = len(field_hits) + len(text_hits) + len(domain_hits)
+    base_hit_count = len(field_hits) + len(text_hits) + len(domain_hits)
+    risk_hit_count = base_hit_count
     if combo_blocked:
         combo_hit_bonus = max(2, min(8, len(combo_hits)))
         risk_hit_count += combo_hit_bonus
@@ -1314,9 +1448,12 @@ def _scan_task_risk_inputs(
             }
         )
 
-    high_risk = risk_hit_count > 0 or bool(scan_errors)
+    high_risk = bool(combo_blocked) or risk_hit_count >= int(high_risk_hit_threshold)
+    if not high_risk and scan_errors and RISK_SCAN_SCAN_ERRORS_FORCE_HIGH_RISK:
+        high_risk = True
     return {
         "risk_level": "high" if high_risk else "normal",
+        "base_hit_count": base_hit_count,
         "hit_count": risk_hit_count,
         "field_hits": field_hits[:128],
         "html_hits": text_hits[:128],
@@ -1333,6 +1470,9 @@ def _scan_task_risk_inputs(
         "combo_hits": combo_hits[:128],
         "combo_category_hits": combo_category_hits[:64],
         "permission_combo_hits": permission_combo_hits[:64],
+        "high_risk_hit_threshold": int(high_risk_hit_threshold),
+        "review_hit_threshold": int(RISK_SCAN_MIN_HIT_COUNT_FOR_REVIEW),
+        "freeze_hit_threshold": int(RISK_SCAN_MIN_HIT_COUNT_FOR_FREEZE),
         "scan_errors": scan_errors[:32],
         "scanned_at": datetime.now().isoformat(),
     }
@@ -1927,7 +2067,16 @@ def _requires_risk_review(client_id: str | None, risk_scan: dict) -> bool:
         return False
     if _is_risk_review_allowlisted(client_id):
         return False
-    return True
+    if bool(risk_scan.get("ai_guard_blocked")):
+        return True
+    if bool(risk_scan.get("combo_blocked")):
+        return True
+    hit_count = 0
+    try:
+        hit_count = int(risk_scan.get("hit_count") or 0)
+    except Exception:
+        hit_count = 0
+    return hit_count >= int(RISK_SCAN_MIN_HIT_COUNT_FOR_REVIEW)
 
 
 def _is_task_review_approved(task: BuildTask) -> bool:
@@ -2114,6 +2263,40 @@ def _get_task_ai_state_redis_client() -> Redis | None:
         return client
 
 
+def _parse_iso_datetime_to_timestamp(raw_value: str | None) -> float:
+    text = str(raw_value or "").strip()
+    if not text:
+        return 0.0
+    normalized_text = text.replace("Z", "+00:00")
+    try:
+        return float(datetime.fromisoformat(normalized_text).timestamp())
+    except Exception:
+        return 0.0
+
+
+def _resolve_client_freeze_timing(value: dict) -> tuple[float, int]:
+    freeze_seconds = TASK_AI_FREEZE_SECONDS
+    try:
+        freeze_seconds = max(int(value.get("freeze_seconds") or TASK_AI_FREEZE_SECONDS), 60)
+    except Exception:
+        freeze_seconds = TASK_AI_FREEZE_SECONDS
+
+    expires_at_ts = 0.0
+    try:
+        expires_at_ts = float(value.get("expires_at_ts") or 0.0)
+    except Exception:
+        expires_at_ts = 0.0
+    if expires_at_ts <= 0:
+        expires_at_ts = _parse_iso_datetime_to_timestamp(value.get("expires_at"))
+    if expires_at_ts <= 0:
+        frozen_at_ts = _parse_iso_datetime_to_timestamp(value.get("frozen_at"))
+        if frozen_at_ts > 0:
+            expires_at_ts = frozen_at_ts + float(freeze_seconds)
+    if expires_at_ts <= 0:
+        expires_at_ts = time.time() + float(freeze_seconds)
+    return expires_at_ts, freeze_seconds
+
+
 def _normalize_client_freeze_record(value, default_client_id: str = "") -> dict | None:
     if not isinstance(value, dict):
         return None
@@ -2126,6 +2309,11 @@ def _normalize_client_freeze_record(value, default_client_id: str = "") -> dict 
     frozen_at = str(value.get("frozen_at") or datetime.now().isoformat()).strip()
     operator = str(value.get("operator") or "system").strip() or "system"
     contact = str(value.get("contact") or TASK_AI_FREEZE_CONTACT).strip() or TASK_AI_FREEZE_CONTACT
+    expires_at_ts, freeze_seconds = _resolve_client_freeze_timing(value)
+    remaining_seconds = int(max(0.0, expires_at_ts - time.time()))
+    if remaining_seconds <= 0:
+        return None
+    expires_at = str(value.get("expires_at") or datetime.fromtimestamp(expires_at_ts).isoformat()).strip()
     evidence_raw = value.get("evidence")
     evidence: list[str] = []
     if isinstance(evidence_raw, list):
@@ -2146,6 +2334,10 @@ def _normalize_client_freeze_record(value, default_client_id: str = "") -> dict 
         "reason": reason[:240],
         "evidence": evidence,
         "frozen_at": frozen_at,
+        "expires_at": expires_at,
+        "expires_at_ts": int(expires_at_ts),
+        "freeze_seconds": int(freeze_seconds),
+        "remaining_seconds": int(remaining_seconds),
         "operator": operator[:80],
         "contact": contact[:200],
     }
@@ -2162,9 +2354,26 @@ def _build_client_freeze_compliance_alert(client_id: str, freeze_record: dict | 
         "reason": normalized_record["reason"],
         "source_task_id": normalized_record["source_task_id"],
         "frozen_at": normalized_record["frozen_at"],
+        "freeze_expires_at": normalized_record["expires_at"],
+        "freeze_seconds": int(normalized_record.get("freeze_seconds") or TASK_AI_FREEZE_SECONDS),
+        "freeze_remaining_seconds": int(normalized_record.get("remaining_seconds") or 0),
         "contact": normalized_record["contact"],
         "action": "contact_developer_to_unfreeze",
     }
+
+
+def _delete_client_freeze_record_by_state_key(normalized_key: str) -> None:
+    if not normalized_key:
+        return
+    redis_client = _get_task_ai_state_redis_client()
+    if redis_client is not None:
+        redis_key = _task_ai_state_redis_key(f"client-freeze:{normalized_key}")
+        try:
+            redis_client.delete(redis_key)
+        except RedisError:
+            pass
+    with TASK_AI_STATE_FALLBACK_LOCK:
+        TASK_AI_CLIENT_FREEZE_FALLBACK.pop(normalized_key, None)
 
 
 def _get_client_freeze_record(client_id: str | None) -> dict | None:
@@ -2187,11 +2396,18 @@ def _get_client_freeze_record(client_id: str | None) -> dict | None:
             normalized_record = _normalize_client_freeze_record(parsed, default_client_id=normalized_key)
             if normalized_record:
                 return normalized_record
+            _delete_client_freeze_record_by_state_key(normalized_key)
+            return None
     with TASK_AI_STATE_FALLBACK_LOCK:
         fallback = TASK_AI_CLIENT_FREEZE_FALLBACK.get(normalized_key)
     if not isinstance(fallback, dict):
         return None
-    return _normalize_client_freeze_record(fallback, default_client_id=normalized_key)
+    normalized_record = _normalize_client_freeze_record(fallback, default_client_id=normalized_key)
+    if normalized_record:
+        return normalized_record
+    with TASK_AI_STATE_FALLBACK_LOCK:
+        TASK_AI_CLIENT_FREEZE_FALLBACK.pop(normalized_key, None)
+    return None
 
 
 def _list_client_freeze_records(limit: int = 200, keyword: str | None = None) -> list[dict]:
@@ -2211,12 +2427,17 @@ def _list_client_freeze_records(limit: int = 200, keyword: str | None = None) ->
                 except Exception:
                     parsed = {"client_id": "", "reason": str(raw)}
                 normalized_record = _normalize_client_freeze_record(parsed)
+                client_state_key = _normalize_client_state_key(
+                    parsed.get("client_id")
+                    or redis_key.split("client-freeze:")[-1]
+                )
                 if not normalized_record:
                     normalized_record = _normalize_client_freeze_record(
                         parsed,
-                        default_client_id=_normalize_client_state_key(redis_key.split("client-freeze:")[-1]),
+                        default_client_id=client_state_key,
                     )
                 if not normalized_record:
+                    _delete_client_freeze_record_by_state_key(client_state_key)
                     continue
                 client_key = _normalize_client_state_key(normalized_record.get("client_id"))
                 if not client_key:
@@ -2226,12 +2447,16 @@ def _list_client_freeze_records(limit: int = 200, keyword: str | None = None) ->
                     break
         except RedisError:
             pass
+    stale_keys: list[str] = []
     with TASK_AI_STATE_FALLBACK_LOCK:
         for key, value in TASK_AI_CLIENT_FREEZE_FALLBACK.items():
             normalized_record = _normalize_client_freeze_record(value, default_client_id=key)
             if not normalized_record:
+                stale_keys.append(key)
                 continue
             records[_normalize_client_state_key(normalized_record.get("client_id"))] = normalized_record
+        for key in stale_keys:
+            TASK_AI_CLIENT_FREEZE_FALLBACK.pop(key, None)
     items = list(records.values())
     if keyword_text:
         filtered: list[dict] = []
@@ -2261,6 +2486,9 @@ def _freeze_client_by_ai_risk(
 ) -> dict:
     normalized_client_id = _require_client_id(client_id)
     reason_text = str(reason or "").strip() or "AI risk guard flagged high risk"
+    freeze_seconds = max(int(TASK_AI_FREEZE_SECONDS), 60)
+    frozen_at = datetime.now()
+    expires_at_ts = time.time() + float(freeze_seconds)
     evidence_list: list[str] = []
     if isinstance(evidence, list):
         for item in evidence:
@@ -2279,7 +2507,11 @@ def _freeze_client_by_ai_risk(
         "source_task_id": str(task_id or "").strip(),
         "reason": reason_text[:240],
         "evidence": evidence_list,
-        "frozen_at": datetime.now().isoformat(),
+        "frozen_at": frozen_at.isoformat(),
+        "expires_at": datetime.fromtimestamp(expires_at_ts).isoformat(),
+        "expires_at_ts": int(expires_at_ts),
+        "freeze_seconds": int(freeze_seconds),
+        "remaining_seconds": int(freeze_seconds),
         "operator": str(operator or "system_ai_guard").strip() or "system_ai_guard",
         "contact": TASK_AI_FREEZE_CONTACT,
     }
@@ -2288,7 +2520,7 @@ def _freeze_client_by_ai_risk(
     if redis_client is not None:
         redis_key = _task_ai_state_redis_key(f"client-freeze:{normalized_key}")
         try:
-            redis_client.set(redis_key, json.dumps(record, ensure_ascii=False))
+            redis_client.set(redis_key, json.dumps(record, ensure_ascii=False), ex=freeze_seconds)
         except RedisError:
             pass
     with TASK_AI_STATE_FALLBACK_LOCK:
@@ -2319,6 +2551,66 @@ def _unfreeze_client_by_admin(client_id: str, operator: str = "admin", note: str
         "note": str(note or "").strip(),
         "previous_record": existed_record or {},
         "unfrozen_at": datetime.now().isoformat(),
+    }
+
+
+def _release_pending_reviews_after_unfreeze(client_id: str, operator: str = "admin", note: str = "") -> dict:
+    normalized_client_id = _require_client_id(client_id)
+    normalized_operator = str(operator or "admin").strip() or "admin"
+    released_task_ids: list[str] = []
+    now = datetime.now()
+    for task_id, task in list(tasks_db.items()):
+        try:
+            task_client_id = _normalize_client_id(getattr(task, "client_id", ""))
+            if task_client_id != normalized_client_id:
+                continue
+            review_status = str(getattr(task, "review_status", "") or "").strip().lower()
+            if review_status != RISK_REVIEW_STATUS_PENDING:
+                continue
+            if not bool(getattr(task, "review_required", False)):
+                continue
+            risk_scan = getattr(task, "risk_scan", {})
+            if not isinstance(risk_scan, dict):
+                risk_scan = {}
+            compliance_alert = risk_scan.get("compliance_alert") if isinstance(risk_scan.get("compliance_alert"), dict) else {}
+            alert_code = str(compliance_alert.get("code") or "").strip().lower()
+            alert_client_id = _normalize_client_id(compliance_alert.get("client_id"))
+            if alert_code != "client_frozen_by_ai_risk":
+                continue
+            if alert_client_id and alert_client_id != normalized_client_id:
+                continue
+
+            task.review_required = True
+            task.review_status = RISK_REVIEW_STATUS_APPROVED
+            if not getattr(task, "review_requested_at", None):
+                task.review_requested_at = now
+            task.review_decision_at = now
+            task.review_decision_by = normalized_operator
+            unfreeze_note = str(note or "").strip()
+            default_note = "管理员解冻后自动放行"
+            task.review_note = f"{default_note}：{unfreeze_note[:120]}" if unfreeze_note else default_note
+            if getattr(task, "status", None) == BuildStatus.PENDING:
+                task.message = "Risk review auto-approved after client unfreeze."
+            task.updated_at = now
+            released_task_ids.append(task_id)
+        except Exception:
+            continue
+    if released_task_ids:
+        try:
+            persist_tasks_db(force=True)
+        except Exception:
+            pass
+        for task_id in released_task_ids:
+            try:
+                task = tasks_db.get(task_id)
+                if task:
+                    _sync_task_risk_review_to_admin(task_id, task)
+            except Exception:
+                pass
+    return {
+        "client_id": normalized_client_id,
+        "released_task_count": len(released_task_ids),
+        "released_task_ids": released_task_ids,
     }
 
 
@@ -2514,6 +2806,14 @@ def _freeze_client_when_risk_blocked(
     review_required = _requires_risk_review(client_id, merged_risk_scan)
     if risk_level != "high" or not review_required:
         return None
+    severe_hit = bool(merged_risk_scan.get("combo_blocked")) or bool(merged_risk_scan.get("ai_guard_blocked"))
+    if not severe_hit:
+        try:
+            severe_hit = int(merged_risk_scan.get("hit_count") or 0) >= int(RISK_SCAN_MIN_HIT_COUNT_FOR_FREEZE)
+        except Exception:
+            severe_hit = False
+    if not severe_hit:
+        return None
     freeze_reason, freeze_evidence, freeze_source = _build_freeze_reason_and_evidence(ai_guard_result, merged_risk_scan)
     freeze_operator = "system_ai_guard" if freeze_source == "ai_risk_guard" else "system_rule_guard"
     return _freeze_client_by_ai_risk(
@@ -2546,6 +2846,7 @@ def _build_client_frozen_error_detail(client_id: str, freeze_record: dict | None
                 "source": "ai_risk_guard",
                 "source_task_id": "",
                 "frozen_at": datetime.now().isoformat(),
+                "freeze_seconds": int(TASK_AI_FREEZE_SECONDS),
                 "operator": "system",
                 "contact": TASK_AI_FREEZE_CONTACT,
             },
@@ -2559,6 +2860,9 @@ def _build_client_frozen_error_detail(client_id: str, freeze_record: dict | None
         "reason": str(record.get("reason") or "AI risk guard flagged high risk"),
         "source_task_id": str(record.get("source_task_id") or ""),
         "frozen_at": str(record.get("frozen_at") or ""),
+        "freeze_expires_at": str(record.get("expires_at") or ""),
+        "freeze_seconds": int(record.get("freeze_seconds") or TASK_AI_FREEZE_SECONDS),
+        "freeze_remaining_seconds": int(record.get("remaining_seconds") or 0),
         "contact": str(record.get("contact") or TASK_AI_FREEZE_CONTACT),
         "action": "contact_developer_to_unfreeze",
         "cooldown_seconds": int(TASK_AI_DIAG_COOLDOWN_SECONDS),
@@ -5489,6 +5793,9 @@ async def get_client_freeze_status(client_id: str = None):
         "client_id": normalized_client_id,
         "frozen": bool(record),
         "freeze": record or {},
+        "freeze_remaining_seconds": int((record or {}).get("remaining_seconds") or 0),
+        "freeze_seconds": int((record or {}).get("freeze_seconds") or TASK_AI_FREEZE_SECONDS),
+        "freeze_expires_at": str((record or {}).get("expires_at") or ""),
         "cooldown_remaining_seconds": _get_client_ai_diag_cooldown_remaining_seconds(normalized_client_id),
         "cooldown_seconds": int(TASK_AI_DIAG_COOLDOWN_SECONDS),
     }
@@ -5514,7 +5821,19 @@ async def unfreeze_client_freeze_record(request: Request, payload: dict = Body(.
         operator=operator,
         note=note,
     )
-    return result
+    release_result = _release_pending_reviews_after_unfreeze(
+        target_client_id,
+        operator=operator,
+        note=note,
+    )
+    merged = dict(result)
+    merged.update(
+        {
+            "released_task_count": int(release_result.get("released_task_count") or 0),
+            "released_task_ids": list(release_result.get("released_task_ids") or []),
+        }
+    )
+    return merged
 
 
 @app.delete("/api/tasks/{task_id}")
@@ -5625,6 +5944,53 @@ async def start_task(task_id: str, client_id: str = None):
         elif not status["ready"]:
             detail = status.get("error") or "Build environment is not ready"
             raise HTTPException(status_code=503, detail=detail)
+
+    bound_user_id = _get_user_id_by_client_id(client_id) or ""
+    quota_result = consume_build_quota(
+        task_id=task_id,
+        client_id=client_id,
+        user_id=bound_user_id,
+        idempotency_key=f"consume:{task_id}",
+    )
+    if not isinstance(quota_result, dict):
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "build_quota_service_unavailable",
+                "message": "build quota service unavailable",
+                "reason": "admin_unavailable",
+            },
+        )
+    if not bool(quota_result.get("ok", False)):
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "build_quota_service_unavailable",
+                "message": "build quota service unavailable",
+                "reason": str(quota_result.get("reason") or "admin_unavailable"),
+            },
+        )
+    if not bool(quota_result.get("allowed", False)):
+        deny_reason = str(quota_result.get("reason") or "build_quota_denied").strip().lower()
+        deny_code = "build_quota_denied"
+        deny_message = "build quota denied"
+        deny_status = 403
+        if deny_reason == "insufficient_quota":
+            deny_code = "insufficient_quota"
+            deny_message = "insufficient quota"
+        elif deny_reason in {"login required", "login_required"}:
+            deny_code = "quota_login_required"
+            deny_message = "quota requires login"
+            deny_status = 401
+        raise HTTPException(
+            status_code=deny_status,
+            detail={
+                "code": deny_code,
+                "message": deny_message,
+                "reason": deny_reason,
+                "remaining_balance": quota_result.get("remaining_balance"),
+            },
+        )
 
     task.status = BuildStatus.PROCESSING
     task.progress = 5
@@ -6435,6 +6801,40 @@ async def adminhub_announcements():
 @app.get("/api/adminhub/features")
 async def adminhub_features(client_id: str | None = None):
     return _load_client_feature_flags(client_id=client_id)
+
+
+@app.get("/api/adminhub/build-quota")
+async def adminhub_build_quota(client_id: str | None = None):
+    normalized_client_id = _normalize_client_id(client_id)
+    bound_user_id = _get_user_id_by_client_id(normalized_client_id) or ""
+    return _load_client_build_quota_context(
+        client_id=normalized_client_id,
+        user_id=bound_user_id,
+        force=True,
+    )
+
+
+@app.post("/api/build-quota/redeem")
+async def redeem_build_quota(payload: dict = Body(...)):
+    client_id = _require_client_id(payload.get("client_id"))
+    code = str(payload.get("code") or "").strip()
+    if not code:
+        raise HTTPException(status_code=400, detail="code is required")
+    bound_user_id = _get_user_id_by_client_id(client_id) or ""
+    idempotency_key = str(payload.get("idempotency_key") or "").strip()
+    result = redeem_build_code(
+        client_id=client_id,
+        code=code,
+        user_id=bound_user_id,
+        idempotency_key=idempotency_key,
+    )
+    if not isinstance(result, dict):
+        raise HTTPException(status_code=503, detail="build quota service unavailable")
+    if not bool(result.get("ok", False)):
+        raise HTTPException(status_code=503, detail=result)
+    if not bool(result.get("allowed", False)):
+        raise HTTPException(status_code=400, detail=result)
+    return result
 
 
 @app.get("/api/adminhub/update-check")

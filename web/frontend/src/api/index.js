@@ -468,6 +468,25 @@ export const getAdminFeatures = async () => {
   return response.data
 }
 
+// 获取当前客户端的构建额度上下文
+export const getBuildQuotaContext = async () => {
+  const response = await api.get('/adminhub/build-quota', {
+    params: { client_id: getClientId() }
+  })
+  return response.data
+}
+
+// 兑换构建码，成功后返回最新剩余次数
+export const redeemBuildQuotaCode = async (code, idempotencyKey = '') => {
+  const payload = {
+    client_id: getClientId(),
+    code: String(code || '').trim(),
+    idempotency_key: String(idempotencyKey || '').trim() || undefined
+  }
+  const response = await api.post('/build-quota/redeem', payload)
+  return response.data
+}
+
 // 查询当前客户端是否处于 AI 风险冻结状态
 export const getClientFreezeStatus = async (clientId) => {
   const response = await api.get('/client-freeze/status', {

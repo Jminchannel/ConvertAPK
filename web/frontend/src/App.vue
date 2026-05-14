@@ -1762,7 +1762,44 @@
           </div>
 
           <div class="settings-dialog-body">
-            
+            <div class="settings-section">
+              <div class="settings-section-title">
+                <span class="section-title-icon">馃搵</span>
+                构建额度
+              </div>
+              <div class="settings-hint">
+                当前模式：
+                <span v-if="isBuildQuotaUnlimited">完全免费</span>
+                <span v-else-if="buildQuotaContext.effective_build_quota_mode === 'free_quota'">免费次数模式</span>
+                <span v-else-if="buildQuotaContext.effective_build_quota_mode === 'code_only'">仅构建码模式</span>
+                <span v-else-if="buildQuotaContext.effective_build_quota_mode === 'free_plus_code'">免费次数 + 构建码模式</span>
+                <span v-else>完全免费</span>
+              </div>
+              <div class="settings-hint" style="margin-top: 6px;">
+                剩余次数：
+                <span v-if="isBuildQuotaUnlimited">不限</span>
+                <span v-else>{{ buildQuotaContext.remaining_balance ?? 0 }}</span>
+              </div>
+              <div v-if="buildQuotaContext.build_code_enabled" class="flex-row-center" style="margin-top: 10px;">
+                <input
+                  class="form-input"
+                  style="flex: 1;"
+                  v-model.trim="buildCodeInput"
+                  placeholder="输入构建码"
+                />
+                <button
+                  class="btn btn-primary btn-sm ml-auto"
+                  @click="redeemCurrentBuildCode"
+                  :disabled="buildCodeRedeeming"
+                >
+                  {{ buildCodeRedeeming ? '兑换中...' : '兑换构建码' }}
+                </button>
+              </div>
+              <div v-else class="settings-hint" style="margin-top: 8px;">
+                当前已关闭构建码模式，系统完全免费。
+              </div>
+            </div>
+
             <div class="settings-section">
               <div class="settings-section-title">
                 <span class="section-title-icon">💬</span>

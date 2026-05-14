@@ -136,6 +136,20 @@ export const useAppState = () => {
     client_sms_login_enabled: false,
     client_register_enabled: true,
   })
+  const buildQuotaContext = ref({
+    build_code_enabled: false,
+    build_quota_mode: 'free_unlimited',
+    effective_build_quota_mode: 'free_unlimited',
+    free_build_quota_default: 0,
+    quota_require_login: false,
+    subject_type: '',
+    subject_id: '',
+    remaining_balance: null,
+    consumed_total: null,
+    is_unlimited: true
+  })
+  const buildCodeInput = ref('')
+  const buildCodeRedeeming = ref(false)
   const isWebModeEnabled = computed(() => Boolean(featureFlags.value.web_link_to_apk_enabled))
   const isDesktopModeEnabled = computed(() => Boolean(featureFlags.value.zip_to_desktop_enabled))
   const isRewardedBuildAdsEnabled = computed(() => Boolean(featureFlags.value.rewarded_build_ads_enabled))
@@ -143,6 +157,7 @@ export const useAppState = () => {
   const isClientSmsLoginEnabled = computed(() => featureFlags.value.client_sms_login_enabled === true)
   const isClientRegisterEnabled = computed(() => featureFlags.value.client_register_enabled !== false)
   const isAuthEntryEnabled = computed(() => isClientLoginEnabled.value || isClientRegisterEnabled.value)
+  const isBuildQuotaUnlimited = computed(() => Boolean(buildQuotaContext.value.is_unlimited))
   const normalizeDonationPopupProbability = (value) => {
     const num = Number(value)
     if (!Number.isFinite(num)) return 10
@@ -1200,6 +1215,18 @@ export const useAppState = () => {
     if (!detail) return ''
     if (detail.includes('task is pending admin risk review')) return t('toast.riskReviewPending')
     if (detail.includes('task was rejected by admin risk review')) return t('toast.riskReviewRejected')
+    if (detail.includes('insufficient_quota') || detail.includes('insufficient quota')) return '构建次数不足，请先兑换构建码'
+    if (
+      detail.includes('quota_login_required')
+      || detail.includes('quota requires login')
+      || detail.includes('login required')
+      || detail.includes('login_required')
+    ) {
+      return '请先登录账号，再使用构建次数'
+    }
+    if (detail.includes('build_quota_service_unavailable') || detail.includes('build quota service unavailable') || detail.includes('admin_unavailable')) {
+      return '构建额度服务暂不可用，请稍后重试'
+    }
     return ''
   }
 
@@ -1624,6 +1651,7 @@ export const useAppState = () => {
         'success'
       )
       await refreshTasks()
+      await fetchBuildQuotaContext()
     } catch (error) {
       applyAuthError(error)
     } finally {
@@ -1691,6 +1719,7 @@ export const useAppState = () => {
       closeAuthModal()
       showToast(t('auth.logoutSuccess'), 'success')
       await refreshTasks()
+      await fetchBuildQuotaContext()
     }
   }
 
@@ -3636,6 +3665,77 @@ export const useAppState = () => {
       // ignore
     }
   }
+  const normalizeBuildQuotaContext = (payload) => {
+    const data = payload && typeof payload === 'object' ? payload : {}
+    const mode = String(data.effective_build_quota_mode || data.build_quota_mode || 'free_unlimited').trim().toLowerCase()
+    const effectiveMode = ['free_unlimited', 'free_quota', 'code_only', 'free_plus_code'].includes(mode)
+      ? mode
+      : 'free_unlimited'
+    const remainingRaw = data.remaining_balance
+    const consumedRaw = data.consumed_total
+    const remainingBalance = remainingRaw === null || remainingRaw === undefined
+      ? null
+      : Number.parseInt(remainingRaw, 10)
+    const consumedTotal = consumedRaw === null || consumedRaw === undefined
+      ? null
+      : Number.parseInt(consumedRaw, 10)
+    return {
+      build_code_enabled: Boolean(data.build_code_enabled),
+      build_quota_mode: String(data.build_quota_mode || 'free_unlimited').trim().toLowerCase() || 'free_unlimited',
+      effective_build_quota_mode: effectiveMode,
+      free_build_quota_default: Math.max(0, Number.parseInt(data.free_build_quota_default || 0, 10) || 0),
+      quota_require_login: Boolean(data.quota_require_login),
+      subject_type: String(data.subject_type || '').trim(),
+      subject_id: String(data.subject_id || '').trim(),
+      remaining_balance: Number.isFinite(remainingBalance) ? remainingBalance : null,
+      consumed_total: Number.isFinite(consumedTotal) ? consumedTotal : null,
+      is_unlimited: data.is_unlimited === undefined ? effectiveMode === 'free_unlimited' : Boolean(data.is_unlimited)
+    }
+  }
+  const fetchBuildQuotaContext = async () => {
+    try {
+      const result = await api.getBuildQuotaContext()
+      buildQuotaContext.value = normalizeBuildQuotaContext(result)
+    } catch {
+      buildQuotaContext.value = normalizeBuildQuotaContext({})
+    }
+  }
+  const redeemCurrentBuildCode = async () => {
+    const code = String(buildCodeInput.value || '').trim()
+    if (!code) {
+      showToast('请输入构建码', 'error')
+      return
+    }
+    if (buildCodeRedeeming.value) return
+    buildCodeRedeeming.value = true
+    try {
+      await api.redeemBuildQuotaCode(code)
+      buildCodeInput.value = ''
+      await fetchBuildQuotaContext()
+      showToast('兑换成功，构建次数已更新', 'success')
+    } catch (error) {
+      const detail = getErrorDetailText(error)
+      if (detail.includes('invalid_code')) {
+        showToast('构建码无效，请检查后重试', 'error')
+      } else if (detail.includes('subject_redeem_limit_reached')) {
+        showToast('该构建码已达当前用户兑换上限', 'error')
+      } else if (detail.includes('login_required') || detail.includes('login required')) {
+        showToast('请先登录账号，再兑换构建码', 'warning')
+      } else if (detail.includes('exhausted')) {
+        showToast('该构建码已被兑换完', 'error')
+      } else if (detail.includes('expired')) {
+        showToast('该构建码已过期', 'error')
+      } else if (detail.includes('build_code_disabled')) {
+        showToast('当前已关闭构建码模式，系统为完全免费', 'warning')
+      } else if (detail.includes('admin_unavailable')) {
+        showToast('额度服务暂不可用，请稍后重试', 'error')
+      } else {
+        showToast('兑换失败，请稍后重试', 'error')
+      }
+    } finally {
+      buildCodeRedeeming.value = false
+    }
+  }
   const fetchAdminFeatures = async () => {
     try {
       const result = await api.getAdminFeatures()
@@ -3667,6 +3767,7 @@ export const useAppState = () => {
     if (!isDesktopModeEnabled.value && mode.value === 'desktop') {
       mode.value = 'convert'
     }
+    await fetchBuildQuotaContext()
     if (!isAuthEntryEnabled.value) {
       if (showAuthModal.value) {
         closeAuthModal()
@@ -4010,6 +4111,10 @@ export const useAppState = () => {
     isWebModeEnabled,
     isDesktopModeEnabled,
     isRewardedBuildAdsEnabled,
+    buildQuotaContext,
+    buildCodeInput,
+    buildCodeRedeeming,
+    isBuildQuotaUnlimited,
     mainRef,
     mobilePageHeadRef,
     convertUploadSection,
@@ -4100,6 +4205,8 @@ export const useAppState = () => {
     queueStatus,
     pollInterval,
     showSettings,
+    fetchBuildQuotaContext,
+    redeemCurrentBuildCode,
     announcements,
     deviceInfo,
     feedbackContent,

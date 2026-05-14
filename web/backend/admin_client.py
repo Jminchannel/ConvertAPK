@@ -23,6 +23,14 @@ _AI_TIMEOUT_SECONDS_MAX = 120
 _DONATION_POPUP_PROBABILITY_DEFAULT = 10
 _DONATION_POPUP_PROBABILITY_MIN = 0
 _DONATION_POPUP_PROBABILITY_MAX = 100
+_RISK_SCAN_HIGH_RISK_HIT_THRESHOLD_DEFAULT = 3
+_RISK_SCAN_HIGH_RISK_HIT_THRESHOLD_MIN = 1
+_RISK_SCAN_HIGH_RISK_HIT_THRESHOLD_MAX = 200
+_BUILD_QUOTA_CONTEXT_CACHE: dict = {}
+try:
+    _BUILD_QUOTA_CONTEXT_TTL = max(0.0, float(os.getenv("ADMIN_BUILD_QUOTA_CONTEXT_CACHE_TTL", "3")))
+except Exception:
+    _BUILD_QUOTA_CONTEXT_TTL = 3.0
 
 
 def _safe_path_segment(value: str, fallback: str) -> str:
@@ -267,6 +275,7 @@ def fetch_feature_flags(client_id: str = "", force: bool = False) -> Dict[str, A
         "upload_max_size_mb": 200,
         "risk_scan_block_keywords": [],
         "risk_scan_domain_keywords": [],
+        "risk_scan_high_risk_hit_threshold": _RISK_SCAN_HIGH_RISK_HIT_THRESHOLD_DEFAULT,
         "ai_enabled": True,
         "ai_provider": "openrouter",
         "ai_api_url": _AI_API_URL_DEFAULT,
@@ -317,6 +326,17 @@ def fetch_feature_flags(client_id: str = "", force: bool = False) -> Dict[str, A
             return _DONATION_POPUP_PROBABILITY_MAX
         return parsed
 
+    def _normalize_risk_scan_high_risk_hit_threshold(value: Any) -> int:
+        try:
+            parsed = int(value)
+        except Exception:
+            return _RISK_SCAN_HIGH_RISK_HIT_THRESHOLD_DEFAULT
+        if parsed < _RISK_SCAN_HIGH_RISK_HIT_THRESHOLD_MIN:
+            return _RISK_SCAN_HIGH_RISK_HIT_THRESHOLD_MIN
+        if parsed > _RISK_SCAN_HIGH_RISK_HIT_THRESHOLD_MAX:
+            return _RISK_SCAN_HIGH_RISK_HIT_THRESHOLD_MAX
+        return parsed
+
     if isinstance(data, dict):
         result["web_link_to_apk_enabled"] = bool(data.get("web_link_to_apk_enabled"))
         result["zip_to_desktop_enabled"] = bool(data.get("zip_to_desktop_enabled"))
@@ -345,6 +365,10 @@ def fetch_feature_flags(client_id: str = "", force: bool = False) -> Dict[str, A
             result["risk_scan_block_keywords"] = _normalize_keyword_list(data.get("risk_scan_block_keywords"))
         if "risk_scan_domain_keywords" in data:
             result["risk_scan_domain_keywords"] = _normalize_keyword_list(data.get("risk_scan_domain_keywords"))
+        if "risk_scan_high_risk_hit_threshold" in data:
+            result["risk_scan_high_risk_hit_threshold"] = _normalize_risk_scan_high_risk_hit_threshold(
+                data.get("risk_scan_high_risk_hit_threshold")
+            )
         if "ai_enabled" in data:
             result["ai_enabled"] = bool(data.get("ai_enabled"))
         if "ai_provider" in data:
@@ -367,6 +391,117 @@ def fetch_feature_flags(client_id: str = "", force: bool = False) -> Dict[str, A
         "checked_at": now,
     }
     return dict(result)
+
+
+def fetch_build_quota_context(
+    client_id: str = "",
+    user_id: str = "",
+    force: bool = False,
+) -> Dict[str, Any]:
+    now = time.monotonic()
+    normalized_client_id = str(client_id or "").strip()
+    normalized_user_id = str(user_id or "").strip()
+    cache_key = f"{normalized_client_id}::{normalized_user_id}"
+    cached = _BUILD_QUOTA_CONTEXT_CACHE.get(cache_key, {})
+    if not force and now - float(cached.get("checked_at", 0.0)) < _BUILD_QUOTA_CONTEXT_TTL:
+        data = cached.get("data")
+        if isinstance(data, dict):
+            return dict(data)
+
+    params = {}
+    if normalized_client_id:
+        params["client_id"] = normalized_client_id
+    if normalized_user_id:
+        params["user_id"] = normalized_user_id
+    data = _request_json("GET", "/api/client/build-quota/context", params=params or None)
+    result = {
+        "build_code_enabled": False,
+        "build_quota_mode": "free_unlimited",
+        "effective_build_quota_mode": "free_unlimited",
+        "free_build_quota_default": 0,
+        "quota_require_login": False,
+        "subject_type": None,
+        "subject_id": None,
+        "remaining_balance": None,
+        "consumed_total": None,
+        "is_unlimited": True,
+    }
+    if isinstance(data, dict):
+        result["build_code_enabled"] = bool(data.get("build_code_enabled"))
+        result["build_quota_mode"] = str(data.get("build_quota_mode") or "free_unlimited")
+        result["effective_build_quota_mode"] = str(
+            data.get("effective_build_quota_mode") or result["build_quota_mode"]
+        )
+        try:
+            result["free_build_quota_default"] = max(0, int(data.get("free_build_quota_default") or 0))
+        except Exception:
+            result["free_build_quota_default"] = 0
+        result["quota_require_login"] = bool(data.get("quota_require_login"))
+        result["subject_type"] = str(data.get("subject_type") or "") or None
+        result["subject_id"] = str(data.get("subject_id") or "") or None
+        try:
+            remaining_value = data.get("remaining_balance")
+            result["remaining_balance"] = int(remaining_value) if remaining_value is not None else None
+        except Exception:
+            result["remaining_balance"] = None
+        try:
+            consumed_value = data.get("consumed_total")
+            result["consumed_total"] = int(consumed_value) if consumed_value is not None else None
+        except Exception:
+            result["consumed_total"] = None
+        result["is_unlimited"] = bool(data.get("is_unlimited"))
+
+    _BUILD_QUOTA_CONTEXT_CACHE[cache_key] = {
+        "data": result,
+        "checked_at": now,
+    }
+    return dict(result)
+
+
+def consume_build_quota(
+    task_id: str,
+    client_id: str,
+    user_id: str = "",
+    idempotency_key: str = "",
+) -> Dict[str, Any]:
+    payload = {
+        "task_id": str(task_id or "").strip(),
+        "client_id": str(client_id or "").strip(),
+        "user_id": str(user_id or "").strip() or None,
+        "idempotency_key": str(idempotency_key or "").strip() or None,
+    }
+    data = _request_json("POST", "/api/client/build-quota/consume", payload=payload)
+    if not isinstance(data, dict):
+        return {
+            "ok": False,
+            "allowed": False,
+            "reason": "admin_unavailable",
+            "is_unlimited": False,
+        }
+    return dict(data)
+
+
+def redeem_build_code(
+    client_id: str,
+    code: str,
+    user_id: str = "",
+    idempotency_key: str = "",
+) -> Dict[str, Any]:
+    payload = {
+        "client_id": str(client_id or "").strip(),
+        "user_id": str(user_id or "").strip() or None,
+        "code": str(code or "").strip(),
+        "idempotency_key": str(idempotency_key or "").strip() or None,
+    }
+    data = _request_json("POST", "/api/client/build-quota/redeem", payload=payload)
+    if not isinstance(data, dict):
+        return {
+            "ok": False,
+            "allowed": False,
+            "reason": "admin_unavailable",
+            "is_unlimited": False,
+        }
+    return dict(data)
 
 
 def _encode_multipart(fields: Dict[str, str], files: List[Dict[str, Any]]) -> tuple[bytes, str]:
