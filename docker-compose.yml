@@ -94,7 +94,7 @@ services:
       - CONVERTAPK_TASK_INPUTS_ROOT=/data/task-inputs
     volumes:
       - admin-storage:/app/admin/backend/admin-storage
-      - convertapk-data:/data:ro
+      - convertapk-data:/data
     depends_on:
       - admin-db
     ports:
