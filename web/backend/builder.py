@@ -1730,10 +1730,21 @@ class BuildTaskRunner:
         
         def on_complete(success: bool, message: str, output_file: Optional[str]):
             task_mode = str(getattr(task, "mode", "convert") or "convert").strip().lower()
+            task_config = getattr(task, "config", None)
+            if isinstance(task_config, dict):
+                raw_desktop_runtime = task_config.get("desktop_runtime")
+            else:
+                raw_desktop_runtime = getattr(task_config, "desktop_runtime", None)
+            desktop_runtime = str(raw_desktop_runtime or "electron").strip().lower()
+            if desktop_runtime in {"tauri", "rust"}:
+                desktop_runtime = "tauri"
+            else:
+                desktop_runtime = "electron"
             defer_desktop_output_cleanup = bool(
                 success
                 and output_file
                 and task_mode == "desktop"
+                and desktop_runtime != "tauri"
             )
             auto_clean_output = bool(
                 success

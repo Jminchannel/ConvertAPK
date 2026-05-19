@@ -4607,8 +4607,21 @@ async def ensure_env_ready(request: Request, call_next):
     return await call_next(request)
 
 
+def _get_task_desktop_runtime(task: BuildTask) -> str:
+    config = getattr(task, "config", None)
+    if isinstance(config, dict):
+        raw_runtime = config.get("desktop_runtime")
+    else:
+        raw_runtime = getattr(config, "desktop_runtime", None)
+    normalized_runtime = str(raw_runtime or "electron").strip().lower()
+    if normalized_runtime in {"tauri", "rust"}:
+        return "tauri"
+    return "electron"
+
+
 def _should_cleanup_desktop_output_on_download(task: BuildTask) -> bool:
-    return str(getattr(task, "mode", "") or "").strip().lower() == "desktop"
+    task_mode = str(getattr(task, "mode", "") or "").strip().lower()
+    return task_mode == "desktop" and _get_task_desktop_runtime(task) != "tauri"
 
 
 def _consume_desktop_output(task: BuildTask, reason: str) -> str | None:
