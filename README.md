@@ -205,15 +205,6 @@ docker compose logs -f admin-backend
 
 管理端仅建议在内网、VPN、SSH 隧道或堡垒机环境访问，不建议直接暴露公网端口。生产部署时请限制管理端前后端端口的入站访问，或移除对外端口映射后通过内网反向代理访问。
 
-Docker 部署时，管理端默认账号取自 `docker-compose.yml` 中的 Compose 环境变量：
-
-```text
-用户名：admin
-密码：admin123
-```
-
-生产环境请务必修改默认密码、`JWT_SECRET`、`CLIENT_TOKEN` 和数据库密码。
-
 ## Ubuntu 快速部署示例
 
 ```bash
