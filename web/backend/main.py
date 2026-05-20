@@ -2270,6 +2270,13 @@ def _require_risk_review_admin_access(request: Request) -> str:
     return "admin"
 
 
+def _require_payload_client_id(payload: dict, field_name: str) -> str:
+    client_id = _normalize_client_id((payload or {}).get(field_name))
+    if not client_id:
+        raise HTTPException(status_code=400, detail=f"{field_name} is required")
+    return client_id
+
+
 def _sync_task_risk_review_to_admin(task_id: str, task: BuildTask) -> None:
     try:
         config_data = task.config.model_dump() if hasattr(task.config, "model_dump") else task.config.dict()
@@ -5967,6 +5974,52 @@ async def list_pending_risk_reviews(request: Request, client_id: str | None = No
         items.append(task)
     items.sort(key=lambda item: (item.updated_at, item.created_at, item.id), reverse=True)
     return items[:safe_limit]
+
+
+@app.post("/api/admin/tasks/restore-client-records")
+async def restore_client_task_records(request: Request, payload: dict = Body(...)):
+    """恢复旧 clientId 的任务记录归属（管理端调用）。"""
+    operator = _require_risk_review_admin_access(request)
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="payload must be an object")
+    current_client_id = _require_payload_client_id(payload, "current_client_id")
+    previous_client_id = _require_payload_client_id(payload, "previous_client_id")
+    if current_client_id == previous_client_id:
+        raise HTTPException(status_code=400, detail="client ids must be different")
+
+    before_current_count = sum(
+        1
+        for task in tasks_db.values()
+        if _normalize_client_id(getattr(task, "client_id", "")) == current_client_id
+    )
+    restored_task_ids: list[str] = []
+    for task in list(tasks_db.values()):
+        if _normalize_client_id(getattr(task, "client_id", "")) != previous_client_id:
+            continue
+        task.client_id = current_client_id
+        task_id = str(getattr(task, "id", "") or "").strip()
+        if task_id:
+            restored_task_ids.append(task_id)
+
+    if restored_task_ids:
+        persist_tasks_db(force=True)
+
+    after_current_count = sum(
+        1
+        for task in tasks_db.values()
+        if _normalize_client_id(getattr(task, "client_id", "")) == current_client_id
+    )
+    return {
+        "ok": True,
+        "operator": operator,
+        "current_client_id": current_client_id,
+        "previous_client_id": previous_client_id,
+        "updated_task_count": len(restored_task_ids),
+        "before_current_task_count": before_current_count,
+        "after_current_task_count": after_current_count,
+        "task_ids": restored_task_ids[:200],
+        "truncated": len(restored_task_ids) > 200,
+    }
 
 
 @app.post("/api/risk-reviews/{task_id}/approve", response_model=BuildTaskResponse)
