@@ -92,9 +92,13 @@ services:
       - ADMIN_STORAGE_ROOT=admin-storage
       - CONVERTAPK_TASKS_ROOT=/data/tasks
       - CONVERTAPK_TASK_INPUTS_ROOT=/data/task-inputs
+      - CONVERTAPK_DOCKER_CLEANUP_ENABLED=true
+      - CONVERTAPK_DEPLOY_ROOT=/data/ConvertAPK-Desktop
     volumes:
       - admin-storage:/app/admin/backend/admin-storage
       - convertapk-data:/data
+      - .:/data/ConvertAPK-Desktop
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       - admin-db
     ports:
