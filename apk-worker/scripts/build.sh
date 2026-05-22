@@ -720,9 +720,50 @@ ensure_gradle_wrapper_dist() {
     return 0
 }
 
+version_gte() {
+    local current="$1"
+    local required="$2"
+    if [ -z "$current" ] || [ -z "$required" ]; then
+        return 1
+    fi
+    [ "$(printf '%s\n%s\n' "$required" "$current" | sort -V | head -n 1)" = "$required" ]
+}
+
+detect_android_gradle_plugin_version() {
+    local version=""
+    if [ -f "gradle/libs.versions.toml" ]; then
+        version="$(sed -n -E 's/^[[:space:]]*agp[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' gradle/libs.versions.toml | head -n 1)"
+    fi
+    if [ -z "$version" ]; then
+        version="$(grep -RhoE 'com\.android\.(application|library)[^0-9\r\n]*[0-9]+(\.[0-9]+){1,3}' \
+            build.gradle build.gradle.kts settings.gradle settings.gradle.kts app/build.gradle app/build.gradle.kts 2>/dev/null \
+            | sed -n -E 's/.*([0-9]+(\.[0-9]+){1,3}).*/\1/p' \
+            | head -n 1)"
+    fi
+    printf '%s' "$version"
+}
+
+resolve_gradle_distribution_url() {
+    if [ -n "${CONVERTAPK_GRADLE_DISTRIBUTION_URL:-}" ]; then
+        printf '%s' "$CONVERTAPK_GRADLE_DISTRIBUTION_URL"
+        return 0
+    fi
+
+    local agp_version
+    agp_version="$(detect_android_gradle_plugin_version)"
+    if version_gte "$agp_version" "9.0.0"; then
+        # AGP 9.x 需要 Gradle 9，避免补齐 wrapper 后被旧版 Gradle 拦截。
+        printf '%s' "https://services.gradle.org/distributions/gradle-9.3.1-bin.zip"
+        return 0
+    fi
+
+    # 默认使用兼容 JDK 21 的 Gradle 8 版本，覆盖旧模板中的过低版本。
+    printf '%s' "https://services.gradle.org/distributions/gradle-8.14.3-all.zip"
+}
+
 patch_gradle_wrapper_version() {
-    # 统一锁定到支持 JDK 21 的 Gradle 版本，避免旧模板回退到 8.0.2 导致构建失败。
-    local target_url="${CONVERTAPK_GRADLE_DISTRIBUTION_URL:-https://services.gradle.org/distributions/gradle-8.14.3-all.zip}"
+    local target_url
+    target_url="$(resolve_gradle_distribution_url)"
     local safe_url="$target_url"
     local patched="false"
 

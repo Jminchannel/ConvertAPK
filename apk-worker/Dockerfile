@@ -125,6 +125,7 @@ RUN set -e; \
       rm -f "$target_dir/$zip"; \
       return 0; \
     }; \
+    prefetch_gradle "gradle-9.3.1-bin.zip"; \
     prefetch_gradle "gradle-8.14.3-all.zip"; \
     prefetch_gradle "gradle-8.11.1-bin.zip"
 
