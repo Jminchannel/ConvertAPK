@@ -3802,9 +3802,6 @@ def _has_native_android_project_entries(entries: list[tuple[str, ...]]) -> bool:
     }
 
     for root in sorted(candidate_roots, key=lambda item: (len(item), item)):
-        has_wrapper = (*root, "gradlew") in entry_set and (*root, "gradlew.bat") in entry_set
-        if not has_wrapper:
-            continue
         for parts in entries:
             if len(parts) <= len(root) + 3 or parts[: len(root)] != root:
                 continue

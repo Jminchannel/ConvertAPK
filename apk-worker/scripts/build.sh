@@ -621,9 +621,6 @@ findNativeAndroidRoot() {
     while IFS= read -r settingsFile; do
         local candidateRoot
         candidateRoot="$(dirname "$settingsFile")"
-        if [ ! -f "$candidateRoot/gradlew" ]; then
-            continue
-        fi
         if [ -f "$candidateRoot/app/src/main/AndroidManifest.xml" ] && \
            { [ -f "$candidateRoot/app/build.gradle" ] || [ -f "$candidateRoot/app/build.gradle.kts" ]; }; then
             echo "$candidateRoot"
@@ -4147,7 +4144,10 @@ if [ ! -f "gradlew" ]; then
     if [ -f "$TEMPLATE_DIR/gradlew" ]; then
         log_warning "gradlew missing; restoring from template"
         cp "$TEMPLATE_DIR/gradlew" .
-        if [ -d "$TEMPLATE_DIR/gradle" ] && [ ! -d "gradle" ]; then
+        if [ -d "$TEMPLATE_DIR/gradle/wrapper" ] && [ ! -d "gradle/wrapper" ]; then
+            mkdir -p "gradle"
+            cp -R "$TEMPLATE_DIR/gradle/wrapper" "gradle/wrapper"
+        elif [ -d "$TEMPLATE_DIR/gradle" ] && [ ! -d "gradle" ]; then
             cp -R "$TEMPLATE_DIR/gradle" .
         fi
     fi
