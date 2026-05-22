@@ -2787,6 +2787,121 @@ def _replace_template_launcher_icon(project_root: Path, logo_path: Path, on_log=
     except Exception as exc:
         _log(on_log, f"[Android] launcher icon update failed: {exc}")
 
+
+def _is_android_application_module(module_dir: Path) -> bool:
+    gradle_file = module_dir / "build.gradle"
+    gradle_kts_file = module_dir / "build.gradle.kts"
+    build_file = gradle_kts_file if gradle_kts_file.exists() else gradle_file
+    manifest_file = module_dir / "src" / "main" / "AndroidManifest.xml"
+    if not build_file.exists() or not manifest_file.exists():
+        return False
+    if module_dir.name.lower() == "app":
+        return True
+    try:
+        build_text = build_file.read_text(encoding="utf-8", errors="ignore")
+    except Exception:
+        build_text = ""
+    return "com.android.application" in build_text or "android.application" in build_text
+
+
+def _try_find_android_app_module_dir(android_project_root: Path) -> Optional[Path]:
+    preferred = android_project_root / "app"
+    if _is_android_application_module(preferred):
+        return preferred
+
+    candidates: list[Path] = []
+    for manifest_file in android_project_root.rglob("AndroidManifest.xml"):
+        lower_parts = {part.lower() for part in manifest_file.parts}
+        if lower_parts & {"build", ".gradle", ".git", "node_modules", "__macosx"}:
+            continue
+        try:
+            module_dir = manifest_file.parents[2]
+        except IndexError:
+            continue
+        if _is_android_application_module(module_dir):
+            candidates.append(module_dir)
+
+    candidates.sort(key=lambda item: (len(item.relative_to(android_project_root).parts), str(item).lower()))
+    return candidates[0] if candidates else None
+
+
+def _find_android_app_module_dir(android_project_root: Path) -> Path:
+    module_dir = _try_find_android_app_module_dir(android_project_root)
+    if module_dir:
+        return module_dir
+    raise RuntimeError("原生 Android 工程中未找到应用模块，请确认存在 app/src/main/AndroidManifest.xml 与 com.android.application")
+
+
+def _find_native_android_project_root(source_dir: Path) -> Path:
+    settings_files = [
+        item
+        for item in source_dir.rglob("*")
+        if item.is_file()
+        and item.name.lower() in {"settings.gradle", "settings.gradle.kts"}
+        and not ({part.lower() for part in item.parts} & {".git", "node_modules", "__macosx"})
+    ]
+    settings_files.sort(key=lambda item: (len(item.relative_to(source_dir).parts), str(item).lower()))
+    for settings_file in settings_files:
+        candidate_root = settings_file.parent
+        required_wrapper = "gradlew.bat" if os.name == "nt" else "gradlew"
+        has_gradle_wrapper = (candidate_root / required_wrapper).exists()
+        if not has_gradle_wrapper:
+            continue
+        if _try_find_android_app_module_dir(candidate_root):
+            return candidate_root
+    raise RuntimeError("原生 Android 源码 ZIP 中未找到完整 Gradle 工程，请确认包含 settings.gradle、当前系统可执行的 Gradle Wrapper 与 app 模块")
+
+
+def _replace_android_launcher_icon(android_app_dir: Path, logo_path: Path, on_log=None) -> None:
+    if not logo_path.exists():
+        return
+    res_dir = android_app_dir / "src" / "main" / "res"
+    drawable_dir = res_dir / "drawable"
+    if not drawable_dir.exists():
+        return
+    target_png = drawable_dir / "ic_launcher_foreground.png"
+    target_xml = drawable_dir / "ic_launcher_foreground.xml"
+    try:
+        if target_xml.exists():
+            target_xml.unlink()
+        shutil.copy2(logo_path, target_png)
+        _log(on_log, f"[Android] launcher icon updated: {target_png}")
+    except Exception as exc:
+        _log(on_log, f"[Android] launcher icon update failed: {exc}")
+
+
+def _patch_native_android_identity(build_gradle: Path, env: Dict[str, str], on_log=None) -> None:
+    if not build_gradle.exists():
+        return
+    text = build_gradle.read_text(encoding="utf-8")
+    original = text
+    is_kts = build_gradle.name.endswith(".kts")
+    package_name = str(env.get("PACKAGE_NAME") or "com.example.app").strip()
+    version_name = str(env.get("VERSION_NAME") or "1.0.0").strip()
+    version_code = str(env.get("VERSION_CODE") or "1").strip()
+    if not version_code.isdigit():
+        version_code = "1"
+
+    if is_kts:
+        replacements = [
+            (r'(?m)^(\s*)applicationId\s*=\s*"[^"]*"', rf'\1applicationId = "{package_name}"'),
+            (r'(?m)^(\s*)versionName\s*=\s*"[^"]*"', rf'\1versionName = "{version_name}"'),
+            (r'(?m)^(\s*)versionCode\s*=\s*\d+', rf'\1versionCode = {version_code}'),
+        ]
+    else:
+        replacements = [
+            (r'(?m)^(\s*)applicationId\s*(?:=|\s)\s*"[^"]*"', rf'\1applicationId "{package_name}"'),
+            (r'(?m)^(\s*)versionName\s*(?:=|\s)\s*"[^"]*"', rf'\1versionName "{version_name}"'),
+            (r'(?m)^(\s*)versionCode\s*(?:=|\s)\s*\d+', rf'\1versionCode {version_code}'),
+        ]
+
+    for pattern, replacement in replacements:
+        text = re.sub(pattern, replacement, text, count=1)
+
+    if text != original:
+        build_gradle.write_text(text, encoding="utf-8")
+        _log(on_log, "[Android] native project app id/version updated")
+
 def run_local_build(
     env: Dict[str, str],
     task_output_dir: Path,
@@ -2826,19 +2941,23 @@ def run_local_build(
     if java_home:
         java_bin = str(Path(java_home) / "bin")
         process_env["PATH"] = f"{java_bin}{os.pathsep}{process_env.get('PATH', '')}"
-    node_home = env.get("NODE_HOME", "").strip()
-    if node_home:
-        process_env["PATH"] = f"{node_home}{os.pathsep}{process_env.get('PATH', '')}"
-    npm_cmd = _resolve_node_tool(process_env, "npm")
-    npx_cmd = _resolve_node_tool(process_env, "npx")
-
-    progress(10, "Step 0: 准备工作...")
-    _log(on_log, "Step 0: 准备工作...")
-
     task_mode = (env.get("TASK_MODE") or "convert").strip().lower()
     is_desktop_task = task_mode == "desktop"
     is_web_task = task_mode == "web"
     is_html_task = task_mode == "html"
+    is_native_task = task_mode == "native"
+    node_home = env.get("NODE_HOME", "").strip()
+    if node_home:
+        process_env["PATH"] = f"{node_home}{os.pathsep}{process_env.get('PATH', '')}"
+    if is_native_task:
+        npm_cmd = ""
+        npx_cmd = ""
+    else:
+        npm_cmd = _resolve_node_tool(process_env, "npm")
+        npx_cmd = _resolve_node_tool(process_env, "npx")
+
+    progress(10, "Step 0: 准备工作...")
+    _log(on_log, "Step 0: 准备工作...")
 
     if is_desktop_task:
         desktop_runtime = _normalize_desktop_runtime(env.get("DESKTOP_RUNTIME"))
@@ -3163,6 +3282,24 @@ def run_local_build(
                 gradle_text,
             )
             gradle_file.write_text(gradle_text, encoding="utf-8")
+    elif is_native_task:
+        progress(25, "Step 1: 解压原生 Android 工程...")
+        _log(on_log, "Step 1: 解压原生 Android 工程...")
+
+        zip_files = list(task_input_dir.glob("*.zip"))
+        if not zip_files:
+            raise RuntimeError(f"目录中未找到 ZIP 文件: {task_input_dir}")
+        zip_file = zip_files[0]
+
+        if project_dir.exists():
+            shutil.rmtree(project_dir)
+        project_dir.mkdir(parents=True, exist_ok=True)
+        if zip_file.suffix.lower() != ".zip":
+            raise RuntimeError("上传文件不是 ZIP 格式")
+        _extract_zip_safely(zip_file, project_dir)
+        _normalize_project_text_encodings(project_dir, on_log=on_log)
+        project_root = _find_native_android_project_root(project_dir)
+        _log(on_log, f"[Android] native project root: {project_root}")
     else:
         zip_files = list(task_input_dir.glob("*.zip"))
         if not zip_files:
@@ -3270,8 +3407,8 @@ def run_local_build(
         _log(on_log, "Step 5: 同步 Android 配置...")
         _run_cmd([npx_cmd, "cap", "sync", "android"], cwd=project_root, env=process_env, on_log=on_log)
 
-    android_project_root = project_root if (is_web_task or is_html_task) else project_root / "android"
-    android_app_dir = android_project_root / "app"
+    android_project_root = project_root if (is_web_task or is_html_task or is_native_task) else project_root / "android"
+    android_app_dir = _find_android_app_module_dir(android_project_root) if is_native_task else android_project_root / "app"
 
     permissions_raw = str(env.get("PERMISSIONS", "")).strip()
     permissions = [p for p in (perm.strip() for perm in permissions_raw.split(",")) if p]
@@ -3282,13 +3419,29 @@ def run_local_build(
         permissions,
         on_log=on_log,
     )
+    if is_native_task:
+        strings_file = android_app_dir / "src" / "main" / "res" / "values" / "strings.xml"
+        if strings_file.exists():
+            strings_text = strings_file.read_text(encoding="utf-8")
+            strings_text = re.sub(
+                r'(<string\s+name="app_name">)(.*?)(</string>)',
+                rf"\1{env.get('APP_NAME', 'MyApp')}\3",
+                strings_text,
+            )
+            strings_file.write_text(strings_text, encoding="utf-8")
+        logo = task_input_dir / "logo.png"
+        _replace_android_launcher_icon(android_app_dir, logo, on_log=on_log)
     build_gradle_kts = android_app_dir / "build.gradle.kts"
     build_gradle = android_app_dir / "build.gradle"
-    if build_gradle_kts.exists():
+    if is_native_task and build_gradle_kts.exists():
+        _patch_native_android_identity(build_gradle_kts, env, on_log=on_log)
+    elif is_native_task and build_gradle.exists():
+        _patch_native_android_identity(build_gradle, env, on_log=on_log)
+    elif build_gradle_kts.exists():
         _patch_android_build_config(build_gradle_kts, env, on_log=on_log)
     elif build_gradle.exists():
         _patch_android_build_config(build_gradle, env, on_log=on_log)
-    if not is_web_task and not is_html_task:
+    if task_mode == "convert":
         package_name = str(env.get("PACKAGE_NAME", "")).strip()
         status_bar_hidden_enabled = str(env.get("STATUS_BAR_HIDDEN", "false")).strip().lower() == "true"
         double_click_exit_enabled = str(env.get("DOUBLE_CLICK_EXIT", "true")).strip().lower() == "true"
@@ -3334,7 +3487,7 @@ def run_local_build(
     local_props = android_project_root / "local.properties"
     local_props.write_text(f"sdk.dir={android_home.as_posix()}\n", encoding="utf-8")
 
-    if not is_web_task and not is_html_task:
+    if task_mode == "convert":
         gradle_file = android_app_dir / "build.gradle"
         if gradle_file.exists():
             gradle_text = gradle_file.read_text(encoding="utf-8")

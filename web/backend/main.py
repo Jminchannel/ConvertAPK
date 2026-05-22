@@ -222,6 +222,7 @@ def _load_client_feature_flags(client_id: str | None = None) -> dict:
     flags = {
         "web_link_to_apk_enabled": False,
         "zip_to_desktop_enabled": False,
+        "native_android_packaging_enabled": False,
         "rewarded_build_ads_enabled": False,
         "donation_popup_probability": DONATION_POPUP_PROBABILITY_DEFAULT,
         "donation_popup_message": "",
@@ -268,6 +269,7 @@ def _load_client_feature_flags(client_id: str | None = None) -> dict:
     if isinstance(data, dict):
         flags["web_link_to_apk_enabled"] = bool(data.get("web_link_to_apk_enabled"))
         flags["zip_to_desktop_enabled"] = bool(data.get("zip_to_desktop_enabled"))
+        flags["native_android_packaging_enabled"] = bool(data.get("native_android_packaging_enabled"))
         flags["rewarded_build_ads_enabled"] = bool(data.get("rewarded_build_ads_enabled"))
         if "donation_popup_probability" in data:
             flags["donation_popup_probability"] = _normalize_donation_popup_probability(
@@ -332,6 +334,11 @@ def _is_web_link_mode_enabled(client_id: str | None = None) -> bool:
 def _is_desktop_mode_enabled(client_id: str | None = None) -> bool:
     flags = _load_client_feature_flags(client_id=client_id)
     return bool(flags.get("zip_to_desktop_enabled"))
+
+
+def _is_native_android_mode_enabled(client_id: str | None = None) -> bool:
+    flags = _load_client_feature_flags(client_id=client_id)
+    return bool(flags.get("native_android_packaging_enabled"))
 
 
 def _is_client_login_enabled(client_id: str | None = None) -> bool:
@@ -3786,23 +3793,66 @@ def _iter_zip_entries(zip_file: zipfile.ZipFile):
         yield info, parts
 
 
+def _has_native_android_project_entries(entries: list[tuple[str, ...]]) -> bool:
+    entry_set = set(entries)
+    candidate_roots = {
+        parts[:-1]
+        for parts in entries
+        if parts[-1] in {"settings.gradle", "settings.gradle.kts"}
+    }
+
+    for root in sorted(candidate_roots, key=lambda item: (len(item), item)):
+        has_wrapper = (*root, "gradlew") in entry_set and (*root, "gradlew.bat") in entry_set
+        if not has_wrapper:
+            continue
+        for parts in entries:
+            if len(parts) <= len(root) + 3 or parts[: len(root)] != root:
+                continue
+            rel = parts[len(root):]
+            if len(rel) < 4 or rel[-3:] != ("src", "main", "androidmanifest.xml"):
+                continue
+            module = rel[0]
+            if module != "app":
+                continue
+            if (
+                (*root, module, "build.gradle") in entry_set
+                or (*root, module, "build.gradle.kts") in entry_set
+            ):
+                return True
+    return False
+
+
 def _detect_zip_build_mode(zip_path: Path) -> tuple[str, str | None]:
     try:
         with zipfile.ZipFile(zip_path, "r") as archive:
+            package_candidates = []
             index_candidates = []
+            native_entries: list[tuple[str, ...]] = []
             for _, parts in _iter_zip_entries(archive):
                 lower_parts = [part.lower() for part in parts]
+                if not any(part in {"node_modules", ".git", "__macosx"} for part in lower_parts):
+                    native_entries.append(tuple(lower_parts))
                 if any(part in {"node_modules", ".git", "android", "__macosx"} for part in lower_parts):
                     continue
                 filename = lower_parts[-1]
                 if filename == "package.json":
-                    return "convert", None
+                    entry_name = str(PurePosixPath(*parts))
+                    package_candidates.append((len(parts), len(entry_name), entry_name))
                 if filename == "index.html":
                     entry_name = str(PurePosixPath(*parts))
                     index_candidates.append((len(parts), len(entry_name), entry_name))
+            package_candidates.sort(key=lambda item: (item[0], item[1], item[2]))
+            if package_candidates and package_candidates[0][0] <= 3:
+                return "convert", None
+            index_candidates.sort(key=lambda item: (item[0], item[1], item[2]))
+            if index_candidates and index_candidates[0][0] <= 3:
+                return "html", index_candidates[0][2]
+            if _has_native_android_project_entries(native_entries):
+                return "native", None
+            if package_candidates:
+                return "convert", None
             if not index_candidates:
                 return "invalid", None
-            index_candidates.sort(key=lambda item: (item[0], item[1], item[2]))
             return "html", index_candidates[0][2]
     except zipfile.BadZipFile:
         raise HTTPException(status_code=400, detail="ZIP format is invalid, please upload again")
@@ -5607,8 +5657,8 @@ async def create_task(task_data: BuildTaskCreate):
     )
 
     mode = (task_data.mode or "convert").strip().lower()
-    if mode not in {"convert", "web", "html", "desktop"}:
-        raise HTTPException(status_code=400, detail="mode must be convert, web, html, or desktop")
+    if mode not in {"convert", "web", "html", "desktop", "native"}:
+        raise HTTPException(status_code=400, detail="mode must be convert, web, html, desktop, or native")
     web_url = None
     if mode == "web":
         if not _is_web_link_mode_enabled(client_id):
@@ -5619,6 +5669,9 @@ async def create_task(task_data: BuildTaskCreate):
     if mode == "desktop":
         if not _is_desktop_mode_enabled(client_id):
             raise HTTPException(status_code=403, detail="desktop mode is disabled by admin")
+    if mode == "native":
+        if not _is_native_android_mode_enabled(client_id):
+            raise HTTPException(status_code=403, detail="native android mode is disabled by admin")
     html_filename = None
     if mode == "html":
         html_filename = str(task_data.html_filename or "").strip()
@@ -5636,7 +5689,7 @@ async def create_task(task_data: BuildTaskCreate):
 
     quick_generate = bool(task_data.quick_generate)
     if mode == "desktop" and quick_generate:
-        raise HTTPException(status_code=400, detail="desktop mode does not support quick generate")
+        raise HTTPException(status_code=400, detail=f"{mode} mode does not support quick generate")
     quick_icon_path = None
     quickSharedKeystorePath = None
     if quick_generate:
@@ -5664,13 +5717,23 @@ async def create_task(task_data: BuildTaskCreate):
     effective_config = task_data.config
     
     # 移动ZIP文件到任务目录（仅 convert 模式）
-    if mode in {"convert", "desktop"}:
+    if mode in {"convert", "desktop", "native"}:
         if not task_data.filename:
             raise HTTPException(status_code=400, detail="filename is required for zip-based mode")
         src_zip = BACKEND_UPLOAD_DIR / task_data.filename
         if not src_zip.exists():
             raise HTTPException(status_code=400, detail="ZIP文件不存在，请重新上传")
         detected_mode, detected_index_entry = _detect_zip_build_mode(src_zip)
+        if mode == "native" and detected_mode != "native":
+            raise HTTPException(
+                status_code=400,
+                detail="原生 Android 模式需要上传完整 Gradle 工程 ZIP：包含 settings.gradle、gradlew/gradlew.bat 和 app/src/main/AndroidManifest.xml",
+            )
+        if mode in {"convert", "desktop"} and detected_mode == "native":
+            raise HTTPException(
+                status_code=400,
+                detail="检测到原生 Android 工程，请切换到“原生安卓打包”模式后再上传",
+            )
         if detected_mode == "invalid":
             raise HTTPException(
                 status_code=400,
@@ -6299,6 +6362,18 @@ async def start_task(task_id: str, client_id: str = None):
             node_ready = bool(str(status.get("paths", {}).get("node", "")).strip())
             if not node_ready:
                 raise HTTPException(status_code=503, detail="Node.js environment is not ready for desktop mode")
+        elif task.mode == "native":
+            paths = status.get("paths", {}) or {}
+            native_missing = [
+                name
+                for name, key in (("JDK", "jdk"), ("Android SDK", "android"))
+                if not str(paths.get(key, "")).strip()
+            ]
+            if native_missing:
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"{' and '.join(native_missing)} environment is not ready for native Android mode",
+                )
         elif not status["ready"]:
             detail = status.get("error") or "Build environment is not ready"
             raise HTTPException(status_code=503, detail=detail)
@@ -6695,6 +6770,20 @@ async def update_task(task_id: str, update_data: UpdateTaskRequest):
     if update_data.filename:
         src_zip = BACKEND_UPLOAD_DIR / update_data.filename
         if src_zip.exists():
+            if task.mode == "native":
+                detected_mode, _ = _detect_zip_build_mode(src_zip)
+                if detected_mode != "native":
+                    raise HTTPException(
+                        status_code=400,
+                        detail="原生 Android 模式需要上传完整 Gradle 工程 ZIP：包含 settings.gradle、gradlew/gradlew.bat 和 app/src/main/AndroidManifest.xml",
+                    )
+            elif task.mode in {"convert", "desktop"}:
+                detected_mode, _ = _detect_zip_build_mode(src_zip)
+                if detected_mode == "native":
+                    raise HTTPException(
+                        status_code=400,
+                        detail="检测到原生 Android 工程，请切换到“原生安卓打包”模式后再上传",
+                    )
             dst_zip = _store_task_asset(task_id, task_input_dir, "project.zip", src_zip, move=True)
             if task.mode == "html":
                 index_entry = _pick_zip_index_entry(dst_zip)

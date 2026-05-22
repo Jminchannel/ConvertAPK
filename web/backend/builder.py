@@ -886,7 +886,7 @@ class APKBuilder:
         
         # 验证输入文件存在
         task_mode_normalized = (task_mode or "convert").strip().lower()
-        if task_mode_normalized in {"convert", "desktop"}:
+        if task_mode_normalized in {"convert", "desktop", "native"}:
             zip_file = task_input_dir / "project.zip"
             if not zip_file.exists():
                 raise FileNotFoundError(f"ZIP 文件不存在: {zip_file}")
@@ -1054,6 +1054,7 @@ class APKBuilder:
         process = None
         task_mode = str(env.get("TASK_MODE", "convert")).strip().lower()
         is_desktop_task = task_mode == "desktop"
+        is_native_task = task_mode == "native"
         docker_image = DESKTOP_BUILDER_IMAGE if is_desktop_task else APK_BUILDER_IMAGE
 
         try:
@@ -1062,7 +1063,7 @@ class APKBuilder:
             log(f"App Name: {env.get('APP_NAME', 'N/A')}")
             log(f"Package Name: {env.get('PACKAGE_NAME', 'N/A')}")
             log(f"Version: {env.get('VERSION_NAME', 'N/A')}")
-            log(f"Build Mode: {'desktop' if is_desktop_task else 'android'}")
+            log(f"Build Mode: {'desktop' if is_desktop_task else ('native android' if is_native_task else 'android')}")
             log(f"Build Image: {docker_image}")
             log("")
 
@@ -1216,6 +1217,17 @@ class APKBuilder:
                     "Step 5": (85, "Signing and organizing output..."),
                 }
                 success_markers = ("[DesktopBuilder] output:",)
+            elif is_native_task:
+                progress_map = {
+                    "Step 0": (15, "Preparing build environment..."),
+                    "Step 1": (25, "Unzipping native Android project..."),
+                    "Step 6": (65, "Applying Android config..."),
+                    "Step 7": (70, "Building release package..."),
+                    "Step 8": (80, "Preparing signing keys..."),
+                    "Step 9": (85, "Aligning APK / preparing AAB..."),
+                    "Step 10": (90, "Signing APK / AAB..."),
+                }
+                success_markers = ("APK ", "AAB ")
             else:
                 progress_map = {
                     "Step 0": (15, "Preparing build environment..."),

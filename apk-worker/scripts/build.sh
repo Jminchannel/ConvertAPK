@@ -615,6 +615,27 @@ findAlternativeViteRoot() {
     return 1
 }
 
+findNativeAndroidRoot() {
+    local searchRoot="$1"
+    local settingsFile=""
+    while IFS= read -r settingsFile; do
+        local candidateRoot
+        candidateRoot="$(dirname "$settingsFile")"
+        if [ ! -f "$candidateRoot/gradlew" ]; then
+            continue
+        fi
+        if [ -f "$candidateRoot/app/src/main/AndroidManifest.xml" ] && \
+           { [ -f "$candidateRoot/app/build.gradle" ] || [ -f "$candidateRoot/app/build.gradle.kts" ]; }; then
+            echo "$candidateRoot"
+            return 0
+        fi
+    done < <(find "$searchRoot" \( -name "settings.gradle" -o -name "settings.gradle.kts" \) -type f \
+        -not -path "*/node_modules/*" \
+        -not -path "*/.git/*" \
+        -not -path "*/__MACOSX/*" | sort)
+    return 1
+}
+
 ensure_gradle_wrapper_dist() {
     # 目标：如果 Gradle wrapper 分发包已缓存则直接复用；否则从镜像尝试下载到缓存目录，避免每次构建重新下载
     local wrapper_props=""
@@ -854,7 +875,7 @@ PROJECT_DIR="${PROJECT_DIR:-/workspace/project}"
 
 # Fallback inference if TASK_MODE is missing or unrecognized.
 case "$TASK_MODE" in
-    web|html|convert) ;;
+    web|html|convert|native) ;;
     *)
         if [ -n "$INPUT_DIR" ] && find "$INPUT_DIR" -maxdepth 1 -type f \( -name "*.html" -o -name "*.htm" \) | head -n 1 | grep -q .; then
             log_warning "TASK_MODE '$TASK_MODE' unrecognized; falling back to html (HTML file found in input)"
@@ -1106,6 +1127,30 @@ NODE
         fi
     fi
 
+    cd "$PROJECT_ROOT"
+    log_success "Step 0 done"
+elif [ "$TASK_MODE" = "native" ]; then
+    log_info "Step 1: 解压原生 Android 工程..."
+    ZIP_FILE=$(find "$INPUT_DIR" -name "*.zip" -type f | head -n 1)
+
+    if [ -z "$ZIP_FILE" ]; then
+        log_error "No ZIP found in $INPUT_DIR"
+        exit 1
+    fi
+
+    log_info "Found native Android ZIP: $ZIP_FILE"
+    rm -rf "$PROJECT_DIR"
+    mkdir -p "$PROJECT_DIR"
+    unzip -q "$ZIP_FILE" -d "$PROJECT_DIR"
+    check_error "Unzip native Android project failed"
+
+    PROJECT_ROOT="$(findNativeAndroidRoot "$PROJECT_DIR" || true)"
+    if [ -z "$PROJECT_ROOT" ]; then
+        log_error "原生 Android 源码 ZIP 中未找到完整 Gradle 工程，请确认包含 settings.gradle、gradlew 与 app 模块"
+        exit 1
+    fi
+    ANDROID_DIR="."
+    log_info "Native Android project root: $PROJECT_ROOT"
     cd "$PROJECT_ROOT"
     log_success "Step 0 done"
 else
@@ -2250,6 +2295,7 @@ log_success "代码同步完成"
 # 注入下载处理（外部浏览器下载）
 log_info "注入 Android 下载处理..."
 fi
+if [ "$TASK_MODE" != "native" ]; then
 export ANDROID_DIR="$ANDROID_DIR"
 node << 'NODE'
 const fs = require("fs");
@@ -4036,6 +4082,8 @@ NODE
 # ============================================
 # 步骤 6: 配置 Android 项目
 # ============================================
+fi
+
 log_info "Step 6: 配置 Android 项目..."
 
 # 创建 local.properties
@@ -4052,13 +4100,25 @@ if [ ! -f "$GRADLE_FILE" ]; then
 fi
 if [ -f "$GRADLE_FILE" ]; then
     if echo "$GRADLE_FILE" | grep -q '\.kts$'; then
+        sed -i -E "s/applicationId[[:space:]]*=[[:space:]]*\"[^\"]*\"/applicationId = \"$PACKAGE_NAME\"/" "$GRADLE_FILE"
         sed -i "s/versionName[[:space:]]*=[[:space:]]*\".*\"/versionName = \"$VERSION_NAME\"/" "$GRADLE_FILE"
         sed -i "s/versionCode[[:space:]]*=[[:space:]]*[0-9]\+/versionCode = $VERSION_CODE/" "$GRADLE_FILE"
     else
+        sed -i -E "s/applicationId[[:space:]]*=[[:space:]]*\"[^\"]*\"/applicationId \"$PACKAGE_NAME\"/" "$GRADLE_FILE"
+        sed -i -E "s/applicationId[[:space:]]+\"[^\"]*\"/applicationId \"$PACKAGE_NAME\"/" "$GRADLE_FILE"
         sed -i "s/versionName \".*\"/versionName \"$VERSION_NAME\"/" "$GRADLE_FILE"
         sed -i "s/versionCode .*/versionCode $VERSION_CODE/" "$GRADLE_FILE"
     fi
     log_info "已更新版本号信息"
+fi
+
+if [ "$TASK_MODE" = "native" ] && [ -f "$INPUT_DIR/logo.png" ]; then
+    drawable_dir="$ANDROID_DIR/app/src/main/res/drawable"
+    if [ -d "$drawable_dir" ]; then
+        rm -f "$drawable_dir/ic_launcher_foreground.xml"
+        cp "$INPUT_DIR/logo.png" "$drawable_dir/ic_launcher_foreground.png"
+        log_info "Native launcher icon updated"
+    fi
 fi
 
 log_success "Android 项目配置完成"

@@ -36,6 +36,30 @@ export const messages = {
       openAiStudio: 'Open AI Studio',
       tips: 'Tip: when exporting. If your app uses camera, import/export (download), tell Gemini: "this feature needs Capacitor adaptation".'
     },
+    // 新手引导
+    onboarding: {
+      kicker: 'First build',
+      title: 'Turn a web project into an installable app',
+      subtitle: 'Follow the three-step path below: upload your ZIP, confirm app details, then build and download the APK.',
+      primaryAction: 'Start first build',
+      requirementsAction: 'Packaging requirements',
+      flowLabel: 'First build workflow',
+      stepUploadTitle: 'Upload project ZIP',
+      stepUploadText: 'Use the exported web project or a static HTML package.',
+      stepConfigTitle: 'Confirm app info',
+      stepConfigText: 'Set app name, package name, version, icon and optional signing.',
+      stepBuildTitle: 'Build and download',
+      stepBuildText: 'Track logs in real time and download the output after success.',
+      materialsTitle: 'Prepare these before starting',
+      materialZip: 'Project ZIP',
+      materialName: 'App name',
+      materialPackage: 'Package name',
+      materialIcon: '512x512 icon',
+      previewLabel: 'Example task preview',
+      previewTitle: 'Example app task',
+      previewText: 'Your completed builds will appear here with logs and downloads.',
+      previewStatus: 'Ready'
+    },
     // Steps
     steps: {
       upload: 'Upload Project',
@@ -307,6 +331,7 @@ export const messages = {
       taskCreated: 'Build task created',
       taskStarted: 'Build task started',
       desktopModeDisabled: 'Electron desktop mode is disabled',
+      nativeModeDisabled: 'Native Android packaging mode is disabled',
       firstBuildHint: 'First build may take around 15 minutes. Later builds should be faster.',
       taskRetried: 'Task reset, please start again',
       taskDeleted: 'Task deleted',
@@ -471,6 +496,30 @@ export const messages = {
       step3: '在此处上传并构建 APK',
       openAiStudio: '打开 AI Studio',
       tips: '提示：如果应用中包含相机、导入/导出（下载）等功能，请在 Google AI Studio 提示 Gemini：“相机、导入/导出（下载）等功能需要做 Capacitor 适配”。'
+    },
+    // 新手引导
+    onboarding: {
+      kicker: '第一次构建',
+      title: '把网页项目变成可安装应用',
+      subtitle: '按下面三步走：上传 ZIP，确认应用信息，然后开始构建并下载 APK。',
+      primaryAction: '开始第一个构建',
+      requirementsAction: '查看打包要求',
+      flowLabel: '首次构建流程',
+      stepUploadTitle: '上传项目 ZIP',
+      stepUploadText: '使用导出的网页项目，或准备好的静态 HTML 包。',
+      stepConfigTitle: '确认应用信息',
+      stepConfigText: '设置应用名称、包名、版本、图标和可选签名。',
+      stepBuildTitle: '构建并下载',
+      stepBuildText: '实时查看日志，成功后下载生成产物。',
+      materialsTitle: '开始前准备这些材料',
+      materialZip: '项目 ZIP',
+      materialName: '应用名称',
+      materialPackage: 'Android 包名',
+      materialIcon: '512x512 图标',
+      previewLabel: '示例任务预览',
+      previewTitle: '示例应用任务',
+      previewText: '你的构建任务会显示在这里，包含日志和下载入口。',
+      previewStatus: '待创建'
     },
     // Steps
     steps: {
@@ -742,6 +791,7 @@ export const messages = {
       taskCreated: '构建任务已创建',
       taskStarted: '构建任务已启动',
       desktopModeDisabled: 'Electron 桌面模式已关闭',
+      nativeModeDisabled: '原生 Android 打包模式已关闭',
       firstBuildHint: '首次构建可能需要约 15 分钟，后续构建会更快。',
       taskRetried: '任务已重置，请重新开始',
       taskDeleted: '任务已删除',
@@ -903,6 +953,30 @@ export const messages = {
       step3: '在此處上傳並建構 APK',
       openAiStudio: '開啟 AI Studio',
       tips: '提示：如應用包含相機、匯入/匯出（下載）等功能，請在 Google AI Studio 提示 Gemini：「該功能需要做 Capacitor 適配」。'
+    },
+    // 新手引导
+    onboarding: {
+      kicker: '第一次建構',
+      title: '把網頁專案變成可安裝應用',
+      subtitle: '依照下面三步走：上傳 ZIP，確認應用資訊，然後開始建構並下載 APK。',
+      primaryAction: '開始第一個建構',
+      requirementsAction: '查看打包要求',
+      flowLabel: '首次建構流程',
+      stepUploadTitle: '上傳專案 ZIP',
+      stepUploadText: '使用匯出的網頁專案，或準備好的靜態 HTML 包。',
+      stepConfigTitle: '確認應用資訊',
+      stepConfigText: '設定應用名稱、包名、版本、圖示和可選簽名。',
+      stepBuildTitle: '建構並下載',
+      stepBuildText: '即時查看日誌，成功後下載生成產物。',
+      materialsTitle: '開始前準備這些材料',
+      materialZip: '專案 ZIP',
+      materialName: '應用名稱',
+      materialPackage: 'Android 包名',
+      materialIcon: '512x512 圖示',
+      previewLabel: '示例任務預覽',
+      previewTitle: '示例應用任務',
+      previewText: '你的建構任務會顯示在這裡，包含日誌和下載入口。',
+      previewStatus: '待建立'
     },
     // Steps
     steps: {
@@ -1176,6 +1250,7 @@ export const messages = {
       taskCreated: '建構任務已建立',
       taskStarted: '建構任務已啟動',
       desktopModeDisabled: 'Electron 桌面模式已關閉',
+      nativeModeDisabled: '原生 Android 打包模式已關閉',
       firstBuildHint: '首次建構可能需要約 15 分鐘，後續建構會更快。',
       taskRetried: '任務已重置，請重新開始',
       taskDeleted: '任務已刪除',
@@ -1590,9 +1665,27 @@ messages['zh-TW'].config.desktopRuntimeTauri = 'Tauri'
 messages.en.upload.desktopTitle = 'Desktop App Project ZIP'
 messages['zh-CN'].upload.desktopTitle = '桌面应用项目 ZIP'
 messages['zh-TW'].upload.desktopTitle = '桌面應用專案 ZIP'
+messages.en.mode.native = 'Native Android'
+messages['zh-CN'].mode.native = '原生安卓打包'
+messages['zh-TW'].mode.native = '原生安卓打包'
+messages.en.upload.nativeTitle = 'Native Android Source ZIP'
+messages.en.upload.nativeSubtitle = 'Upload a complete Gradle Android project with settings.gradle and gradlew'
+messages.en.upload.nativeDragDrop = 'Drag & drop native Android source ZIP here, or click to select'
+messages.en.upload.nativeHint = 'Requires an app module, AndroidManifest.xml, and Gradle Wrapper'
+messages['zh-CN'].upload.nativeTitle = '原生 Android 源码 ZIP'
+messages['zh-CN'].upload.nativeSubtitle = '上传完整 Gradle 工程源码包，需包含 settings.gradle 与 gradlew'
+messages['zh-CN'].upload.nativeDragDrop = '拖放原生 Android 源码 ZIP，或点击选择'
+messages['zh-CN'].upload.nativeHint = '需包含 app 模块、AndroidManifest.xml 和 Gradle Wrapper'
+messages['zh-TW'].upload.nativeTitle = '原生 Android 原始碼 ZIP'
+messages['zh-TW'].upload.nativeSubtitle = '上傳完整 Gradle 專案原始碼包，需包含 settings.gradle 與 gradlew'
+messages['zh-TW'].upload.nativeDragDrop = '拖放原生 Android 原始碼 ZIP，或點擊選擇'
+messages['zh-TW'].upload.nativeHint = '需包含 app 模組、AndroidManifest.xml 和 Gradle Wrapper'
 messages.en.toast.desktopModeDisabled = 'Desktop app mode is disabled'
 messages['zh-CN'].toast.desktopModeDisabled = '桌面应用模式已关闭'
 messages['zh-TW'].toast.desktopModeDisabled = '桌面應用模式已關閉'
+messages.en.toast.nativeModeDisabled = 'Native Android packaging mode is disabled'
+messages['zh-CN'].toast.nativeModeDisabled = '原生 Android 打包模式已关闭'
+messages['zh-TW'].toast.nativeModeDisabled = '原生 Android 打包模式已關閉'
 
 messages.en.auth.loginMethodPassword = 'Password'
 messages.en.auth.loginMethodSms = 'SMS Code'

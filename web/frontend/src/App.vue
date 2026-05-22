@@ -196,6 +196,10 @@
             <span class="mode-icon">&#x1F5A5;</span>
             {{ t('mode.desktop') }}
           </button>
+          <button v-if="isNativeModeEnabled" class="mode-tab" :class="{ active: mode === 'native' }" @click="handleModeChange('native')">
+            <span class="mode-icon">A</span>
+            {{ t('mode.native') }}
+          </button>
           <button class="mode-tab" :class="{ active: mode === 'html' }" @click="handleModeChange('html')">
             <span class="mode-icon">&lt;/&gt;</span>
             {{ t('mode.html') }}
@@ -226,6 +230,55 @@
         <div class="grid grid-auto mobile-content-grid">
           <!-- Left -->
           <div class="stack mobile-page mobile-page-build" :class="isMobileShell ? mobilePageAnimClass : ''" v-show="!isMobileShell || mobileTab === 'build'">
+            <!-- 新手引导 -->
+            <div class="card starter-card" v-if="tasks.length === 0 && !updatingTaskId">
+              <div class="starter-hero">
+                <div class="starter-copy-wrap">
+                  <div class="starter-kicker">{{ t('onboarding.kicker') }}</div>
+                  <h2 class="starter-title">{{ t('onboarding.title') }}</h2>
+                  <p class="starter-copy">{{ t('onboarding.subtitle') }}</p>
+                </div>
+                <button class="btn btn-primary btn-sm starter-cta" @click="openFirstTaskGuide">
+                  <span class="action-icon" aria-hidden="true">↑</span>
+                  {{ t('onboarding.primaryAction') }}
+                </button>
+              </div>
+
+              <div class="starter-flow" :aria-label="t('onboarding.flowLabel')">
+                <div class="starter-flow-item">
+                  <div class="starter-flow-num">1</div>
+                  <div>
+                    <div class="starter-flow-title">{{ t('onboarding.stepUploadTitle') }}</div>
+                    <div class="starter-flow-text">{{ t('onboarding.stepUploadText') }}</div>
+                  </div>
+                </div>
+                <div class="starter-flow-item">
+                  <div class="starter-flow-num">2</div>
+                  <div>
+                    <div class="starter-flow-title">{{ t('onboarding.stepConfigTitle') }}</div>
+                    <div class="starter-flow-text">{{ t('onboarding.stepConfigText') }}</div>
+                  </div>
+                </div>
+                <div class="starter-flow-item">
+                  <div class="starter-flow-num">3</div>
+                  <div>
+                    <div class="starter-flow-title">{{ t('onboarding.stepBuildTitle') }}</div>
+                    <div class="starter-flow-text">{{ t('onboarding.stepBuildText') }}</div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="starter-materials">
+                <div class="starter-materials-title">{{ t('onboarding.materialsTitle') }}</div>
+                <div class="starter-chip-row">
+                  <span class="starter-chip">{{ t('onboarding.materialZip') }}</span>
+                  <span class="starter-chip">{{ t('onboarding.materialName') }}</span>
+                  <span class="starter-chip">{{ t('onboarding.materialPackage') }}</span>
+                  <span class="starter-chip">{{ t('onboarding.materialIcon') }}</span>
+                </div>
+              </div>
+            </div>
+
             <!-- Guide (convert only) -->
             <div class="card guide-card" v-if="mode === 'convert'">
               <div class="card-header">
@@ -264,13 +317,13 @@
               </div>
             </div>
 
-            <!-- Upload (convert only) -->
-            <div class="card upload-card" v-if="mode === 'convert' || mode === 'desktop'" ref="convertUploadSection">
+            <!-- ZIP 上传（项目、桌面、原生 Android） -->
+            <div class="card upload-card" v-if="mode === 'convert' || mode === 'desktop' || mode === 'native'" ref="convertUploadSection">
               <div class="card-header">
                 <div class="card-icon">↑</div>
                 <div>
-                  <div class="card-title">{{ mode === 'desktop' ? t('upload.desktopTitle') : t('upload.title') }}</div>
-                  <div class="card-subtitle">{{ mode === 'desktop' ? t('upload.desktopSubtitle') : t('upload.subtitle') }}</div>
+                  <div class="card-title">{{ mode === 'desktop' ? t('upload.desktopTitle') : (mode === 'native' ? t('upload.nativeTitle') : t('upload.title')) }}</div>
+                  <div class="card-subtitle">{{ mode === 'desktop' ? t('upload.desktopSubtitle') : (mode === 'native' ? t('upload.nativeSubtitle') : t('upload.subtitle')) }}</div>
                 </div>
               </div>
 
@@ -291,8 +344,8 @@
 
                 <template v-if="!uploadedFile">
                   <div class="upload-icon">↑</div>
-                  <div class="upload-text">{{ mode === 'desktop' ? t('upload.desktopDragDrop') : t('upload.dragDrop') }}</div>
-                  <div class="upload-hint">{{ mode === 'desktop' ? t('upload.desktopHint') : t('upload.hint') }}</div>
+                  <div class="upload-text">{{ mode === 'desktop' ? t('upload.desktopDragDrop') : (mode === 'native' ? t('upload.nativeDragDrop') : t('upload.dragDrop')) }}</div>
+                  <div class="upload-hint">{{ mode === 'desktop' ? t('upload.desktopHint') : (mode === 'native' ? t('upload.nativeHint') : t('upload.hint')) }}</div>
                 </template>
                 <template v-else>
                   <div class="upload-icon">✓</div>
@@ -514,7 +567,7 @@
                 </div>
                 <div class="card-header-actions">
                   <div
-                    v-if="mode === 'convert' || mode === 'web' || mode === 'html'"
+                    v-if="mode === 'convert' || mode === 'web' || mode === 'html' || mode === 'native'"
                     class="quickgen-switch"
                     :class="{ disabled: updatingTaskId }"
                     :title="t('config.quickGenerateHint')"
@@ -1057,10 +1110,26 @@
               </div>
             </div>
 
-            <div v-else class="empty-state">
+            <div v-else class="empty-state task-empty-state">
               <div class="empty-icon">＋</div>
               <div class="empty-text">{{ t('tasks.noTasks') }}</div>
               <div class="empty-hint">{{ t('tasks.createFirst') }}</div>
+              <div class="task-empty-actions">
+                <button class="btn btn-primary btn-sm" @click="openFirstTaskGuide">
+                  {{ t('onboarding.primaryAction') }}
+                </button>
+                <a class="btn btn-secondary btn-sm" href="/help.html">
+                  {{ t('onboarding.requirementsAction') }}
+                </a>
+              </div>
+              <div class="task-empty-preview" :aria-label="t('onboarding.previewLabel')">
+                <div class="task-empty-preview-icon">✓</div>
+                <div class="task-empty-preview-main">
+                  <div class="task-empty-preview-title">{{ t('onboarding.previewTitle') }}</div>
+                  <div class="task-empty-preview-text">{{ t('onboarding.previewText') }}</div>
+                </div>
+                <div class="task-empty-preview-status">{{ t('onboarding.previewStatus') }}</div>
+              </div>
             </div>
 
             <div v-if="totalTaskPages > 1" class="pagination">

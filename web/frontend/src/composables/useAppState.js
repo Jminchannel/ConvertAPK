@@ -124,11 +124,12 @@ export const useAppState = () => {
     if (!e.target.closest('.download-dropdown')) closeDownloadMenu()
   }
 
-  // Modes & feature state
-  const mode = ref('convert') // convert | web | html | desktop
+  // 模式与功能开关状态
+  const mode = ref('convert') // convert | web | html | desktop | native
   const featureFlags = ref({
     web_link_to_apk_enabled: false,
     zip_to_desktop_enabled: false,
+    native_android_packaging_enabled: false,
     rewarded_build_ads_enabled: false,
     donation_popup_probability: 10,
     donation_popup_message: '',
@@ -152,6 +153,7 @@ export const useAppState = () => {
   const buildCodeRedeeming = ref(false)
   const isWebModeEnabled = computed(() => Boolean(featureFlags.value.web_link_to_apk_enabled))
   const isDesktopModeEnabled = computed(() => Boolean(featureFlags.value.zip_to_desktop_enabled))
+  const isNativeModeEnabled = computed(() => Boolean(featureFlags.value.native_android_packaging_enabled))
   const isRewardedBuildAdsEnabled = computed(() => Boolean(featureFlags.value.rewarded_build_ads_enabled))
   const isClientLoginEnabled = computed(() => featureFlags.value.client_login_enabled !== false)
   const isClientSmsLoginEnabled = computed(() => featureFlags.value.client_sms_login_enabled === true)
@@ -210,6 +212,7 @@ export const useAppState = () => {
   const useCustomKeystore = ref(false)
   const quickGenerate = ref(false)
   const quickGenerateStash = ref(null)
+  const quickGenerateSupportedModes = new Set(['convert', 'web', 'html', 'native'])
   const codeCopied = ref(false)
   const mobileTab = ref('build') // build | tasks | profile
   const isMobileShell = ref(false)
@@ -407,16 +410,19 @@ export const useAppState = () => {
     }
   }
 
-  const scrollToProjectSection = async () => {
-    if (!isMobileViewport()) return
+  const getProjectEntrySection = () => {
+    if (mode.value === 'convert' || mode.value === 'desktop' || mode.value === 'native') return convertUploadSection.value
+    if (mode.value === 'html') return htmlUploadSection.value
+    return webUrlSection.value
+  }
+
+  const scrollToProjectSection = async ({ includeDesktop = false } = {}) => {
+    if (!includeDesktop && !isMobileViewport()) return
     if (isMobileShell.value) {
       await scrollToMobileHeadAnchor()
       return
     }
-    const target = mode.value === 'convert' || mode.value === 'desktop'
-      ? convertUploadSection.value
-      : (mode.value === 'html' ? htmlUploadSection.value : webUrlSection.value)
-    await scrollWithinMain(target)
+    await scrollWithinMain(getProjectEntrySection())
   }
 
   const switchMobileTab = async (tab, options = {}) => {
@@ -437,6 +443,16 @@ export const useAppState = () => {
     closeDownloadMenu()
     if (!isMobileShell.value) return
     await scrollToMobileHeadAnchor()
+  }
+
+  const openFirstTaskGuide = async () => {
+    if (isMobileShell.value && mobileTab.value !== 'build') {
+      await switchMobileTab('build', { animate: true })
+    } else if (mobileTab.value !== 'build') {
+      mobileTab.value = 'build'
+    }
+    await nextTick()
+    await scrollToProjectSection({ includeDesktop: true })
   }
 
   const handleMobileSwipeStart = (event) => {
@@ -528,6 +544,10 @@ export const useAppState = () => {
     }
     if (value === 'desktop' && !isDesktopModeEnabled.value) {
       showToast(t('toast.desktopModeDisabled'), 'error')
+      return
+    }
+    if (value === 'native' && !isNativeModeEnabled.value) {
+      showToast(t('toast.nativeModeDisabled'), 'error')
       return
     }
     mode.value = value
@@ -964,7 +984,7 @@ export const useAppState = () => {
   })
 
   const applyQuickGenerateDefaults = () => {
-    // Quick generate uses backend defaults for icon & signing file; clear any user uploads.
+    // 一键生成使用后端默认图标与签名文件，进入时清理用户已上传的内容。
     if (appIcon.value && !appIcon.value.startsWith('/api/') && appIconFile.value) URL.revokeObjectURL(appIcon.value)
     appIcon.value = null
     appIconFile.value = null
@@ -981,7 +1001,7 @@ export const useAppState = () => {
       ...config.value,
       app_name: 'demo',
       package_name: 'com.convertapk.demo',
-      // Backend will auto-increment these on each task creation.
+      // 后端会在每次创建任务时自动递增版本号。
       version_name: '1.0.0',
       version_code: 1,
       output_format: 'apk',
@@ -1028,7 +1048,7 @@ export const useAppState = () => {
     iconError.value = String(stash.iconError || '')
     uploadedIcon.value = stash.uploadedIcon || null
 
-    // Restore icon preview
+    // 恢复图标预览。
     if (appIcon.value && !appIcon.value.startsWith('/api/') && appIconFile.value) {
       try { URL.revokeObjectURL(appIcon.value) } catch {}
     }
@@ -1041,13 +1061,13 @@ export const useAppState = () => {
 
     config.value = stash.config || config.value
 
-    // File inputs cannot be restored; reset the native value for cleanliness.
+    // 文件输入无法恢复，重置原生控件值以保持界面干净。
     if (keystoreInput.value) keystoreInput.value.value = ''
   }
 
   const enterQuickGenerate = () => {
     if (quickGenerate.value) return
-    if ((mode.value !== 'convert' && mode.value !== 'web' && mode.value !== 'html') || updatingTaskId.value) return
+    if (!quickGenerateSupportedModes.has(mode.value) || updatingTaskId.value) return
     stashQuickGenerateState()
     quickGenerate.value = true
     applyQuickGenerateDefaults()
@@ -1899,7 +1919,7 @@ export const useAppState = () => {
     const complianceReady = requireTaskCompliance
       ? taskComplianceAck.value && !taskComplianceError.value
       : true
-    const hasIcon = quickGenerate.value && (mode.value === 'convert' || mode.value === 'web' || mode.value === 'html') && !updatingTaskId.value
+    const hasIcon = quickGenerate.value && quickGenerateSupportedModes.has(mode.value) && !updatingTaskId.value
       ? true
       : (appIcon.value || uploadedIcon.value)
     const common =
@@ -1912,7 +1932,7 @@ export const useAppState = () => {
       complianceReady &&
       hasIcon
 
-    if (mode.value === 'convert' || mode.value === 'desktop') {
+    if (mode.value === 'convert' || mode.value === 'desktop' || mode.value === 'native') {
       return common && uploadedFile.value
     }
     if (mode.value === 'html') {
@@ -1930,7 +1950,7 @@ export const useAppState = () => {
   })
 
   watch(() => mode.value, (value) => {
-    if (value !== 'convert' && value !== 'web' && value !== 'html' && quickGenerate.value) {
+    if (!quickGenerateSupportedModes.has(value) && quickGenerate.value) {
       exitQuickGenerate()
     }
   })
@@ -3332,7 +3352,7 @@ export const useAppState = () => {
     htmlSavedUploadContent.value = ''
     setHtmlEditorContent(defaultHtmlTemplate, false)
 
-    if (mode.value === 'convert' || mode.value === 'desktop') {
+    if (mode.value === 'convert' || mode.value === 'desktop' || mode.value === 'native') {
       uploadedFile.value = { filename: 'project.zip', reused: true, original_name: '使用上一版本的项目文件', size: 0 }
       uploadProgress.value = 100
     } else if (mode.value === 'html') {
@@ -3474,7 +3494,7 @@ export const useAppState = () => {
         }
       }
 
-      const isQuickGenerate = quickGenerate.value && (mode.value === 'convert' || mode.value === 'web' || mode.value === 'html') && !updatingTaskId.value
+      const isQuickGenerate = quickGenerate.value && quickGenerateSupportedModes.has(mode.value) && !updatingTaskId.value
 
     if (updatingTaskId.value) {
         if (compareVersion(config.value.version_name, previousVersionName.value) < 0) {
@@ -3521,7 +3541,7 @@ export const useAppState = () => {
           compliance_ack: Boolean(taskComplianceAck.value),
           web_url: mode.value === 'web' ? normalizedWebUrl : null,
           ad_config: mode.value === 'web' && enableAds.value ? adConfig.value : null,
-          filename: (mode.value === 'convert' || mode.value === 'desktop') ? uploadedFile.value.filename : null,
+          filename: (mode.value === 'convert' || mode.value === 'desktop' || mode.value === 'native') ? uploadedFile.value.filename : null,
           html_filename: mode.value === 'html' ? htmlFilename : null,
           icon_filename: isQuickGenerate ? null : (uploadedIcon.value?.filename || null),
           keystore_filename: isQuickGenerate ? null : (uploadedKeystore.value?.filename || null),
@@ -3652,7 +3672,7 @@ export const useAppState = () => {
       keystore_password: '',
       key_password: ''
     }
-    if (preserveQuickGenerate && quickGenerate.value && (mode.value === 'convert' || mode.value === 'web' || mode.value === 'html')) {
+    if (preserveQuickGenerate && quickGenerate.value && quickGenerateSupportedModes.has(mode.value)) {
       applyQuickGenerateDefaults()
     }
     currentStep.value = 1
@@ -3865,6 +3885,7 @@ export const useAppState = () => {
       featureFlags.value = {
         web_link_to_apk_enabled: Boolean(result?.web_link_to_apk_enabled),
         zip_to_desktop_enabled: Boolean(result?.zip_to_desktop_enabled),
+        native_android_packaging_enabled: Boolean(result?.native_android_packaging_enabled),
         rewarded_build_ads_enabled: Boolean(result?.rewarded_build_ads_enabled),
         donation_popup_probability: normalizeDonationPopupProbability(result?.donation_popup_probability),
         donation_popup_message: String(result?.donation_popup_message || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n'),
@@ -3876,6 +3897,7 @@ export const useAppState = () => {
       featureFlags.value = {
         web_link_to_apk_enabled: false,
         zip_to_desktop_enabled: false,
+        native_android_packaging_enabled: false,
         rewarded_build_ads_enabled: false,
         donation_popup_probability: 10,
         donation_popup_message: '',
@@ -3888,6 +3910,9 @@ export const useAppState = () => {
       mode.value = 'convert'
     }
     if (!isDesktopModeEnabled.value && mode.value === 'desktop') {
+      mode.value = 'convert'
+    }
+    if (!isNativeModeEnabled.value && mode.value === 'native') {
       mode.value = 'convert'
     }
     await fetchBuildQuotaContext()
@@ -4233,6 +4258,7 @@ export const useAppState = () => {
     mode,
     isWebModeEnabled,
     isDesktopModeEnabled,
+    isNativeModeEnabled,
     isRewardedBuildAdsEnabled,
     buildQuotaContext,
     buildCodeInput,
@@ -4269,6 +4295,7 @@ export const useAppState = () => {
     handleMobileSwipeEnd,
     handleMobileSwipeCancel,
     scrollToProjectSection,
+    openFirstTaskGuide,
     handleModeChange,
     jsTemplate,
     copyJsCode,

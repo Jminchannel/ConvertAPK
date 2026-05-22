@@ -269,6 +269,7 @@ def fetch_feature_flags(client_id: str = "", force: bool = False) -> Dict[str, A
     result = {
         "web_link_to_apk_enabled": False,
         "zip_to_desktop_enabled": False,
+        "native_android_packaging_enabled": False,
         "rewarded_build_ads_enabled": False,
         "donation_popup_probability": _DONATION_POPUP_PROBABILITY_DEFAULT,
         "donation_popup_message": "",
@@ -355,6 +356,7 @@ def fetch_feature_flags(client_id: str = "", force: bool = False) -> Dict[str, A
     if isinstance(data, dict):
         result["web_link_to_apk_enabled"] = bool(data.get("web_link_to_apk_enabled"))
         result["zip_to_desktop_enabled"] = bool(data.get("zip_to_desktop_enabled"))
+        result["native_android_packaging_enabled"] = bool(data.get("native_android_packaging_enabled"))
         result["rewarded_build_ads_enabled"] = bool(data.get("rewarded_build_ads_enabled"))
         if "donation_popup_probability" in data:
             result["donation_popup_probability"] = _normalize_donation_popup_probability(
