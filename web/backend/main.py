@@ -3860,6 +3860,30 @@ def _extract_android_string_resource(strings_text: str, resource_name: str) -> s
     return _clean_native_android_app_name(match.group("value") if match else "")
 
 
+def _clean_native_android_package_name(value: str | None) -> str:
+    package_name = html.unescape(str(value or "")).strip()
+    if re.fullmatch(r"[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+", package_name):
+        return package_name
+    return ""
+
+
+def _extract_gradle_string_property(gradle_text: str, property_name: str) -> str:
+    property_pattern = re.escape(str(property_name or "").strip())
+    if not property_pattern:
+        return ""
+    text_without_line_comments = re.sub(r"(?m)//.*$", "", gradle_text)
+    pattern = rf"(?<![A-Za-z0-9_]){property_pattern}\s*(?:=|\s)\s*(['\"])(?P<value>[^'\"]+)\1"
+    match = re.search(pattern, text_without_line_comments)
+    return _clean_native_android_package_name(match.group("value") if match else "")
+
+
+def _extract_android_manifest_package_name(manifest_text: str) -> str:
+    manifest_match = re.search(r"<manifest\b(?P<attrs>[\s\S]*?)>", manifest_text, flags=re.IGNORECASE)
+    attr_text = manifest_match.group("attrs") if manifest_match else manifest_text
+    package_match = re.search(r"\bpackage\s*=\s*(['\"])(?P<package>.*?)\1", attr_text, flags=re.IGNORECASE)
+    return _clean_native_android_package_name(package_match.group("package") if package_match else "")
+
+
 def _resolve_native_android_app_name(zip_path: Path) -> str:
     try:
         with zipfile.ZipFile(zip_path, "r") as archive:
@@ -3896,6 +3920,41 @@ def _resolve_native_android_app_name(zip_path: Path) -> str:
                 return ""
             strings_text = _decode_zip_text(archive.read(strings_info))
             return _extract_android_string_resource(strings_text, resource_match.group("name"))
+    except (zipfile.BadZipFile, KeyError, OSError):
+        return ""
+
+
+def _resolve_native_android_package_name(zip_path: Path) -> str:
+    try:
+        with zipfile.ZipFile(zip_path, "r") as archive:
+            entry_map: dict[tuple[str, ...], zipfile.ZipInfo] = {}
+            native_entries: list[tuple[str, ...]] = []
+            for info, parts in _iter_zip_entries(archive):
+                lower_parts = tuple(part.lower() for part in parts)
+                if any(part in {"node_modules", ".git", "__macosx"} for part in lower_parts):
+                    continue
+                entry_map[lower_parts] = info
+                native_entries.append(lower_parts)
+
+            root = _find_native_android_project_root(native_entries)
+            if root is None:
+                return ""
+
+            for gradle_name in ("build.gradle.kts", "build.gradle"):
+                gradle_info = entry_map.get((*root, "app", gradle_name))
+                if not gradle_info:
+                    continue
+                gradle_text = _decode_zip_text(archive.read(gradle_info))
+                for property_name in ("applicationId", "namespace"):
+                    package_name = _extract_gradle_string_property(gradle_text, property_name)
+                    if package_name:
+                        return package_name
+
+            manifest_info = entry_map.get((*root, "app", "src", "main", "androidmanifest.xml"))
+            if not manifest_info:
+                return ""
+            manifest_text = _decode_zip_text(archive.read(manifest_info))
+            return _extract_android_manifest_package_name(manifest_text)
     except (zipfile.BadZipFile, KeyError, OSError):
         return ""
 
@@ -5797,6 +5856,7 @@ async def create_task(task_data: BuildTaskCreate):
 
     effective_config = task_data.config
     native_source_app_name = ""
+    native_source_package_name = ""
     
     # 移动 ZIP 文件到任务目录，并按内容识别实际构建模式
     if mode in {"convert", "desktop", "native"}:
@@ -5821,6 +5881,7 @@ async def create_task(task_data: BuildTaskCreate):
                 raise HTTPException(status_code=403, detail="native android mode is disabled by admin")
             mode = "native"
             native_source_app_name = _resolve_native_android_app_name(src_zip)
+            native_source_package_name = _resolve_native_android_package_name(src_zip)
         if detected_mode == "invalid":
             raise HTTPException(
                 status_code=400,
@@ -5879,9 +5940,14 @@ async def create_task(task_data: BuildTaskCreate):
             if native_quick_generate
             else QUICK_GENERATE_APP_NAME
         )
+        quick_package_name = (
+            (native_source_package_name or QUICK_GENERATE_PACKAGE_NAME)
+            if native_quick_generate
+            else QUICK_GENERATE_PACKAGE_NAME
+        )
         effective_config = AppConfig(
             app_name=quick_app_name,
-            package_name=QUICK_GENERATE_PACKAGE_NAME,
+            package_name=quick_package_name,
             version_name=version_name,
             version_code=version_code,
             output_format="apk",
