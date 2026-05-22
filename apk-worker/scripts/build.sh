@@ -4159,6 +4159,41 @@ if [ "$TASK_MODE" = "native" ] && [ -f "$INPUT_DIR/logo.png" ]; then
     fi
 fi
 
+if [ "$TASK_MODE" = "native" ] && [ -f "$GRADLE_FILE" ]; then
+    GRADLE_FILE_FOR_PATCH="$GRADLE_FILE" KEY_ALIAS_FOR_PATCH="$KEY_ALIAS" node <<'NODE'
+const fs = require('fs');
+
+const filePath = process.env.GRADLE_FILE_FOR_PATCH;
+const keyAlias = process.env.KEY_ALIAS_FOR_PATCH || 'key0';
+if (filePath && fs.existsSync(filePath)) {
+  const quote = (value) => String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  let source = fs.readFileSync(filePath, 'utf8');
+  const original = source;
+
+  if (filePath.endsWith('.kts')) {
+    source = source.replace(/storeFile\s*=\s*file\([^\n]*\)/g, 'storeFile = file(System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks")');
+    source = source.replace(/storePassword\s*=\s*("[^"]*"|System\.getenv\("[^"]+"\))/g, 'storePassword = System.getenv("STORE_PASSWORD")');
+    source = source.replace(/keyAlias\s*=\s*"[^"]*"/g, `keyAlias = System.getenv("KEY_ALIAS") ?: "${quote(keyAlias)}"`);
+    source = source.replace(/keyPassword\s*=\s*("[^"]*"|System\.getenv\("[^"]+"\))/g, 'keyPassword = System.getenv("KEY_PASSWORD")');
+  } else {
+    source = source.replace(/storeFile\s+(file\([^\n]*\))/g, 'storeFile file(System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks")');
+    source = source.replace(/storeFile\s*=\s*(file\([^\n]*\))/g, 'storeFile = file(System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks")');
+    source = source.replace(/storePassword\s+("[^"]*"|System\.getenv\("[^"]+"\))/g, 'storePassword System.getenv("STORE_PASSWORD")');
+    source = source.replace(/storePassword\s*=\s*("[^"]*"|System\.getenv\("[^"]+"\))/g, 'storePassword = System.getenv("STORE_PASSWORD")');
+    source = source.replace(/keyAlias\s+"[^"]*"/g, `keyAlias System.getenv("KEY_ALIAS") ?: "${quote(keyAlias)}"`);
+    source = source.replace(/keyAlias\s*=\s*"[^"]*"/g, `keyAlias = System.getenv("KEY_ALIAS") ?: "${quote(keyAlias)}"`);
+    source = source.replace(/keyPassword\s+("[^"]*"|System\.getenv\("[^"]+"\))/g, 'keyPassword System.getenv("KEY_PASSWORD")');
+    source = source.replace(/keyPassword\s*=\s*("[^"]*"|System\.getenv\("[^"]+"\))/g, 'keyPassword = System.getenv("KEY_PASSWORD")');
+  }
+
+  if (source !== original) {
+    fs.writeFileSync(filePath, source);
+    console.log(`[NativeSigningPatch] patched: ${filePath}`);
+  }
+}
+NODE
+fi
+
 log_success "Android 项目配置完成"
 
 # ============================================
@@ -4174,6 +4209,42 @@ if [ "$OUTPUT_FORMAT" = "aab" ]; then
     log_info "Step 7: 构建 Release AAB..."
 else
     log_info "Step 7: 构建 Release APK..."
+fi
+
+KEYSTORE_FILE="$KEYSTORE_DIR/release.keystore"
+
+ensure_native_gradle_signing_keystore() {
+    if [ "$KEYSTORE_REUSED" = "true" ]; then
+        if [ ! -f "$KEYSTORE_FILE" ]; then
+            log_error "复用签名模式下密钥库文件不存在，无法执行原生 Gradle 签名"
+            exit 1
+        fi
+        return 0
+    fi
+
+    if [ -f "$KEYSTORE_FILE" ]; then
+        return 0
+    fi
+
+    log_info "为原生 Gradle 构建预生成签名密钥..."
+    keytool -genkeypair -v \
+        -keystore "$KEYSTORE_FILE" \
+        -alias "$KEY_ALIAS" \
+        -keyalg RSA \
+        -keysize 2048 \
+        -validity 10000 \
+        -storepass "$KEYSTORE_PASSWORD" \
+        -keypass "$KEY_PASSWORD" \
+        -dname "CN=APK Builder, OU=Dev, O=Company, L=City, ST=State, C=CN"
+    check_error "原生 Gradle 签名密钥生成失败"
+}
+
+if [ "$TASK_MODE" = "native" ]; then
+    ensure_native_gradle_signing_keystore
+    export KEYSTORE_PATH="$KEYSTORE_FILE"
+    export STORE_PASSWORD="$KEYSTORE_PASSWORD"
+    export KEY_PASSWORD="$KEY_PASSWORD"
+    export KEY_ALIAS="$KEY_ALIAS"
 fi
 
 ANDROID_BUILD_DIR="$PROJECT_ROOT/$ANDROID_DIR"
@@ -4293,8 +4364,6 @@ cd "$PROJECT_ROOT"
 # 步骤 8: 生成/使用密钥库
 # ============================================
 log_info "Step 8: 准备签名密钥..."
-
-KEYSTORE_FILE="$KEYSTORE_DIR/release.keystore"
 
 # 定义生成新keystore的函数
 generate_keystore() {
