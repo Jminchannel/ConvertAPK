@@ -25,6 +25,7 @@ import urllib.request
 import urllib.error
 import urllib.parse
 import zipfile
+import html
 import hashlib
 import secrets
 from redis import Redis
@@ -3794,6 +3795,10 @@ def _iter_zip_entries(zip_file: zipfile.ZipFile):
 
 
 def _has_native_android_project_entries(entries: list[tuple[str, ...]]) -> bool:
+    return _find_native_android_project_root(entries) is not None
+
+
+def _find_native_android_project_root(entries: list[tuple[str, ...]]) -> tuple[str, ...] | None:
     entry_set = set(entries)
     candidate_roots = {
         parts[:-1]
@@ -3815,8 +3820,84 @@ def _has_native_android_project_entries(entries: list[tuple[str, ...]]) -> bool:
                 (*root, module, "build.gradle") in entry_set
                 or (*root, module, "build.gradle.kts") in entry_set
             ):
-                return True
-    return False
+                return root
+    return None
+
+
+def _decode_zip_text(data: bytes) -> str:
+    for encoding in ("utf-8-sig", "utf-8", "gb18030"):
+        try:
+            return data.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return data.decode("utf-8", errors="ignore")
+
+
+def _clean_native_android_app_name(value: str | None) -> str:
+    text = html.unescape(str(value or ""))
+    text = re.sub(r"<[^>]+>", "", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    if not text or text.startswith("@") or text.startswith("?"):
+        return ""
+    return text[:80]
+
+
+def _extract_android_label_value(manifest_text: str) -> str:
+    application_match = re.search(r"<application\b(?P<attrs>[\s\S]*?)>", manifest_text, flags=re.IGNORECASE)
+    attr_text = application_match.group("attrs") if application_match else manifest_text
+    label_match = re.search(r"\bandroid:label\s*=\s*(['\"])(?P<label>.*?)\1", attr_text, flags=re.IGNORECASE)
+    if not label_match and application_match:
+        label_match = re.search(r"\bandroid:label\s*=\s*(['\"])(?P<label>.*?)\1", manifest_text, flags=re.IGNORECASE)
+    return str(label_match.group("label") if label_match else "").strip()
+
+
+def _extract_android_string_resource(strings_text: str, resource_name: str) -> str:
+    name_pattern = re.escape(str(resource_name or "").strip())
+    if not name_pattern:
+        return ""
+    pattern = rf"<string\b(?=[^>]*\bname\s*=\s*(['\"]){name_pattern}\1)[^>]*>(?P<value>[\s\S]*?)</string>"
+    match = re.search(pattern, strings_text, flags=re.IGNORECASE)
+    return _clean_native_android_app_name(match.group("value") if match else "")
+
+
+def _resolve_native_android_app_name(zip_path: Path) -> str:
+    try:
+        with zipfile.ZipFile(zip_path, "r") as archive:
+            entry_map: dict[tuple[str, ...], zipfile.ZipInfo] = {}
+            native_entries: list[tuple[str, ...]] = []
+            for info, parts in _iter_zip_entries(archive):
+                lower_parts = tuple(part.lower() for part in parts)
+                if any(part in {"node_modules", ".git", "__macosx"} for part in lower_parts):
+                    continue
+                entry_map[lower_parts] = info
+                native_entries.append(lower_parts)
+
+            root = _find_native_android_project_root(native_entries)
+            if root is None:
+                return ""
+
+            manifest_key = (*root, "app", "src", "main", "androidmanifest.xml")
+            manifest_info = entry_map.get(manifest_key)
+            if not manifest_info:
+                return ""
+            manifest_text = _decode_zip_text(archive.read(manifest_info))
+            label_value = _extract_android_label_value(manifest_text)
+            literal_label = _clean_native_android_app_name(label_value)
+            if literal_label:
+                return literal_label
+
+            resource_match = re.match(r"^@string/(?P<name>[A-Za-z0-9_.]+)$", label_value)
+            if not resource_match:
+                return ""
+
+            strings_key = (*root, "app", "src", "main", "res", "values", "strings.xml")
+            strings_info = entry_map.get(strings_key)
+            if not strings_info:
+                return ""
+            strings_text = _decode_zip_text(archive.read(strings_info))
+            return _extract_android_string_resource(strings_text, resource_match.group("name"))
+    except (zipfile.BadZipFile, KeyError, OSError):
+        return ""
 
 
 def _detect_zip_build_mode(zip_path: Path) -> tuple[str, str | None]:
@@ -5715,6 +5796,7 @@ async def create_task(task_data: BuildTaskCreate):
     task_keystore_dir.mkdir(parents=True, exist_ok=True)
 
     effective_config = task_data.config
+    native_source_app_name = ""
     
     # 移动 ZIP 文件到任务目录，并按内容识别实际构建模式
     if mode in {"convert", "desktop", "native"}:
@@ -5738,6 +5820,7 @@ async def create_task(task_data: BuildTaskCreate):
             if not _is_native_android_mode_enabled(client_id):
                 raise HTTPException(status_code=403, detail="native android mode is disabled by admin")
             mode = "native"
+            native_source_app_name = _resolve_native_android_app_name(src_zip)
         if detected_mode == "invalid":
             raise HTTPException(
                 status_code=400,
@@ -5788,10 +5871,16 @@ async def create_task(task_data: BuildTaskCreate):
         cdn_localize_preprocessed = bool(preprocess_result.get("preprocessed"))
         cdn_localize_log_lines = [str(item) for item in preprocess_result.get("log_lines", []) if str(item).strip()]
 
+    native_quick_generate = quick_generate and mode == "native"
     if quick_generate:
         version_name, version_code = _alloc_quick_generate_versions()
+        quick_app_name = (
+            (native_source_app_name or "native-app")
+            if native_quick_generate
+            else QUICK_GENERATE_APP_NAME
+        )
         effective_config = AppConfig(
-            app_name=QUICK_GENERATE_APP_NAME,
+            app_name=quick_app_name,
             package_name=QUICK_GENERATE_PACKAGE_NAME,
             version_name=version_name,
             version_code=version_code,
@@ -5809,7 +5898,7 @@ async def create_task(task_data: BuildTaskCreate):
     
     # 移动图标文件到任务目录（如果有）
     icon_in_task = None
-    if quick_generate:
+    if quick_generate and not native_quick_generate:
         icon_path = quick_icon_path
         dst_icon = task_input_dir / "logo.png"
         if icon_path and icon_path.exists():
