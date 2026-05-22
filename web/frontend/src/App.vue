@@ -196,10 +196,6 @@
             <span class="mode-icon">&#x1F5A5;</span>
             {{ t('mode.desktop') }}
           </button>
-          <button v-if="isNativeModeEnabled" class="mode-tab" :class="{ active: mode === 'native' }" @click="handleModeChange('native')">
-            <span class="mode-icon">A</span>
-            {{ t('mode.native') }}
-          </button>
           <button class="mode-tab" :class="{ active: mode === 'html' }" @click="handleModeChange('html')">
             <span class="mode-icon">&lt;/&gt;</span>
             {{ t('mode.html') }}
@@ -317,13 +313,13 @@
               </div>
             </div>
 
-            <!-- ZIP 上传（项目、桌面、原生 Android） -->
-            <div class="card upload-card" v-if="mode === 'convert' || mode === 'desktop' || mode === 'native'" ref="convertUploadSection">
+            <!-- ZIP 上传（项目与桌面；原生 Android 由项目入口自动识别） -->
+            <div class="card upload-card" v-if="mode === 'convert' || mode === 'desktop'" ref="convertUploadSection">
               <div class="card-header">
                 <div class="card-icon">↑</div>
                 <div>
-                  <div class="card-title">{{ mode === 'desktop' ? t('upload.desktopTitle') : (mode === 'native' ? t('upload.nativeTitle') : t('upload.title')) }}</div>
-                  <div class="card-subtitle">{{ mode === 'desktop' ? t('upload.desktopSubtitle') : (mode === 'native' ? t('upload.nativeSubtitle') : t('upload.subtitle')) }}</div>
+                  <div class="card-title">{{ mode === 'desktop' ? t('upload.desktopTitle') : t('upload.title') }}</div>
+                  <div class="card-subtitle">{{ mode === 'desktop' ? t('upload.desktopSubtitle') : t('upload.subtitle') }}</div>
                 </div>
               </div>
 
@@ -344,8 +340,8 @@
 
                 <template v-if="!uploadedFile">
                   <div class="upload-icon">↑</div>
-                  <div class="upload-text">{{ mode === 'desktop' ? t('upload.desktopDragDrop') : (mode === 'native' ? t('upload.nativeDragDrop') : t('upload.dragDrop')) }}</div>
-                  <div class="upload-hint">{{ mode === 'desktop' ? t('upload.desktopHint') : (mode === 'native' ? t('upload.nativeHint') : t('upload.hint')) }}</div>
+                  <div class="upload-text">{{ mode === 'desktop' ? t('upload.desktopDragDrop') : t('upload.dragDrop') }}</div>
+                  <div class="upload-hint">{{ mode === 'desktop' ? t('upload.desktopHint') : t('upload.hint') }}</div>
                 </template>
                 <template v-else>
                   <div class="upload-icon">✓</div>
@@ -567,7 +563,7 @@
                 </div>
                 <div class="card-header-actions">
                   <div
-                    v-if="mode === 'convert' || mode === 'web' || mode === 'html' || mode === 'native'"
+                    v-if="mode === 'convert' || mode === 'web' || mode === 'html'"
                     class="quickgen-switch"
                     :class="{ disabled: updatingTaskId }"
                     :title="t('config.quickGenerateHint')"

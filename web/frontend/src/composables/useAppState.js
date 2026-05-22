@@ -125,7 +125,7 @@ export const useAppState = () => {
   }
 
   // 模式与功能开关状态
-  const mode = ref('convert') // convert | web | html | desktop | native
+  const mode = ref('convert') // convert | web | html | desktop；原生 Android 由后端自动识别
   const featureFlags = ref({
     web_link_to_apk_enabled: false,
     zip_to_desktop_enabled: false,
@@ -153,7 +153,6 @@ export const useAppState = () => {
   const buildCodeRedeeming = ref(false)
   const isWebModeEnabled = computed(() => Boolean(featureFlags.value.web_link_to_apk_enabled))
   const isDesktopModeEnabled = computed(() => Boolean(featureFlags.value.zip_to_desktop_enabled))
-  const isNativeModeEnabled = computed(() => Boolean(featureFlags.value.native_android_packaging_enabled))
   const isRewardedBuildAdsEnabled = computed(() => Boolean(featureFlags.value.rewarded_build_ads_enabled))
   const isClientLoginEnabled = computed(() => featureFlags.value.client_login_enabled !== false)
   const isClientSmsLoginEnabled = computed(() => featureFlags.value.client_sms_login_enabled === true)
@@ -212,7 +211,7 @@ export const useAppState = () => {
   const useCustomKeystore = ref(false)
   const quickGenerate = ref(false)
   const quickGenerateStash = ref(null)
-  const quickGenerateSupportedModes = new Set(['convert', 'web', 'html', 'native'])
+  const quickGenerateSupportedModes = new Set(['convert', 'web', 'html'])
   const codeCopied = ref(false)
   const mobileTab = ref('build') // build | tasks | profile
   const isMobileShell = ref(false)
@@ -411,7 +410,7 @@ export const useAppState = () => {
   }
 
   const getProjectEntrySection = () => {
-    if (mode.value === 'convert' || mode.value === 'desktop' || mode.value === 'native') return convertUploadSection.value
+    if (mode.value === 'convert' || mode.value === 'desktop') return convertUploadSection.value
     if (mode.value === 'html') return htmlUploadSection.value
     return webUrlSection.value
   }
@@ -546,11 +545,7 @@ export const useAppState = () => {
       showToast(t('toast.desktopModeDisabled'), 'error')
       return
     }
-    if (value === 'native' && !isNativeModeEnabled.value) {
-      showToast(t('toast.nativeModeDisabled'), 'error')
-      return
-    }
-    mode.value = value
+    mode.value = value === 'native' ? 'convert' : value
     if (isMobileShell.value) {
       const previousTab = mobileTab.value
       mobileTab.value = 'build'
@@ -1288,6 +1283,9 @@ export const useAppState = () => {
     ) {
       return '构建参数校验失败，请检查包名、版本号和端口配置'
     }
+    if (detail.includes('native android mode is disabled')) {
+      return '原生 Android 打包功能已关闭，请联系管理员开启'
+    }
     if (detail.includes('request failed with status code 413')) {
       return '上传文件过大，请压缩后重试'
     }
@@ -1932,7 +1930,7 @@ export const useAppState = () => {
       complianceReady &&
       hasIcon
 
-    if (mode.value === 'convert' || mode.value === 'desktop' || mode.value === 'native') {
+    if (mode.value === 'convert' || mode.value === 'desktop') {
       return common && uploadedFile.value
     }
     if (mode.value === 'html') {
@@ -3272,6 +3270,9 @@ export const useAppState = () => {
     } else if (taskMode === 'desktop' && !isDesktopModeEnabled.value) {
       mode.value = 'convert'
       webUrl.value = ''
+    } else if (taskMode === 'native') {
+      mode.value = 'convert'
+      webUrl.value = ''
     } else {
       mode.value = taskMode
       webUrl.value = task.web_url || ''
@@ -3352,7 +3353,7 @@ export const useAppState = () => {
     htmlSavedUploadContent.value = ''
     setHtmlEditorContent(defaultHtmlTemplate, false)
 
-    if (mode.value === 'convert' || mode.value === 'desktop' || mode.value === 'native') {
+    if (mode.value === 'convert' || mode.value === 'desktop') {
       uploadedFile.value = { filename: 'project.zip', reused: true, original_name: '使用上一版本的项目文件', size: 0 }
       uploadProgress.value = 100
     } else if (mode.value === 'html') {
@@ -3541,7 +3542,7 @@ export const useAppState = () => {
           compliance_ack: Boolean(taskComplianceAck.value),
           web_url: mode.value === 'web' ? normalizedWebUrl : null,
           ad_config: mode.value === 'web' && enableAds.value ? adConfig.value : null,
-          filename: (mode.value === 'convert' || mode.value === 'desktop' || mode.value === 'native') ? uploadedFile.value.filename : null,
+          filename: (mode.value === 'convert' || mode.value === 'desktop') ? uploadedFile.value.filename : null,
           html_filename: mode.value === 'html' ? htmlFilename : null,
           icon_filename: isQuickGenerate ? null : (uploadedIcon.value?.filename || null),
           keystore_filename: isQuickGenerate ? null : (uploadedKeystore.value?.filename || null),
@@ -3912,7 +3913,7 @@ export const useAppState = () => {
     if (!isDesktopModeEnabled.value && mode.value === 'desktop') {
       mode.value = 'convert'
     }
-    if (!isNativeModeEnabled.value && mode.value === 'native') {
+    if (mode.value === 'native') {
       mode.value = 'convert'
     }
     await fetchBuildQuotaContext()
@@ -4258,7 +4259,6 @@ export const useAppState = () => {
     mode,
     isWebModeEnabled,
     isDesktopModeEnabled,
-    isNativeModeEnabled,
     isRewardedBuildAdsEnabled,
     buildQuotaContext,
     buildCodeInput,

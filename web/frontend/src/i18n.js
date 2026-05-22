@@ -1794,3 +1794,21 @@ messages['zh-TW'].toast.riskReviewPending = '偵測到高風險任務，需管�
 messages['zh-TW'].toast.riskReviewRejected = '此任務已被風控審核駁回，請聯繫管理員放行'
 messages['zh-TW'].toast.aiRiskReviewing = '正在進行 AI 風控審核，請稍候'
 messages['zh-TW'].toast.riskReviewPendingWithReason = '偵測到高風險任務：{reason}，待管理員審核後才能啟動建構'
+
+messages.en.mode.apk = 'Project / Native ZIP to APK'
+messages.en.upload.title = 'Project or Native Android ZIP'
+messages.en.upload.subtitle = 'Upload a web project ZIP, static HTML package, or native Android Gradle project'
+messages.en.upload.dragDrop = 'Drag & drop project ZIP here, or click to select'
+messages.en.upload.hint = 'Auto-detects package.json, index.html, and native Android Gradle projects'
+
+messages['zh-CN'].mode.apk = '项目/原生 ZIP 转 APK'
+messages['zh-CN'].upload.title = '项目或原生 Android ZIP'
+messages['zh-CN'].upload.subtitle = '上传 Web 项目 ZIP、静态 HTML 包或原生 Android Gradle 工程'
+messages['zh-CN'].upload.dragDrop = '拖放项目 ZIP 到此处，或点击选择'
+messages['zh-CN'].upload.hint = '自动识别 package.json、index.html 与原生 Android Gradle 工程'
+
+messages['zh-TW'].mode.apk = '專案/原生 ZIP 轉 APK'
+messages['zh-TW'].upload.title = '專案或原生 Android ZIP'
+messages['zh-TW'].upload.subtitle = '上傳 Web 專案 ZIP、靜態 HTML 包或原生 Android Gradle 專案'
+messages['zh-TW'].upload.dragDrop = '拖放專案 ZIP 到此處，或點擊選擇'
+messages['zh-TW'].upload.hint = '自動識別 package.json、index.html 與原生 Android Gradle 專案'

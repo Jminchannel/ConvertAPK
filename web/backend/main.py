@@ -5548,6 +5548,9 @@ async def scan_external_links(payload: dict = Body(...)):
         zip_path = _resolve_upload_file(filename)
         if not zip_path.exists():
             raise HTTPException(status_code=404, detail="uploaded zip file not found")
+        detected_mode, _ = _detect_zip_build_mode(zip_path)
+        if detected_mode == "native":
+            return {"mode": "native", "count": 0, "items": []}
         items = _scan_external_links_in_zip(zip_path)
         return {"mode": "convert", "count": len(items), "items": items}
 
@@ -5713,7 +5716,7 @@ async def create_task(task_data: BuildTaskCreate):
 
     effective_config = task_data.config
     
-    # 移动ZIP文件到任务目录（仅 convert 模式）
+    # 移动 ZIP 文件到任务目录，并按内容识别实际构建模式
     if mode in {"convert", "desktop", "native"}:
         if not task_data.filename:
             raise HTTPException(status_code=400, detail="filename is required for zip-based mode")
@@ -5724,13 +5727,17 @@ async def create_task(task_data: BuildTaskCreate):
         if mode == "native" and detected_mode != "native":
             raise HTTPException(
                 status_code=400,
-                detail="原生 Android 模式需要上传完整 Gradle 工程 ZIP：包含 settings.gradle、gradlew/gradlew.bat 和 app/src/main/AndroidManifest.xml",
+                detail="原生 Android 模式需要上传完整 Gradle 工程 ZIP：包含 settings.gradle、app/build.gradle 和 app/src/main/AndroidManifest.xml",
             )
-        if mode in {"convert", "desktop"} and detected_mode == "native":
-            raise HTTPException(
-                status_code=400,
-                detail="检测到原生 Android 工程，请切换到“原生安卓打包”模式后再上传",
-            )
+        if detected_mode == "native":
+            if mode == "desktop":
+                raise HTTPException(
+                    status_code=400,
+                    detail="检测到原生 Android 工程，请在“项目转 APK”入口上传",
+                )
+            if not _is_native_android_mode_enabled(client_id):
+                raise HTTPException(status_code=403, detail="native android mode is disabled by admin")
+            mode = "native"
         if detected_mode == "invalid":
             raise HTTPException(
                 status_code=400,
@@ -6763,24 +6770,28 @@ async def update_task(task_id: str, update_data: UpdateTaskRequest):
             if f.is_file():
                 f.unlink()
     
-    # 如果有新的ZIP文件，替换旧的（convert 模式）
+    # 如果有新的 ZIP 文件，替换旧文件并按内容调整内部构建模式
     if update_data.filename:
         src_zip = BACKEND_UPLOAD_DIR / update_data.filename
         if src_zip.exists():
+            detected_mode, _ = _detect_zip_build_mode(src_zip)
             if task.mode == "native":
-                detected_mode, _ = _detect_zip_build_mode(src_zip)
                 if detected_mode != "native":
                     raise HTTPException(
                         status_code=400,
-                        detail="原生 Android 模式需要上传完整 Gradle 工程 ZIP：包含 settings.gradle、gradlew/gradlew.bat 和 app/src/main/AndroidManifest.xml",
+                        detail="原生 Android 模式需要上传完整 Gradle 工程 ZIP：包含 settings.gradle、app/build.gradle 和 app/src/main/AndroidManifest.xml",
                     )
-            elif task.mode in {"convert", "desktop"}:
-                detected_mode, _ = _detect_zip_build_mode(src_zip)
+            elif task.mode == "desktop":
                 if detected_mode == "native":
                     raise HTTPException(
                         status_code=400,
-                        detail="检测到原生 Android 工程，请切换到“原生安卓打包”模式后再上传",
+                        detail="检测到原生 Android 工程，请在“项目转 APK”入口上传",
                     )
+            elif task.mode == "convert" and detected_mode == "native":
+                if not _is_native_android_mode_enabled(client_id):
+                    raise HTTPException(status_code=403, detail="native android mode is disabled by admin")
+                task.mode = "native"
+                task.html_filename = None
             dst_zip = _store_task_asset(task_id, task_input_dir, "project.zip", src_zip, move=True)
             if task.mode == "html":
                 index_entry = _pick_zip_index_entry(dst_zip)
