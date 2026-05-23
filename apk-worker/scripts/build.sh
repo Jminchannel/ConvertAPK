@@ -4252,6 +4252,149 @@ if [ -f "$GRADLE_FILE" ]; then
     log_info "已更新版本号信息"
 fi
 
+if [ "$TASK_MODE" = "native" ] && [ -f "$GRADLE_FILE" ]; then
+    GRADLE_FILE_FOR_IDENTITY="$GRADLE_FILE" \
+    APP_DIR_FOR_IDENTITY="$ANDROID_DIR/app" \
+    APP_NAME_FOR_IDENTITY="$APP_NAME" \
+    PACKAGE_NAME_FOR_IDENTITY="$PACKAGE_NAME" \
+    VERSION_NAME_FOR_IDENTITY="$VERSION_NAME" \
+    VERSION_CODE_FOR_IDENTITY="$VERSION_CODE" \
+    node <<'NODE'
+const fs = require('fs');
+const path = require('path');
+
+const gradleFile = process.env.GRADLE_FILE_FOR_IDENTITY;
+const appDir = process.env.APP_DIR_FOR_IDENTITY;
+const appName = String(process.env.APP_NAME_FOR_IDENTITY || '').trim();
+const packageName = String(process.env.PACKAGE_NAME_FOR_IDENTITY || '').trim();
+const versionName = String(process.env.VERSION_NAME_FOR_IDENTITY || '1.0.0').trim() || '1.0.0';
+const versionCodeRaw = String(process.env.VERSION_CODE_FOR_IDENTITY || '1').trim();
+const versionCode = /^\d+$/.test(versionCodeRaw) ? versionCodeRaw : '1';
+
+function escapeRegex(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function escapeXml(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function escapeXmlAttr(value) {
+  return escapeXml(value).replace(/"/g, '&quot;');
+}
+
+function patchOrInsert(source, patterns, replacement) {
+  for (const pattern of patterns) {
+    if (pattern.test(source)) {
+      return source.replace(pattern, replacement);
+    }
+  }
+  if (/defaultConfig\s*\{/.test(source)) {
+    return source.replace(/defaultConfig\s*\{/, (match) => `${match}\n        ${replacement}`);
+  }
+  return source;
+}
+
+function ensureStringValue(stringsFile, key, value) {
+  fs.mkdirSync(path.dirname(stringsFile), { recursive: true });
+  const escapedValue = escapeXml(value);
+  if (!fs.existsSync(stringsFile)) {
+    fs.writeFileSync(
+      stringsFile,
+      `<?xml version="1.0" encoding="utf-8"?>\n<resources>\n    <string name="${key}">${escapedValue}</string>\n</resources>\n`,
+      'utf8'
+    );
+    return true;
+  }
+  let text = fs.readFileSync(stringsFile, 'utf8');
+  const original = text;
+  const pattern = new RegExp(`(<string\\s+name="${escapeRegex(key)}"[^>]*>)([\\s\\S]*?)(<\\/string>)`);
+  if (pattern.test(text)) {
+    text = text.replace(pattern, (match, openTag, oldValue, closeTag) => `${openTag}${escapedValue}${closeTag}`);
+  } else if (/<\/resources>/.test(text)) {
+    text = text.replace(/<\/resources>/, `    <string name="${key}">${escapedValue}</string>\n</resources>`);
+  } else {
+    text += `\n<string name="${key}">${escapedValue}</string>\n`;
+  }
+  if (text !== original) {
+    fs.writeFileSync(stringsFile, text, 'utf8');
+    return true;
+  }
+  return false;
+}
+
+if (gradleFile && fs.existsSync(gradleFile)) {
+  const isKts = gradleFile.endsWith('.kts');
+  let source = fs.readFileSync(gradleFile, 'utf8');
+  const original = source;
+  if (packageName) {
+    source = patchOrInsert(
+      source,
+      isKts
+        ? [/applicationId\s*=\s*"[^"]*"/, /applicationId\s*\(\s*"[^"]*"\s*\)/]
+        : [/applicationId\s*=\s*"[^"]*"/, /applicationId\s+"[^"]*"/],
+      isKts ? `applicationId = "${packageName}"` : `applicationId "${packageName}"`
+    );
+  }
+  source = patchOrInsert(
+    source,
+    isKts
+      ? [/versionName\s*=\s*"[^"]*"/, /versionName\s*\(\s*"[^"]*"\s*\)/]
+      : [/versionName\s*=\s*"[^"]*"/, /versionName\s+"[^"]*"/],
+    isKts ? `versionName = "${versionName}"` : `versionName "${versionName}"`
+  );
+  source = patchOrInsert(
+    source,
+    isKts
+      ? [/versionCode\s*=\s*\d+/, /versionCode\s*\(\s*\d+\s*\)/]
+      : [/versionCode\s*=\s*\d+/, /versionCode\s+\d+/],
+    isKts ? `versionCode = ${versionCode}` : `versionCode ${versionCode}`
+  );
+  if (source !== original) {
+    fs.writeFileSync(gradleFile, source, 'utf8');
+    console.log('[NativeIdentityPatch] Gradle identity updated');
+  }
+}
+
+if (appName && appDir) {
+  const stringsFile = path.join(appDir, 'src', 'main', 'res', 'values', 'strings.xml');
+  const manifestFile = path.join(appDir, 'src', 'main', 'AndroidManifest.xml');
+  if (fs.existsSync(manifestFile)) {
+    let manifest = fs.readFileSync(manifestFile, 'utf8');
+    const originalManifest = manifest;
+    const appTagMatch = manifest.match(/<application\b[^>]*>/);
+    if (appTagMatch) {
+      const appTag = appTagMatch[0];
+      const labelMatch = appTag.match(/android:label\s*=\s*"([^"]*)"/);
+      if (labelMatch && labelMatch[1].startsWith('@string/')) {
+        ensureStringValue(stringsFile, labelMatch[1].slice('@string/'.length), appName);
+      } else if (labelMatch) {
+        manifest = manifest.replace(
+          /(<application\b[^>]*android:label\s*=\s*")[^"]*(")/,
+          (match, openTag, closeQuote) => `${openTag}${escapeXmlAttr(appName)}${closeQuote}`
+        );
+      } else {
+        ensureStringValue(stringsFile, 'app_name', appName);
+        manifest = manifest.replace(/<application\b/, '<application android:label="@string/app_name"');
+      }
+    } else {
+      ensureStringValue(stringsFile, 'app_name', appName);
+    }
+    if (manifest !== originalManifest) {
+      fs.writeFileSync(manifestFile, manifest, 'utf8');
+    }
+    console.log('[NativeIdentityPatch] app label updated');
+  } else {
+    ensureStringValue(stringsFile, 'app_name', appName);
+    console.log('[NativeIdentityPatch] app label updated');
+  }
+}
+NODE
+fi
+
 if [ "$TASK_MODE" = "native" ] && [ -f "$INPUT_DIR/logo.png" ]; then
     drawable_dir="$ANDROID_DIR/app/src/main/res/drawable"
     if [ -d "$drawable_dir" ]; then

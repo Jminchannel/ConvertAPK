@@ -2877,6 +2877,89 @@ public class LauncherIconForegroundPadder {
         _log(on_log, f"[Android] launcher icon safe padding failed, using original: {exc}")
 
 
+def _escape_android_xml_text(value: str) -> str:
+    return (
+        str(value or "")
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+
+
+def _escape_android_xml_attr(value: str) -> str:
+    return _escape_android_xml_text(value).replace('"', "&quot;")
+
+
+def _ensure_android_string_value(strings_file: Path, key: str, value: str) -> bool:
+    strings_file.parent.mkdir(parents=True, exist_ok=True)
+    escaped_value = _escape_android_xml_text(value)
+    if not strings_file.exists():
+        strings_file.write_text(
+            f'<?xml version="1.0" encoding="utf-8"?>\n<resources>\n    <string name="{key}">{escaped_value}</string>\n</resources>\n',
+            encoding="utf-8",
+        )
+        return True
+
+    text = strings_file.read_text(encoding="utf-8")
+    original = text
+    pattern = rf'(<string\s+name="{re.escape(key)}"[^>]*>)([\s\S]*?)(</string>)'
+    if re.search(pattern, text):
+        text = re.sub(pattern, lambda match: f"{match.group(1)}{escaped_value}{match.group(3)}", text, count=1)
+    elif "</resources>" in text:
+        text = text.replace("</resources>", f'    <string name="{key}">{escaped_value}</string>\n</resources>', 1)
+    else:
+        text = f'{text}\n<string name="{key}">{escaped_value}</string>\n'
+
+    if text != original:
+        strings_file.write_text(text, encoding="utf-8")
+        return True
+    return False
+
+
+def _patch_native_android_app_label(android_app_dir: Path, app_name: str, on_log=None) -> None:
+    app_name = str(app_name or "").strip()
+    if not app_name:
+        return
+
+    strings_file = android_app_dir / "src" / "main" / "res" / "values" / "strings.xml"
+    manifest_file = android_app_dir / "src" / "main" / "AndroidManifest.xml"
+    if not manifest_file.exists():
+        _ensure_android_string_value(strings_file, "app_name", app_name)
+        _log(on_log, "[Android] native project app label updated")
+        return
+
+    manifest_text = manifest_file.read_text(encoding="utf-8")
+    original_manifest = manifest_text
+    app_tag_match = re.search(r"<application\b[^>]*>", manifest_text)
+    if app_tag_match:
+        app_tag = app_tag_match.group(0)
+        label_match = re.search(r'android:label\s*=\s*"([^"]*)"', app_tag)
+        if label_match and label_match.group(1).startswith("@string/"):
+            _ensure_android_string_value(strings_file, label_match.group(1).removeprefix("@string/"), app_name)
+        elif label_match:
+            escaped_attr = _escape_android_xml_attr(app_name)
+            manifest_text = re.sub(
+                r'(<application\b[^>]*android:label\s*=\s*")[^"]*(")',
+                lambda match: f"{match.group(1)}{escaped_attr}{match.group(2)}",
+                manifest_text,
+                count=1,
+            )
+        else:
+            _ensure_android_string_value(strings_file, "app_name", app_name)
+            manifest_text = re.sub(
+                r"<application\b",
+                '<application android:label="@string/app_name"',
+                manifest_text,
+                count=1,
+            )
+    else:
+        _ensure_android_string_value(strings_file, "app_name", app_name)
+
+    if manifest_text != original_manifest:
+        manifest_file.write_text(manifest_text, encoding="utf-8")
+    _log(on_log, "[Android] native project app label updated")
+
+
 def _replace_template_launcher_icon(project_root: Path, logo_path: Path, on_log=None) -> None:
     if not logo_path.exists():
         return
@@ -2989,21 +3072,27 @@ def _patch_native_android_identity(build_gradle: Path, env: Dict[str, str], on_l
     if not version_code.isdigit():
         version_code = "1"
 
+    def patch_or_insert_default_config(source: str, patterns: list[str], replacement: str) -> str:
+        for pattern in patterns:
+            if re.search(pattern, source):
+                return re.sub(pattern, replacement, source, count=1)
+        return re.sub(r"defaultConfig\s*\{", lambda match: f"{match.group(0)}\n        {replacement}", source, count=1)
+
     if is_kts:
         replacements = [
-            (r'(?m)^(\s*)applicationId\s*=\s*"[^"]*"', rf'\1applicationId = "{package_name}"'),
-            (r'(?m)^(\s*)versionName\s*=\s*"[^"]*"', rf'\1versionName = "{version_name}"'),
-            (r'(?m)^(\s*)versionCode\s*=\s*\d+', rf'\1versionCode = {version_code}'),
+            ([r'(?m)^(\s*)applicationId\s*=\s*"[^"]*"', r'(?m)^(\s*)applicationId\s*\(\s*"[^"]*"\s*\)'], f'applicationId = "{package_name}"'),
+            ([r'(?m)^(\s*)versionName\s*=\s*"[^"]*"', r'(?m)^(\s*)versionName\s*\(\s*"[^"]*"\s*\)'], f'versionName = "{version_name}"'),
+            ([r'(?m)^(\s*)versionCode\s*=\s*\d+', r'(?m)^(\s*)versionCode\s*\(\s*\d+\s*\)'], f"versionCode = {version_code}"),
         ]
     else:
         replacements = [
-            (r'(?m)^(\s*)applicationId\s*(?:=|\s)\s*"[^"]*"', rf'\1applicationId "{package_name}"'),
-            (r'(?m)^(\s*)versionName\s*(?:=|\s)\s*"[^"]*"', rf'\1versionName "{version_name}"'),
-            (r'(?m)^(\s*)versionCode\s*(?:=|\s)\s*\d+', rf'\1versionCode {version_code}'),
+            ([r'(?m)^(\s*)applicationId\s*=\s*"[^"]*"', r'(?m)^(\s*)applicationId\s+"[^"]*"'], f'applicationId "{package_name}"'),
+            ([r'(?m)^(\s*)versionName\s*=\s*"[^"]*"', r'(?m)^(\s*)versionName\s+"[^"]*"'], f'versionName "{version_name}"'),
+            ([r'(?m)^(\s*)versionCode\s*=\s*\d+', r'(?m)^(\s*)versionCode\s+\d+'], f"versionCode {version_code}"),
         ]
 
-    for pattern, replacement in replacements:
-        text = re.sub(pattern, replacement, text, count=1)
+    for patterns, replacement in replacements:
+        text = patch_or_insert_default_config(text, patterns, replacement)
 
     if text != original:
         build_gradle.write_text(text, encoding="utf-8")
@@ -3527,15 +3616,7 @@ def run_local_build(
         on_log=on_log,
     )
     if is_native_task:
-        strings_file = android_app_dir / "src" / "main" / "res" / "values" / "strings.xml"
-        if strings_file.exists():
-            strings_text = strings_file.read_text(encoding="utf-8")
-            strings_text = re.sub(
-                r'(<string\s+name="app_name">)(.*?)(</string>)',
-                rf"\1{env.get('APP_NAME', 'MyApp')}\3",
-                strings_text,
-            )
-            strings_file.write_text(strings_text, encoding="utf-8")
+        _patch_native_android_app_label(android_app_dir, env.get("APP_NAME", "MyApp"), on_log=on_log)
         logo = task_input_dir / "logo.png"
         _replace_android_launcher_icon(android_app_dir, logo, on_log=on_log)
     build_gradle_kts = android_app_dir / "build.gradle.kts"
