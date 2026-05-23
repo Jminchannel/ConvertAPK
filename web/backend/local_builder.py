@@ -700,6 +700,7 @@ def _write_gradle_init(task_dir: Path, on_log=None) -> Path:
     mirror_public = os.getenv("CONVERTAPK_GRADLE_MAVEN_PUBLIC", "https://maven.aliyun.com/repository/public").strip()
     mirror_google = os.getenv("CONVERTAPK_GRADLE_MAVEN_GOOGLE", "https://maven.aliyun.com/repository/google").strip()
     mirror_plugin = os.getenv("CONVERTAPK_GRADLE_MAVEN_PLUGIN", "https://maven.aliyun.com/repository/gradle-plugin").strip()
+    mirror_jitpack = os.getenv("CONVERTAPK_GRADLE_MAVEN_JITPACK", "https://jitpack.io").strip()
     script = f"""gradle.settingsEvaluated {{ settings ->
     try {{
         settings.pluginManagement {{
@@ -720,6 +721,7 @@ def _write_gradle_init(task_dir: Path, on_log=None) -> Path:
                 maven {{ url '{mirror_public}' }}
                 maven {{ url '{mirror_google}' }}
                 maven {{ url '{mirror_plugin}' }}
+                maven {{ url '{mirror_jitpack}' }}
                 mavenCentral()
                 google()
             }}
@@ -728,7 +730,7 @@ def _write_gradle_init(task_dir: Path, on_log=None) -> Path:
 }}
 """
     init_script.write_text(script, encoding="utf-8")
-    _log(on_log, f"[Gradle] Using Maven mirrors: {mirror_public}, {mirror_google}, {mirror_plugin}")
+    _log(on_log, f"[Gradle] Using Maven mirrors: {mirror_public}, {mirror_google}, {mirror_plugin}, {mirror_jitpack}")
     return init_script
 
 def _ensure_gradle_properties(android_project_root: Path, on_log=None) -> None:
