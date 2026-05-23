@@ -3,6 +3,7 @@ import hashlib
 import os
 import shutil
 import subprocess
+import tempfile
 import zipfile
 import re
 import sys
@@ -2772,6 +2773,110 @@ def _sync_minimal_download_listener(
             f"[MainActivity] {'enabled' if enable else 'disabled'} minimal download-listener: {main_activity}",
         )
 
+
+def _write_padded_launcher_foreground_icon(logo_path: Path, target_png: Path, on_log=None) -> None:
+    target_png.parent.mkdir(parents=True, exist_ok=True)
+    java_bin = shutil.which("java")
+    javac_bin = shutil.which("javac")
+    if not java_bin or not javac_bin:
+        shutil.copy2(logo_path, target_png)
+        _log(on_log, "[Android] launcher icon safe padding skipped: missing JDK")
+        return
+
+    source = r'''import java.awt.Graphics2D;
+import java.awt.Rectangle;
+import java.awt.RenderingHints;
+import java.awt.image.BufferedImage;
+import java.io.File;
+import javax.imageio.ImageIO;
+
+public class LauncherIconForegroundPadder {
+    private static final int CANVAS_SIZE = 432;
+    private static final int ALPHA_THRESHOLD = 8;
+
+    public static void main(String[] args) throws Exception {
+        BufferedImage source = ImageIO.read(new File(args[0]));
+        if (source == null) {
+            throw new IllegalArgumentException("unsupported image");
+        }
+
+        Rectangle bounds = findVisibleBounds(source);
+        int maxContentSize = Math.round(CANVAS_SIZE * 2f / 3f);
+        double scale = Math.min((double) maxContentSize / bounds.width, (double) maxContentSize / bounds.height);
+        int drawWidth = Math.max(1, (int) Math.round(bounds.width * scale));
+        int drawHeight = Math.max(1, (int) Math.round(bounds.height * scale));
+        int drawX = (CANVAS_SIZE - drawWidth) / 2;
+        int drawY = (CANVAS_SIZE - drawHeight) / 2;
+
+        BufferedImage output = new BufferedImage(CANVAS_SIZE, CANVAS_SIZE, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D graphics = output.createGraphics();
+        graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+        graphics.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+        graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        graphics.drawImage(
+            source,
+            drawX,
+            drawY,
+            drawX + drawWidth,
+            drawY + drawHeight,
+            bounds.x,
+            bounds.y,
+            bounds.x + bounds.width,
+            bounds.y + bounds.height,
+            null
+        );
+        graphics.dispose();
+        ImageIO.write(output, "png", new File(args[1]));
+    }
+
+    private static Rectangle findVisibleBounds(BufferedImage image) {
+        int minX = image.getWidth();
+        int minY = image.getHeight();
+        int maxX = -1;
+        int maxY = -1;
+        for (int y = 0; y < image.getHeight(); y++) {
+            for (int x = 0; x < image.getWidth(); x++) {
+                int alpha = (image.getRGB(x, y) >>> 24) & 0xff;
+                if (alpha <= ALPHA_THRESHOLD) {
+                    continue;
+                }
+                if (x < minX) {
+                    minX = x;
+                }
+                if (x > maxX) {
+                    maxX = x;
+                }
+                if (y < minY) {
+                    minY = y;
+                }
+                if (y > maxY) {
+                    maxY = y;
+                }
+            }
+        }
+        if (maxX < minX || maxY < minY) {
+            return new Rectangle(0, 0, image.getWidth(), image.getHeight());
+        }
+        return new Rectangle(minX, minY, maxX - minX + 1, maxY - minY + 1);
+    }
+}
+'''
+    try:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            java_file = Path(temp_dir) / "LauncherIconForegroundPadder.java"
+            java_file.write_text(source, encoding="utf-8")
+            subprocess.run([javac_bin, str(java_file)], check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            subprocess.run(
+                [java_bin, "-cp", temp_dir, "LauncherIconForegroundPadder", str(logo_path), str(target_png)],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+            )
+    except Exception as exc:
+        shutil.copy2(logo_path, target_png)
+        _log(on_log, f"[Android] launcher icon safe padding failed, using original: {exc}")
+
+
 def _replace_template_launcher_icon(project_root: Path, logo_path: Path, on_log=None) -> None:
     if not logo_path.exists():
         return
@@ -2784,7 +2889,7 @@ def _replace_template_launcher_icon(project_root: Path, logo_path: Path, on_log=
     try:
         if target_xml.exists():
             target_xml.unlink()
-        shutil.copy2(logo_path, target_png)
+        _write_padded_launcher_foreground_icon(logo_path, target_png, on_log=on_log)
         _log(on_log, f"[Android] launcher icon updated: {target_png}")
     except Exception as exc:
         _log(on_log, f"[Android] launcher icon update failed: {exc}")
@@ -2866,7 +2971,7 @@ def _replace_android_launcher_icon(android_app_dir: Path, logo_path: Path, on_lo
     try:
         if target_xml.exists():
             target_xml.unlink()
-        shutil.copy2(logo_path, target_png)
+        _write_padded_launcher_foreground_icon(logo_path, target_png, on_log=on_log)
         _log(on_log, f"[Android] launcher icon updated: {target_png}")
     except Exception as exc:
         _log(on_log, f"[Android] launcher icon update failed: {exc}")

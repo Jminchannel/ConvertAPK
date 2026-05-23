@@ -57,6 +57,108 @@ check_error() {
     fi
 }
 
+prepareLauncherForegroundIcon() {
+    local source_file="$1"
+    local target_file="$2"
+    if [ ! -f "$source_file" ]; then
+        return 0
+    fi
+
+    mkdir -p "$(dirname "$target_file")"
+
+    local tmp_dir
+    tmp_dir="$(mktemp -d)"
+    cat > "$tmp_dir/LauncherIconForegroundPadder.java" <<'JAVA'
+import java.awt.Graphics2D;
+import java.awt.Rectangle;
+import java.awt.RenderingHints;
+import java.awt.image.BufferedImage;
+import java.io.File;
+import javax.imageio.ImageIO;
+
+public class LauncherIconForegroundPadder {
+    private static final int CANVAS_SIZE = 432;
+    private static final int ALPHA_THRESHOLD = 8;
+
+    public static void main(String[] args) throws Exception {
+        BufferedImage source = ImageIO.read(new File(args[0]));
+        if (source == null) {
+            throw new IllegalArgumentException("unsupported image");
+        }
+
+        Rectangle bounds = findVisibleBounds(source);
+        int maxContentSize = Math.round(CANVAS_SIZE * 2f / 3f);
+        double scale = Math.min((double) maxContentSize / bounds.width, (double) maxContentSize / bounds.height);
+        int drawWidth = Math.max(1, (int) Math.round(bounds.width * scale));
+        int drawHeight = Math.max(1, (int) Math.round(bounds.height * scale));
+        int drawX = (CANVAS_SIZE - drawWidth) / 2;
+        int drawY = (CANVAS_SIZE - drawHeight) / 2;
+
+        BufferedImage output = new BufferedImage(CANVAS_SIZE, CANVAS_SIZE, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D graphics = output.createGraphics();
+        graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+        graphics.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+        graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        graphics.drawImage(
+            source,
+            drawX,
+            drawY,
+            drawX + drawWidth,
+            drawY + drawHeight,
+            bounds.x,
+            bounds.y,
+            bounds.x + bounds.width,
+            bounds.y + bounds.height,
+            null
+        );
+        graphics.dispose();
+        ImageIO.write(output, "png", new File(args[1]));
+    }
+
+    private static Rectangle findVisibleBounds(BufferedImage image) {
+        int minX = image.getWidth();
+        int minY = image.getHeight();
+        int maxX = -1;
+        int maxY = -1;
+        for (int y = 0; y < image.getHeight(); y++) {
+            for (int x = 0; x < image.getWidth(); x++) {
+                int alpha = (image.getRGB(x, y) >>> 24) & 0xff;
+                if (alpha <= ALPHA_THRESHOLD) {
+                    continue;
+                }
+                if (x < minX) {
+                    minX = x;
+                }
+                if (x > maxX) {
+                    maxX = x;
+                }
+                if (y < minY) {
+                    minY = y;
+                }
+                if (y > maxY) {
+                    maxY = y;
+                }
+            }
+        }
+        if (maxX < minX || maxY < minY) {
+            return new Rectangle(0, 0, image.getWidth(), image.getHeight());
+        }
+        return new Rectangle(minX, minY, maxX - minX + 1, maxY - minY + 1);
+    }
+}
+JAVA
+
+    if javac "$tmp_dir/LauncherIconForegroundPadder.java" >/dev/null 2>&1 \
+        && java -cp "$tmp_dir" LauncherIconForegroundPadder "$source_file" "$target_file" >/dev/null 2>&1; then
+        rm -rf "$tmp_dir"
+        return 0
+    fi
+
+    log_warning "launcher icon safe padding failed; using original uploaded icon"
+    cp "$source_file" "$target_file"
+    rm -rf "$tmp_dir"
+}
+
 normalizeSha256() {
     printf '%s' "$1" | tr -d '\r' | sed -E 's/[^0-9A-Fa-f]//g' | tr '[:lower:]' '[:upper:]'
 }
@@ -1011,8 +1113,8 @@ NODE
         drawable_dir="$PROJECT_ROOT/app/src/main/res/drawable"
         if [ -d "$drawable_dir" ]; then
             rm -f "$drawable_dir/ic_launcher_foreground.xml"
-            cp "$INPUT_DIR/logo.png" "$drawable_dir/ic_launcher_foreground.png"
-            log_info "Template launcher icon updated"
+            prepareLauncherForegroundIcon "$INPUT_DIR/logo.png" "$drawable_dir/ic_launcher_foreground.png"
+            log_info "Template launcher icon updated with adaptive safe padding"
         fi
     fi
 
@@ -1160,8 +1262,8 @@ NODE
         drawable_dir="$PROJECT_ROOT/app/src/main/res/drawable"
         if [ -d "$drawable_dir" ]; then
             rm -f "$drawable_dir/ic_launcher_foreground.xml"
-            cp "$INPUT_DIR/logo.png" "$drawable_dir/ic_launcher_foreground.png"
-            log_info "Template launcher icon updated"
+            prepareLauncherForegroundIcon "$INPUT_DIR/logo.png" "$drawable_dir/ic_launcher_foreground.png"
+            log_info "Template launcher icon updated with adaptive safe padding"
         fi
     fi
 
@@ -4154,8 +4256,8 @@ if [ "$TASK_MODE" = "native" ] && [ -f "$INPUT_DIR/logo.png" ]; then
     drawable_dir="$ANDROID_DIR/app/src/main/res/drawable"
     if [ -d "$drawable_dir" ]; then
         rm -f "$drawable_dir/ic_launcher_foreground.xml"
-        cp "$INPUT_DIR/logo.png" "$drawable_dir/ic_launcher_foreground.png"
-        log_info "Native launcher icon updated"
+        prepareLauncherForegroundIcon "$INPUT_DIR/logo.png" "$drawable_dir/ic_launcher_foreground.png"
+        log_info "Native launcher icon updated with adaptive safe padding"
     fi
 fi
 
