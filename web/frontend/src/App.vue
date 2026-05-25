@@ -25,11 +25,6 @@
             <span class="app-boot-blob app-boot-blob-accent"></span>
             <span class="app-boot-blob app-boot-blob-dot"></span>
           </div>
-          <div class="app-boot-copy">
-            <div class="app-boot-kicker">ConvertAPK</div>
-            <div class="app-boot-title">{{ appBootLoadingTitle }}</div>
-            <div class="app-boot-text">{{ appBootLoadingText }}</div>
-          </div>
           <div class="app-boot-pulse" aria-hidden="true">
             <span></span>
             <span></span>
@@ -2159,48 +2154,6 @@ export default defineComponent({
   animation-delay: 0.56s;
 }
 
-.app-boot-copy {
-  display: grid;
-  gap: 8px;
-  text-align: center;
-  min-width: 0;
-}
-
-.app-boot-kicker {
-  color: #66d4ff;
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: 0;
-  text-transform: uppercase;
-}
-
-.light-theme .app-boot-kicker {
-  color: #2f6fed;
-}
-
-.app-boot-title {
-  color: #f8fbff;
-  font-size: 20px;
-  font-weight: 800;
-  line-height: 1.25;
-  overflow-wrap: anywhere;
-}
-
-.light-theme .app-boot-title {
-  color: #12213a;
-}
-
-.app-boot-text {
-  color: rgba(226, 238, 255, 0.72);
-  font-size: 13px;
-  line-height: 1.6;
-  overflow-wrap: anywhere;
-}
-
-.light-theme .app-boot-text {
-  color: rgba(33, 49, 74, 0.68);
-}
-
 .app-boot-progress {
   position: relative;
   width: 100%;
@@ -2279,9 +2232,6 @@ export default defineComponent({
     height: 52px;
   }
 
-  .app-boot-title {
-    font-size: 18px;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -2375,34 +2325,6 @@ export default defineComponent({
   background: #b8fff8;
   box-shadow: 0 0 26px rgba(184, 255, 248, 0.72);
   animation: appBootGooeyDot 2.45s ease-in-out infinite;
-}
-
-.app-boot-copy {
-  gap: 7px;
-}
-
-.app-boot-kicker {
-  color: #00f5ff;
-}
-
-.light-theme .app-boot-kicker {
-  color: #00f5ff;
-}
-
-.app-boot-title {
-  color: #fff;
-}
-
-.light-theme .app-boot-title {
-  color: #fff;
-}
-
-.app-boot-text {
-  color: rgba(255, 255, 255, 0.62);
-}
-
-.light-theme .app-boot-text {
-  color: rgba(255, 255, 255, 0.62);
 }
 
 .app-boot-pulse {
