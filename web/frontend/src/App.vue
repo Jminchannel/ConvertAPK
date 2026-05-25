@@ -20,22 +20,19 @@
         :aria-label="appBootLoadingTitle"
       >
         <div class="app-boot-panel">
-          <div class="app-boot-orbit" aria-hidden="true">
-            <span class="app-boot-ring app-boot-ring-a"></span>
-            <span class="app-boot-ring app-boot-ring-b"></span>
-            <span class="app-boot-spark app-boot-spark-a"></span>
-            <span class="app-boot-spark app-boot-spark-b"></span>
-            <span class="app-boot-spark app-boot-spark-c"></span>
-            <span class="app-boot-core">
-              <span class="app-boot-core-mark">&lt;/&gt;</span>
-            </span>
+          <div class="app-boot-gooey" aria-hidden="true">
+            <span class="app-boot-blob app-boot-blob-main"></span>
+            <span class="app-boot-blob app-boot-blob-accent"></span>
+            <span class="app-boot-blob app-boot-blob-dot"></span>
           </div>
           <div class="app-boot-copy">
             <div class="app-boot-kicker">ConvertAPK</div>
             <div class="app-boot-title">{{ appBootLoadingTitle }}</div>
             <div class="app-boot-text">{{ appBootLoadingText }}</div>
           </div>
-          <div class="app-boot-progress" aria-hidden="true">
+          <div class="app-boot-pulse" aria-hidden="true">
+            <span></span>
+            <span></span>
             <span></span>
           </div>
         </div>
@@ -2299,6 +2296,200 @@ export default defineComponent({
   .app-boot-loader-enter-active,
   .app-boot-loader-leave-active {
     transition: none;
+  }
+}
+
+/* 首屏加载遮罩：参考 gooey blob 风格重新实现 */
+.app-boot-overlay {
+  background: #000;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.light-theme .app-boot-overlay {
+  background: #000;
+}
+
+.app-boot-panel {
+  width: min(420px, calc(100vw - 40px));
+  min-height: 360px;
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 18px;
+  padding: 24px 20px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: #fff;
+}
+
+.light-theme .app-boot-panel {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.app-boot-gooey {
+  position: relative;
+  width: min(340px, 82vw);
+  height: 168px;
+  overflow: hidden;
+  background: #000;
+  filter: blur(11px) contrast(24);
+  -webkit-filter: blur(11px) contrast(24);
+}
+
+.app-boot-blob {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.app-boot-blob-main,
+.app-boot-blob-accent {
+  width: 72px;
+  height: 72px;
+}
+
+.app-boot-blob-main {
+  left: 24%;
+  background: #fff;
+  box-shadow: 0 0 32px rgba(255, 255, 255, 0.88);
+  animation: appBootGooeyLeft 2.45s ease-in-out infinite;
+}
+
+.app-boot-blob-accent {
+  left: 76%;
+  background: #00f5ff;
+  box-shadow: 0 0 36px rgba(0, 245, 255, 0.92);
+  animation: appBootGooeyRight 2.45s ease-in-out infinite;
+}
+
+.app-boot-blob-dot {
+  width: 30px;
+  height: 30px;
+  background: #b8fff8;
+  box-shadow: 0 0 26px rgba(184, 255, 248, 0.72);
+  animation: appBootGooeyDot 2.45s ease-in-out infinite;
+}
+
+.app-boot-copy {
+  gap: 7px;
+}
+
+.app-boot-kicker {
+  color: #00f5ff;
+}
+
+.light-theme .app-boot-kicker {
+  color: #00f5ff;
+}
+
+.app-boot-title {
+  color: #fff;
+}
+
+.light-theme .app-boot-title {
+  color: #fff;
+}
+
+.app-boot-text {
+  color: rgba(255, 255, 255, 0.62);
+}
+
+.light-theme .app-boot-text {
+  color: rgba(255, 255, 255, 0.62);
+}
+
+.app-boot-pulse {
+  display: inline-flex;
+  gap: 8px;
+  padding-top: 2px;
+}
+
+.app-boot-pulse span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #fff;
+  opacity: 0.28;
+  animation: appBootPulse 1.15s ease-in-out infinite;
+}
+
+.app-boot-pulse span:nth-child(2) {
+  background: #00f5ff;
+  animation-delay: 0.16s;
+}
+
+.app-boot-pulse span:nth-child(3) {
+  animation-delay: 0.32s;
+}
+
+@keyframes appBootGooeyLeft {
+  0%, 100% {
+    left: 24%;
+    transform: translate(-50%, -50%) scale(0.94);
+  }
+  48%, 52% {
+    left: 50%;
+    transform: translate(-50%, -50%) scale(1.08);
+  }
+}
+
+@keyframes appBootGooeyRight {
+  0%, 100% {
+    left: 76%;
+    transform: translate(-50%, -50%) scale(0.94);
+  }
+  48%, 52% {
+    left: 50%;
+    transform: translate(-50%, -50%) scale(1.08);
+  }
+}
+
+@keyframes appBootGooeyDot {
+  0%, 100% {
+    opacity: 0.5;
+    transform: translate(-50%, -50%) scale(0.84);
+  }
+  50% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.34);
+  }
+}
+
+@keyframes appBootPulse {
+  0%, 100% {
+    opacity: 0.22;
+    transform: translateY(0);
+  }
+  50% {
+    opacity: 0.92;
+    transform: translateY(-5px);
+  }
+}
+
+@media (max-width: 640px) {
+  .app-boot-panel {
+    width: min(340px, calc(100vw - 32px));
+    min-height: 320px;
+    padding: 18px 10px;
+  }
+
+  .app-boot-gooey {
+    width: min(286px, 86vw);
+    height: 142px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-boot-blob,
+  .app-boot-pulse span {
+    animation: none;
   }
 }
 
