@@ -119,6 +119,11 @@ AI_TIMEOUT_SECONDS_MAX = 120
 DONATION_POPUP_PROBABILITY_DEFAULT = 10
 DONATION_POPUP_PROBABILITY_MIN = 0
 DONATION_POPUP_PROBABILITY_MAX = 100
+COMPLIANCE_NOTICE_TITLE_DEFAULT = "User Agreement and Terms of Service"
+COMPLIANCE_NOTICE_EFFECTIVE_DATE_DEFAULT = "2026-05-13"
+COMPLIANCE_NOTICE_CONTENT_DEFAULT = ""
+COMPLIANCE_NOTICE_ACCEPT_BUTTON_DEFAULT = "Agree and Continue"
+COMPLIANCE_NOTICE_REJECT_BUTTON_DEFAULT = "Decline and Exit"
 TASK_LOG_LINES_DEFAULT = 220
 TASK_LOG_LINES_MIN = 20
 TASK_LOG_LINES_MAX = 1000
@@ -227,6 +232,12 @@ def _load_client_feature_flags(client_id: str | None = None) -> dict:
         "rewarded_build_ads_enabled": False,
         "donation_popup_probability": DONATION_POPUP_PROBABILITY_DEFAULT,
         "donation_popup_message": "",
+        "compliance_notice_enabled": False,
+        "compliance_notice_title": COMPLIANCE_NOTICE_TITLE_DEFAULT,
+        "compliance_notice_effective_date": COMPLIANCE_NOTICE_EFFECTIVE_DATE_DEFAULT,
+        "compliance_notice_content": COMPLIANCE_NOTICE_CONTENT_DEFAULT,
+        "compliance_notice_accept_button": COMPLIANCE_NOTICE_ACCEPT_BUTTON_DEFAULT,
+        "compliance_notice_reject_button": COMPLIANCE_NOTICE_REJECT_BUTTON_DEFAULT,
         "client_login_enabled": True,
         "client_sms_login_enabled": sms_login_default_enabled,
         "client_register_enabled": True,
@@ -279,6 +290,17 @@ def _load_client_feature_flags(client_id: str | None = None) -> dict:
         if "donation_popup_message" in data:
             donation_popup_message = str(data.get("donation_popup_message") or "").replace("\r\n", "\n").replace("\r", "\n").strip()
             flags["donation_popup_message"] = donation_popup_message
+        if "compliance_notice_enabled" in data:
+            flags["compliance_notice_enabled"] = bool(data.get("compliance_notice_enabled"))
+        for field_name in (
+            "compliance_notice_title",
+            "compliance_notice_effective_date",
+            "compliance_notice_content",
+            "compliance_notice_accept_button",
+            "compliance_notice_reject_button",
+        ):
+            if field_name in data:
+                flags[field_name] = str(data.get(field_name) or "").replace("\r\n", "\n").replace("\r", "\n").strip()
         if "client_login_enabled" in data:
             flags["client_login_enabled"] = bool(data.get("client_login_enabled"))
         if "client_sms_login_enabled" in data:
@@ -325,6 +347,12 @@ def _load_client_feature_flags(client_id: str | None = None) -> dict:
             flags["ai_timeout_seconds"] = _normalize_ai_timeout_seconds(data.get("ai_timeout_seconds"))
     flags["ai_api_url"] = _normalize_ai_api_url(flags.get("ai_api_url"))
     return flags
+
+
+def _to_public_client_feature_flags(flags: dict) -> dict:
+    public_flags = dict(flags or {})
+    public_flags.pop("ai_api_key", None)
+    return public_flags
 
 
 def _is_web_link_mode_enabled(client_id: str | None = None) -> bool:
@@ -7432,7 +7460,7 @@ async def adminhub_announcements():
 
 @app.get("/api/adminhub/features")
 async def adminhub_features(client_id: str | None = None):
-    return _load_client_feature_flags(client_id=client_id)
+    return _to_public_client_feature_flags(_load_client_feature_flags(client_id=client_id))
 
 
 @app.get("/api/adminhub/build-quota")
