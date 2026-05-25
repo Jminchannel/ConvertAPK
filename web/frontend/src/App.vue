@@ -6,9 +6,42 @@
       'mobile-shell-active': isMobileShell,
       'mobile-tab-build': mobileTab === 'build',
       'mobile-tab-tasks': mobileTab === 'tasks',
-      'mobile-tab-profile': mobileTab === 'profile'
+      'mobile-tab-profile': mobileTab === 'profile',
+      'app-boot-loading': appBootLoading
     }"
+    :aria-busy="appBootLoading ? 'true' : 'false'"
   >
+    <Transition name="app-boot-loader">
+      <div
+        v-if="appBootLoading"
+        class="app-boot-overlay"
+        role="status"
+        aria-live="polite"
+        :aria-label="appBootLoadingTitle"
+      >
+        <div class="app-boot-panel">
+          <div class="app-boot-orbit" aria-hidden="true">
+            <span class="app-boot-ring app-boot-ring-a"></span>
+            <span class="app-boot-ring app-boot-ring-b"></span>
+            <span class="app-boot-spark app-boot-spark-a"></span>
+            <span class="app-boot-spark app-boot-spark-b"></span>
+            <span class="app-boot-spark app-boot-spark-c"></span>
+            <span class="app-boot-core">
+              <span class="app-boot-core-mark">&lt;/&gt;</span>
+            </span>
+          </div>
+          <div class="app-boot-copy">
+            <div class="app-boot-kicker">ConvertAPK</div>
+            <div class="app-boot-title">{{ appBootLoadingTitle }}</div>
+            <div class="app-boot-text">{{ appBootLoadingText }}</div>
+          </div>
+          <div class="app-boot-progress" aria-hidden="true">
+            <span></span>
+          </div>
+        </div>
+      </div>
+    </Transition>
+
     <!-- Header -->
     <header class="header">
       <div class="container header-content">
@@ -803,11 +836,37 @@
                 </div>
               </div>
 
-              <div class="form-group" style="margin-bottom: 12px;">
-                <label class="settings-checkbox">
-                  <input type="checkbox" v-model="config.status_bar_hidden" />
-                  {{ t('config.statusBarHidden') }}
-                </label>
+              <div class="grid grid-2 status-bar-settings" v-if="mode === 'convert' || mode === 'web' || mode === 'html'">
+                <div class="form-group">
+                  <label class="form-label">{{ t('config.statusBarColor') }}</label>
+                  <div class="status-bar-color-row" :class="{ 'is-disabled': config.status_bar_hidden }">
+                    <input
+                      type="color"
+                      class="status-bar-color-picker"
+                      :value="statusBarColorPickerValue"
+                      :disabled="config.status_bar_hidden"
+                      @input="handleStatusBarColorPickerInput"
+                    />
+                    <input
+                      type="text"
+                      class="form-input status-bar-color-text"
+                      v-model.trim="config.status_bar_color"
+                      placeholder="#FFFFFF"
+                      maxlength="9"
+                      :disabled="config.status_bar_hidden"
+                      @blur="normalizeStatusBarColorInput"
+                    />
+                  </div>
+                  <div class="form-hint">
+                    {{ config.status_bar_hidden ? t('config.statusBarColorHiddenHint') : t('config.statusBarColorHint') }}
+                  </div>
+                </div>
+                <div class="form-group status-bar-toggle-group">
+                  <label class="settings-checkbox">
+                    <input type="checkbox" v-model="config.status_bar_hidden" />
+                    {{ t('config.statusBarHidden') }}
+                  </label>
+                </div>
               </div>
 
               <!-- Permissions -->
@@ -1963,7 +2022,330 @@ export default defineComponent({
   scoped 会丢失作用域属性导致样式失效；保留为非 scoped 的单文件样式块是有意选择。
 -->
 <style>
+/* 首屏加载遮罩 */
+.app-boot-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 4000;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background:
+    linear-gradient(135deg, rgba(7, 16, 31, 0.92), rgba(9, 18, 34, 0.82)),
+    rgba(7, 16, 31, 0.88);
+  backdrop-filter: blur(18px) saturate(1.2);
+  -webkit-backdrop-filter: blur(18px) saturate(1.2);
+  pointer-events: auto;
+  cursor: wait;
+  touch-action: none;
+  overscroll-behavior: contain;
+}
+
+.light-theme .app-boot-overlay {
+  background:
+    linear-gradient(135deg, rgba(238, 245, 255, 0.92), rgba(248, 252, 255, 0.82)),
+    rgba(238, 245, 255, 0.88);
+}
+
+.app-boot-panel {
+  width: min(360px, calc(100vw - 40px));
+  min-height: 338px;
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 20px;
+  padding: 32px 28px;
+  border: 1px solid rgba(134, 190, 255, 0.24);
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.04)),
+    rgba(10, 20, 38, 0.72);
+  box-shadow:
+    0 24px 72px rgba(0, 0, 0, 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+
+.light-theme .app-boot-panel {
+  border-color: rgba(47, 111, 237, 0.20);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.86), rgba(255, 255, 255, 0.58)),
+    rgba(255, 255, 255, 0.72);
+  box-shadow:
+    0 24px 72px rgba(47, 111, 237, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.84);
+}
+
+.app-boot-orbit {
+  position: relative;
+  width: 132px;
+  height: 132px;
+  display: grid;
+  place-items: center;
+}
+
+.app-boot-ring,
+.app-boot-spark,
+.app-boot-core {
+  position: absolute;
+}
+
+.app-boot-ring {
+  border-radius: 50%;
+}
+
+.app-boot-ring-a {
+  inset: 0;
+  border: 2px solid rgba(134, 190, 255, 0.22);
+  border-top-color: #66d4ff;
+  border-right-color: #25d189;
+  animation: appBootSpin 1.45s linear infinite;
+}
+
+.app-boot-ring-b {
+  inset: 18px;
+  border: 1px dashed rgba(255, 255, 255, 0.32);
+  border-left-color: rgba(37, 209, 137, 0.74);
+  border-bottom-color: rgba(61, 134, 255, 0.74);
+  animation: appBootSpinReverse 2.8s linear infinite;
+}
+
+.app-boot-core {
+  width: 58px;
+  height: 58px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #3d86ff 0%, #25d189 100%);
+  color: #fff;
+  box-shadow:
+    0 18px 40px rgba(61, 134, 255, 0.30),
+    inset 0 1px 0 rgba(255, 255, 255, 0.30);
+  animation: appBootCore 2.4s ease-in-out infinite;
+}
+
+.app-boot-core-mark {
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.app-boot-spark {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: #66d4ff;
+  box-shadow: 0 0 18px rgba(102, 212, 255, 0.60);
+  transform: rotate(45deg);
+  animation: appBootSpark 1.9s ease-in-out infinite;
+}
+
+.app-boot-spark-a {
+  top: 16px;
+  right: 24px;
+}
+
+.app-boot-spark-b {
+  bottom: 20px;
+  left: 20px;
+  background: #25d189;
+  box-shadow: 0 0 18px rgba(37, 209, 137, 0.54);
+  animation-delay: 0.28s;
+}
+
+.app-boot-spark-c {
+  right: 13px;
+  bottom: 38px;
+  width: 8px;
+  height: 8px;
+  background: #f2a53b;
+  box-shadow: 0 0 18px rgba(242, 165, 59, 0.48);
+  animation-delay: 0.56s;
+}
+
+.app-boot-copy {
+  display: grid;
+  gap: 8px;
+  text-align: center;
+  min-width: 0;
+}
+
+.app-boot-kicker {
+  color: #66d4ff;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.light-theme .app-boot-kicker {
+  color: #2f6fed;
+}
+
+.app-boot-title {
+  color: #f8fbff;
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.light-theme .app-boot-title {
+  color: #12213a;
+}
+
+.app-boot-text {
+  color: rgba(226, 238, 255, 0.72);
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.light-theme .app-boot-text {
+  color: rgba(33, 49, 74, 0.68);
+}
+
+.app-boot-progress {
+  position: relative;
+  width: 100%;
+  max-width: 238px;
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(134, 190, 255, 0.16);
+}
+
+.light-theme .app-boot-progress {
+  background: rgba(47, 111, 237, 0.12);
+}
+
+.app-boot-progress span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 46%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #3d86ff 0%, #25d189 64%, #66d4ff 100%);
+  animation: appBootProgress 1.25s ease-in-out infinite;
+}
+
+.app-boot-loader-enter-active,
+.app-boot-loader-leave-active {
+  transition: opacity 0.34s ease, transform 0.34s ease;
+}
+
+.app-boot-loader-enter-from,
+.app-boot-loader-leave-to {
+  opacity: 0;
+  transform: scale(1.015);
+}
+
+@keyframes appBootSpin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes appBootSpinReverse {
+  to { transform: rotate(-360deg); }
+}
+
+@keyframes appBootCore {
+  0%, 100% { transform: scale(1) rotate(0deg); }
+  50% { transform: scale(1.06) rotate(4deg); }
+}
+
+@keyframes appBootSpark {
+  0%, 100% { opacity: 0.42; transform: rotate(45deg) scale(0.82); }
+  50% { opacity: 1; transform: rotate(45deg) scale(1.16); }
+}
+
+@keyframes appBootProgress {
+  0% { transform: translateX(-110%); }
+  100% { transform: translateX(235%); }
+}
+
+@media (max-width: 640px) {
+  .app-boot-overlay {
+    padding: 18px;
+  }
+
+  .app-boot-panel {
+    width: min(326px, calc(100vw - 32px));
+    min-height: 314px;
+    padding: 28px 22px;
+  }
+
+  .app-boot-orbit {
+    width: 118px;
+    height: 118px;
+  }
+
+  .app-boot-core {
+    width: 52px;
+    height: 52px;
+  }
+
+  .app-boot-title {
+    font-size: 18px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-boot-ring-a,
+  .app-boot-ring-b,
+  .app-boot-core,
+  .app-boot-spark,
+  .app-boot-progress span {
+    animation: none;
+  }
+
+  .app-boot-loader-enter-active,
+  .app-boot-loader-leave-active {
+    transition: none;
+  }
+}
+
 /* Mode Tabs */
+.status-bar-settings {
+  gap: 16px;
+  align-items: start;
+  margin-bottom: 12px;
+}
+
+.status-bar-toggle-group {
+  display: flex;
+  align-items: flex-end;
+  min-height: 78px;
+}
+
+.status-bar-color-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.status-bar-color-row.is-disabled {
+  opacity: 0.62;
+}
+
+.status-bar-color-picker {
+  flex: 0 0 48px;
+  width: 48px;
+  height: 44px;
+  padding: 4px;
+  border: 1px solid var(--input-border);
+  border-radius: 10px;
+  background: var(--input-bg);
+  cursor: pointer;
+}
+
+.status-bar-color-picker:disabled,
+.status-bar-color-text:disabled {
+  cursor: not-allowed;
+}
+
+.status-bar-color-text {
+  min-width: 0;
+  text-transform: uppercase;
+}
+
 .mode-tabs {
   --mode-tabs-text: rgba(51, 65, 85, 0.84);
   --mode-tabs-active-text: #1d4ed8;

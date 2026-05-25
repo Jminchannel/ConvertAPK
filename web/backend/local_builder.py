@@ -390,6 +390,11 @@ def _sync_existing_insets_padding_flags(
             "val shouldApplyTopInset = useWebViewPadding &&",
             "val shouldApplyTopInset = useWebViewTopPadding &&",
         )
+        source = re.sub(
+            r"val\s+shouldApplyTopInset\s*=\s*useWebViewTopPadding\s*&&\s*(?:\(\s*drawBehindStatusBar\s*\|\|\s*BuildConfig\.HIDE_STATUS_BAR\s*\)|drawBehindStatusBar\s*&&\s*!BuildConfig\.HIDE_STATUS_BAR)",
+            "val shouldApplyTopInset = useWebViewTopPadding && !BuildConfig.HIDE_STATUS_BAR",
+            source,
+        )
         source = source.replace(
             "val bottomInset = if (useWebViewPadding) nav.bottom else 0",
             "val bottomInset = if (useWebViewBottomPadding) nav.bottom else 0",
@@ -413,6 +418,11 @@ def _sync_existing_insets_padding_flags(
         source = source.replace(
             "boolean shouldApplyTopInset = useWebViewPadding &&",
             "boolean shouldApplyTopInset = useWebViewTopPadding &&",
+        )
+        source = re.sub(
+            r"boolean\s+shouldApplyTopInset\s*=\s*useWebViewTopPadding\s*&&\s*(?:\(\s*drawBehindStatusBar\s*\|\|\s*BuildConfig\.HIDE_STATUS_BAR\s*\)|drawBehindStatusBar\s*&&\s*!hideStatusBar|drawBehindStatusBar\s*&&\s*!BuildConfig\.HIDE_STATUS_BAR)",
+            "boolean shouldApplyTopInset = useWebViewTopPadding && !BuildConfig.HIDE_STATUS_BAR",
+            source,
         )
         source = source.replace(
             "int bottomInset = useWebViewPadding ? nav.bottom : 0;",
@@ -1831,6 +1841,21 @@ def _normalize_screen_orientation(raw: str) -> str:
         return "landscape"
     return ""
 
+def _normalize_status_bar_color_for_android(raw: str, task_mode: str, hidden: bool) -> str:
+    value = str(raw or "").strip()
+    if not value:
+        value = "#FFFFFF"
+    lower = value.lower()
+    if lower in {"transparent", "@android:color/transparent"}:
+        if task_mode == "convert" and not hidden:
+            return "#FFFFFF"
+        return "transparent"
+    if lower == "white":
+        return "#FFFFFF"
+    if re.fullmatch(r"#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{8})", value):
+        return value.upper()
+    return "#FFFFFF"
+
 def _patch_android_manifest(
     manifest_path: Path,
     screen_orientation: str,
@@ -1903,22 +1928,103 @@ def _patch_android_manifest(
 
     manifest_path.write_text(text, encoding="utf-8")
 
+def _patch_android_status_bar_styles(android_app_dir: Path, env: Dict[str, str], on_log=None) -> None:
+    task_mode = str(env.get("TASK_MODE", "convert")).strip().lower()
+    if task_mode != "convert":
+        return
+    status_bar_hidden = str(env.get("STATUS_BAR_HIDDEN", "false")).strip().lower() == "true"
+    status_bar_color = _normalize_status_bar_color_for_android(
+        env.get("STATUS_BAR_COLOR", "#FFFFFF"),
+        task_mode,
+        status_bar_hidden,
+    )
+    status_bar_value = "transparent" if status_bar_hidden else status_bar_color
+    status_bar_style = str(env.get("STATUS_BAR_STYLE", "light")).strip().lower()
+    light_status_bar_icons = "true" if status_bar_style == "dark" else "false"
+    manifest_path = android_app_dir / "src" / "main" / "AndroidManifest.xml"
+    style_names = [
+        "AppTheme",
+        "AppTheme.NoActionBar",
+        "AppTheme.NoActionBarLaunch",
+        "Theme.App",
+        "Theme.App.NoActionBar",
+    ]
+    if manifest_path.exists():
+        manifest_text = manifest_path.read_text(encoding="utf-8")
+        for match in re.finditer(r'android:theme="@(?:android:)?style/([^"]+)"', manifest_text):
+            style_name = match.group(1)
+            if style_name and style_name not in style_names:
+                style_names.append(style_name)
+
+    items = []
+    if status_bar_hidden:
+        items.extend([
+            '<item name="android:windowFullscreen">true</item>',
+            '<item name="android:windowTranslucentStatus">false</item>',
+            '<item name="android:statusBarColor">@android:color/transparent</item>',
+            '<item name="android:windowLightStatusBar">false</item>',
+            '<item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>',
+        ])
+    else:
+        android_color = "@android:color/transparent" if status_bar_value == "transparent" else status_bar_value
+        items.extend([
+            '<item name="android:windowFullscreen">false</item>',
+            '<item name="android:windowTranslucentStatus">false</item>',
+            f'<item name="android:statusBarColor">{android_color}</item>',
+            f'<item name="android:windowLightStatusBar">{light_status_bar_icons}</item>',
+        ])
+
+    style_files: list[Path] = []
+    res_root = android_app_dir / "src" / "main" / "res"
+    if res_root.exists():
+        for values_dir in res_root.iterdir():
+            if not values_dir.is_dir() or not values_dir.name.startswith("values"):
+                continue
+            for filename in ("styles.xml", "themes.xml"):
+                candidate = values_dir / filename
+                if candidate.exists():
+                    style_files.append(candidate)
+
+    insert_text = "\n        " + "\n        ".join(items) + "\n"
+    changed_count = 0
+    for style_file in style_files:
+        text = style_file.read_text(encoding="utf-8")
+        original = text
+        for style_name in style_names:
+            pattern = re.compile(
+                rf'(<style\b[^>]*\bname="{re.escape(style_name)}"[^>]*>)([\s\S]*?)(</style>)'
+            )
+
+            def _replace_style(match: re.Match) -> str:
+                inner = match.group(2) or ""
+                inner = re.sub(r'\s*<item\s+name="android:windowFullscreen">[\s\S]*?</item>\s*', "\n", inner)
+                inner = re.sub(r'\s*<item\s+name="android:windowTranslucentStatus">[\s\S]*?</item>\s*', "\n", inner)
+                inner = re.sub(r'\s*<item\s+name="android:statusBarColor">[\s\S]*?</item>\s*', "\n", inner)
+                inner = re.sub(r'\s*<item\s+name="android:windowLightStatusBar">[\s\S]*?</item>\s*', "\n", inner)
+                inner = re.sub(r'\s*<item\s+name="android:windowLayoutInDisplayCutoutMode">[\s\S]*?</item>\s*', "\n", inner)
+                return f"{match.group(1)}{insert_text}{inner.lstrip(chr(10))}{match.group(3)}"
+
+            text = pattern.sub(_replace_style, text, count=1)
+        if text != original:
+            style_file.write_text(text, encoding="utf-8")
+            changed_count += 1
+    if changed_count:
+        _log(on_log, f"[Android] status bar styles updated: {changed_count}")
+
 def _patch_android_build_config(build_gradle: Path, env: Dict[str, str], on_log=None) -> None:
     if not build_gradle.exists():
         return
     text = build_gradle.read_text(encoding="utf-8")
     is_kts = build_gradle.name.endswith(".kts")
 
-    status_bar_hidden = "true" if str(env.get("STATUS_BAR_HIDDEN", "false")).lower() == "true" else "false"
-    status_bar_color = str(env.get("STATUS_BAR_COLOR", "#FFFFFF")).strip().lower()
     task_mode = str(env.get("TASK_MODE", "convert")).strip().lower()
-    if (
-        task_mode == "convert"
-        and status_bar_hidden != "true"
-        and status_bar_color in {"transparent", "@android:color/transparent"}
-    ):
-        status_bar_color = "#ffffff"
-    status_bar_background = "white" if status_bar_color in {"#ffffff", "white", "#ffffffff"} else "transparent"
+    status_bar_hidden = "true" if str(env.get("STATUS_BAR_HIDDEN", "false")).lower() == "true" else "false"
+    status_bar_color = _normalize_status_bar_color_for_android(
+        env.get("STATUS_BAR_COLOR", "#FFFFFF"),
+        task_mode,
+        status_bar_hidden == "true",
+    )
+    status_bar_background = "transparent" if status_bar_hidden == "true" else status_bar_color
     status_bar_style = str(env.get("STATUS_BAR_STYLE", "light")).strip().lower()
     light_status_bar_icons = "true" if status_bar_style == "dark" else "false"
     double_click_exit = "true" if str(env.get("DOUBLE_CLICK_EXIT", "true")).lower() == "true" else "false"
@@ -2088,7 +2194,6 @@ class MainActivity : BridgeActivity() {{
         webView.clipToPadding = true
         val useWebViewTopPadding = {top_padding_literal}
         val useWebViewBottomPadding = {bottom_padding_literal}
-        val drawBehindStatusBar = BuildConfig.STATUS_BAR_BACKGROUND.trim().lowercase() == "transparent"
         val root = window.decorView
         ViewCompat.setOnApplyWindowInsetsListener(root) {{ _, insets ->
             val nav = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
@@ -2097,7 +2202,7 @@ class MainActivity : BridgeActivity() {{
             val cutout = insets.getInsets(WindowInsetsCompat.Type.displayCutout())
             val fallbackStatusBarHeight = if (BuildConfig.HIDE_STATUS_BAR) readStatusBarHeightPx() else 0
             val topSystemInset = maxOf(status.top, statusStable.top, cutout.top, fallbackStatusBarHeight)
-            val shouldApplyTopInset = useWebViewTopPadding && (drawBehindStatusBar || BuildConfig.HIDE_STATUS_BAR)
+            val shouldApplyTopInset = useWebViewTopPadding && !BuildConfig.HIDE_STATUS_BAR
             val topInset = if (shouldApplyTopInset) topSystemInset else 0
             val bottomInset = if (useWebViewBottomPadding) nav.bottom else 0
             webView.setPadding(nav.left, topInset, nav.right, bottomInset)
@@ -2122,11 +2227,11 @@ class MainActivity : BridgeActivity() {{
     }}
 
     private fun applySystemBars() {{
-        val statusBarBackground = BuildConfig.STATUS_BAR_BACKGROUND.trim().lowercase()
-        val drawBehind = statusBarBackground == "transparent"
-        WindowCompat.setDecorFitsSystemWindows(window, !drawBehind)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        val statusBarColor = resolveStatusBarColor(BuildConfig.STATUS_BAR_BACKGROUND)
         @Suppress("DEPRECATION")
-        window.statusBarColor = if (drawBehind) Color.TRANSPARENT else Color.WHITE
+        window.statusBarColor = statusBarColor
+        window.decorView.setBackgroundColor(statusBarColor)
         val controller = WindowInsetsControllerCompat(window, window.decorView)
         controller.isAppearanceLightStatusBars = BuildConfig.LIGHT_STATUS_BAR_ICONS
         if (BuildConfig.HIDE_STATUS_BAR) {{
@@ -2151,6 +2256,14 @@ class MainActivity : BridgeActivity() {{
                 }}
             controller.show(WindowInsetsCompat.Type.statusBars())
         }}
+    }}
+
+    private fun resolveStatusBarColor(raw: String): Int {{
+        val value = raw.trim()
+        if (value.equals("transparent", ignoreCase = true) || value.equals("@android:color/transparent", ignoreCase = true)) {{
+            return Color.TRANSPARENT
+        }}
+        return runCatching {{ Color.parseColor(value) }}.getOrDefault(Color.WHITE)
     }}
 }}
 """
@@ -2218,7 +2331,6 @@ public class MainActivity extends BridgeActivity {{
         webView.setClipToPadding(true);
         final boolean useWebViewTopPadding = {top_padding_literal};
         final boolean useWebViewBottomPadding = {bottom_padding_literal};
-        final boolean drawBehindStatusBar = "transparent".equalsIgnoreCase(BuildConfig.STATUS_BAR_BACKGROUND.trim());
         View decor = getWindow().getDecorView();
         ViewCompat.setOnApplyWindowInsetsListener(decor, (v, insets) -> {{
             Insets nav = insets.getInsets(WindowInsetsCompat.Type.navigationBars());
@@ -2227,7 +2339,7 @@ public class MainActivity extends BridgeActivity {{
             Insets cutout = insets.getInsets(WindowInsetsCompat.Type.displayCutout());
             int fallbackStatusBarHeight = BuildConfig.HIDE_STATUS_BAR ? readStatusBarHeightPx() : 0;
             int topSystemInset = Math.max(Math.max(status.top, statusStable.top), Math.max(cutout.top, fallbackStatusBarHeight));
-            boolean shouldApplyTopInset = useWebViewTopPadding && (drawBehindStatusBar || BuildConfig.HIDE_STATUS_BAR);
+            boolean shouldApplyTopInset = useWebViewTopPadding && !BuildConfig.HIDE_STATUS_BAR;
             int topInset = shouldApplyTopInset ? topSystemInset : 0;
             int bottomInset = useWebViewBottomPadding ? nav.bottom : 0;
             webView.setPadding(nav.left, topInset, nav.right, bottomInset);
@@ -2253,10 +2365,10 @@ public class MainActivity extends BridgeActivity {{
     }}
 
     private void applySystemBars() {{
-        String statusBarBackground = BuildConfig.STATUS_BAR_BACKGROUND.trim().toLowerCase();
-        boolean drawBehind = "transparent".equals(statusBarBackground);
-        WindowCompat.setDecorFitsSystemWindows(getWindow(), !drawBehind);
-        getWindow().setStatusBarColor(drawBehind ? Color.TRANSPARENT : Color.WHITE);
+        WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
+        int statusBarColor = resolveStatusBarColor(BuildConfig.STATUS_BAR_BACKGROUND);
+        getWindow().setStatusBarColor(statusBarColor);
+        getWindow().getDecorView().setBackgroundColor(statusBarColor);
         WindowInsetsControllerCompat controller = new WindowInsetsControllerCompat(getWindow(), getWindow().getDecorView());
         controller.setAppearanceLightStatusBars(BuildConfig.LIGHT_STATUS_BAR_ICONS);
         if (BuildConfig.HIDE_STATUS_BAR) {{
@@ -2278,6 +2390,18 @@ public class MainActivity extends BridgeActivity {{
             }}
             getWindow().getDecorView().setSystemUiVisibility(visibility);
             controller.show(WindowInsetsCompat.Type.statusBars());
+        }}
+    }}
+
+    private int resolveStatusBarColor(String raw) {{
+        String value = raw == null ? "" : raw.trim();
+        if ("transparent".equalsIgnoreCase(value) || "@android:color/transparent".equalsIgnoreCase(value)) {{
+            return Color.TRANSPARENT;
+        }}
+        try {{
+            return Color.parseColor(value);
+        }} catch (Exception ignored) {{
+            return Color.WHITE;
         }}
     }}
 }}
@@ -2421,6 +2545,14 @@ def _remove_minimal_status_bar_hidden(source: str) -> str:
     )
     return source
 
+def _remove_minimal_status_bar_color(source: str) -> str:
+    source = re.sub(
+        r"(?ms)\n?\s*// ConvertAPK：状态栏颜色开始（极简）\n.*?\n\s*// ConvertAPK：状态栏颜色结束（极简）\n?",
+        "\n",
+        source,
+    )
+    return source
+
 def _sync_minimal_status_bar_hidden(
     main_activity: Path,
     enable: bool,
@@ -2558,6 +2690,241 @@ def _sync_minimal_status_bar_hidden(
         _log(
             on_log,
             f"[MainActivity] {'enabled' if enable else 'disabled'} minimal status-bar-hidden: {main_activity}",
+        )
+
+def _sync_minimal_status_bar_color(
+    main_activity: Path,
+    enable: bool,
+    status_bar_background: str = "#FFFFFF",
+    light_status_bar_icons: bool = False,
+    on_log=None,
+) -> None:
+    if not main_activity.exists():
+        return
+    text = main_activity.read_text(encoding="utf-8")
+    if "BridgeActivity" not in text:
+        return
+    is_kotlin = main_activity.suffix.lower() == ".kt"
+    original = text
+    text = _remove_minimal_status_bar_color(text)
+    if enable:
+        status_bar_literal = json.dumps(status_bar_background or "#FFFFFF")
+        light_icons_literal = "true" if light_status_bar_icons else "false"
+        if is_kotlin:
+            text = _ensure_import_line(text, "import android.graphics.Color")
+            text = _ensure_import_line(text, "import android.os.Build")
+            text = _ensure_import_line(text, "import android.os.Bundle")
+            text = _ensure_import_line(text, "import android.view.Gravity")
+            text = _ensure_import_line(text, "import android.view.View")
+            text = _ensure_import_line(text, "import android.view.ViewGroup")
+            text = _ensure_import_line(text, "import android.view.WindowInsets")
+            text = _ensure_import_line(text, "import android.view.WindowInsetsController")
+            text = _ensure_import_line(text, "import android.view.WindowManager")
+            text = _ensure_import_line(text, "import android.widget.FrameLayout")
+            method_block = (
+                "    // ConvertAPK：状态栏颜色开始（极简）\n"
+                "    override fun onCreate(savedInstanceState: Bundle?) {\n"
+                "        super.onCreate(savedInstanceState)\n"
+                "        applyConvertApkStatusBarColor()\n"
+                "    }\n\n"
+                "    override fun onWindowFocusChanged(hasFocus: Boolean) {\n"
+                "        super.onWindowFocusChanged(hasFocus)\n"
+                "        if (hasFocus) {\n"
+                "            applyConvertApkStatusBarColor()\n"
+                "        }\n"
+                "    }\n\n"
+                "    private fun applyConvertApkStatusBarColor() {\n"
+                f"        val statusBarColor = resolveConvertApkStatusBarColor({status_bar_literal})\n"
+                "        @Suppress(\"DEPRECATION\")\n"
+                "        window.statusBarColor = statusBarColor\n"
+                "        window.decorView.setBackgroundColor(statusBarColor)\n"
+                "        @Suppress(\"DEPRECATION\")\n"
+                "        window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)\n"
+                "        @Suppress(\"DEPRECATION\")\n"
+                "        window.addFlags(WindowManager.LayoutParams.FLAG_FORCE_NOT_FULLSCREEN)\n"
+                "        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {\n"
+                "            window.setDecorFitsSystemWindows(false)\n"
+                "            val controller = window.insetsController\n"
+                "            if (controller != null) {\n"
+                "                controller.show(WindowInsets.Type.statusBars())\n"
+                "                val lightMask = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS\n"
+                f"                controller.setSystemBarsAppearance(if ({light_icons_literal}) lightMask else 0, lightMask)\n"
+                "            }\n"
+                "        } else {\n"
+                "            @Suppress(\"DEPRECATION\")\n"
+                "            var visibility = View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or View.SYSTEM_UI_FLAG_LAYOUT_STABLE\n"
+                f"            if ({light_icons_literal} && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {{\n"
+                "                visibility = visibility or View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR\n"
+                "            }\n"
+                "            @Suppress(\"DEPRECATION\")\n"
+                "            window.decorView.systemUiVisibility = visibility\n"
+                "        }\n"
+                "        syncConvertApkStatusBarOverlay(statusBarColor)\n"
+                "    }\n\n"
+                "    private fun syncConvertApkStatusBarOverlay(statusBarColor: Int) {\n"
+                "        val contentRoot = findViewById<ViewGroup>(android.R.id.content) ?: return\n"
+                "        val topInset = readConvertApkStatusBarHeightPx()\n"
+                "        val convertApkWebView = bridge?.webView\n"
+                "        if (convertApkWebView != null) {\n"
+                "            convertApkWebView.clipToPadding = true\n"
+                "            convertApkWebView.setPadding(convertApkWebView.paddingLeft, topInset, convertApkWebView.paddingRight, convertApkWebView.paddingBottom)\n"
+                "            convertApkWebView.post {\n"
+                "                val script = \"(function(){var t=\" + topInset + \";var root=document.documentElement;\" +\n"
+                "                    \"if(root){root.style.setProperty('--convertapk-safe-top', t+'px');}\" +\n"
+                "                    \"if(document.body){document.body.style.setProperty('--convertapk-safe-top', t+'px');}\" +\n"
+                "                    \"})();\"\n"
+                "                convertApkWebView.evaluateJavascript(script, null)\n"
+                "            }\n"
+                "        }\n"
+                "        val tag = \"convertapk-status-bar-overlay\"\n"
+                "        val overlay = contentRoot.findViewWithTag<View>(tag) ?: View(this).also {\n"
+                "            it.tag = tag\n"
+                "            contentRoot.addView(\n"
+                "                it,\n"
+                "                FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, topInset).apply {\n"
+                "                    gravity = Gravity.TOP\n"
+                "                },\n"
+                "            )\n"
+                "        }\n"
+                "        overlay.setBackgroundColor(statusBarColor)\n"
+                "        val params = overlay.layoutParams\n"
+                "        if (params != null && params.height != topInset) {\n"
+                "            params.height = topInset\n"
+                "            overlay.layoutParams = params\n"
+                "        }\n"
+                "        overlay.bringToFront()\n"
+                "    }\n\n"
+                "    private fun readConvertApkStatusBarHeightPx(): Int {\n"
+                "        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {\n"
+                "            val insetTop = window.decorView.rootWindowInsets?.getInsets(WindowInsets.Type.statusBars())?.top ?: 0\n"
+                "            if (insetTop > 0) return insetTop\n"
+                "        }\n"
+                "        val resId = resources.getIdentifier(\"status_bar_height\", \"dimen\", \"android\")\n"
+                "        if (resId > 0) return resources.getDimensionPixelSize(resId)\n"
+                "        return (24 * resources.displayMetrics.density).toInt()\n"
+                "    }\n\n"
+                "    private fun resolveConvertApkStatusBarColor(raw: String?): Int {\n"
+                "        val value = raw?.trim().orEmpty()\n"
+                "        if (value.equals(\"transparent\", ignoreCase = true) || value.equals(\"@android:color/transparent\", ignoreCase = true)) {\n"
+                "            return Color.TRANSPARENT\n"
+                "        }\n"
+                "        return runCatching { Color.parseColor(value) }.getOrDefault(Color.WHITE)\n"
+                "    }\n"
+                "    // ConvertAPK：状态栏颜色结束（极简）\n"
+            )
+        else:
+            text = _ensure_import_line(text, "import android.graphics.Color;")
+            text = _ensure_import_line(text, "import android.os.Build;")
+            text = _ensure_import_line(text, "import android.os.Bundle;")
+            text = _ensure_import_line(text, "import android.view.Gravity;")
+            text = _ensure_import_line(text, "import android.view.View;")
+            text = _ensure_import_line(text, "import android.view.ViewGroup;")
+            text = _ensure_import_line(text, "import android.view.WindowInsets;")
+            text = _ensure_import_line(text, "import android.view.WindowInsetsController;")
+            text = _ensure_import_line(text, "import android.view.WindowManager;")
+            text = _ensure_import_line(text, "import android.widget.FrameLayout;")
+            method_block = (
+                "    // ConvertAPK：状态栏颜色开始（极简）\n"
+                "    @Override\n"
+                "    protected void onCreate(Bundle savedInstanceState) {\n"
+                "        super.onCreate(savedInstanceState);\n"
+                "        applyConvertApkStatusBarColor();\n"
+                "    }\n\n"
+                "    @Override\n"
+                "    public void onWindowFocusChanged(boolean hasFocus) {\n"
+                "        super.onWindowFocusChanged(hasFocus);\n"
+                "        if (hasFocus) {\n"
+                "            applyConvertApkStatusBarColor();\n"
+                "        }\n"
+                "    }\n\n"
+                "    private void applyConvertApkStatusBarColor() {\n"
+                f"        int statusBarColor = resolveConvertApkStatusBarColor({status_bar_literal});\n"
+                "        getWindow().setStatusBarColor(statusBarColor);\n"
+                "        getWindow().getDecorView().setBackgroundColor(statusBarColor);\n"
+                "        getWindow().clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);\n"
+                "        getWindow().addFlags(WindowManager.LayoutParams.FLAG_FORCE_NOT_FULLSCREEN);\n"
+                "        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {\n"
+                "            getWindow().setDecorFitsSystemWindows(false);\n"
+                "            WindowInsetsController controller = getWindow().getInsetsController();\n"
+                "            if (controller != null) {\n"
+                "                controller.show(WindowInsets.Type.statusBars());\n"
+                "                int lightMask = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS;\n"
+                f"                controller.setSystemBarsAppearance({light_icons_literal} ? lightMask : 0, lightMask);\n"
+                "            }\n"
+                "        } else {\n"
+                "            int visibility = View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN | View.SYSTEM_UI_FLAG_LAYOUT_STABLE;\n"
+                f"            if ({light_icons_literal} && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {{\n"
+                "                visibility |= View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;\n"
+                "            }\n"
+                "            getWindow().getDecorView().setSystemUiVisibility(visibility);\n"
+                "        }\n"
+                "        syncConvertApkStatusBarOverlay(statusBarColor);\n"
+                "    }\n\n"
+                "    private void syncConvertApkStatusBarOverlay(int statusBarColor) {\n"
+                "        ViewGroup contentRoot = findViewById(android.R.id.content);\n"
+                "        if (contentRoot == null) {\n"
+                "            return;\n"
+                "        }\n"
+                "        int topInset = readConvertApkStatusBarHeightPx();\n"
+                "        android.webkit.WebView convertApkWebView = getBridge() != null ? getBridge().getWebView() : null;\n"
+                "        if (convertApkWebView != null) {\n"
+                "            convertApkWebView.setClipToPadding(true);\n"
+                "            convertApkWebView.setPadding(convertApkWebView.getPaddingLeft(), topInset, convertApkWebView.getPaddingRight(), convertApkWebView.getPaddingBottom());\n"
+                "            convertApkWebView.post(() -> convertApkWebView.evaluateJavascript(\n"
+                "                \"(function(){var t=\" + topInset + \";var root=document.documentElement;\" +\n"
+                "                \"if(root){root.style.setProperty('--convertapk-safe-top', t+'px');}\" +\n"
+                "                \"if(document.body){document.body.style.setProperty('--convertapk-safe-top', t+'px');}\" +\n"
+                "                \"})();\",\n"
+                "                null\n"
+                "            ));\n"
+                "        }\n"
+                "        String tag = \"convertapk-status-bar-overlay\";\n"
+                "        View overlay = contentRoot.findViewWithTag(tag);\n"
+                "        if (overlay == null) {\n"
+                "            overlay = new View(this);\n"
+                "            overlay.setTag(tag);\n"
+                "            FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, topInset);\n"
+                "            params.gravity = Gravity.TOP;\n"
+                "            contentRoot.addView(overlay, params);\n"
+                "        }\n"
+                "        overlay.setBackgroundColor(statusBarColor);\n"
+                "        ViewGroup.LayoutParams params = overlay.getLayoutParams();\n"
+                "        if (params != null && params.height != topInset) {\n"
+                "            params.height = topInset;\n"
+                "            overlay.setLayoutParams(params);\n"
+                "        }\n"
+                "        overlay.bringToFront();\n"
+                "    }\n\n"
+                "    private int readConvertApkStatusBarHeightPx() {\n"
+                "        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && getWindow().getDecorView().getRootWindowInsets() != null) {\n"
+                "            int insetTop = getWindow().getDecorView().getRootWindowInsets().getInsets(WindowInsets.Type.statusBars()).top;\n"
+                "            if (insetTop > 0) return insetTop;\n"
+                "        }\n"
+                "        int resId = getResources().getIdentifier(\"status_bar_height\", \"dimen\", \"android\");\n"
+                "        if (resId > 0) return getResources().getDimensionPixelSize(resId);\n"
+                "        return (int) (24 * getResources().getDisplayMetrics().density);\n"
+                "    }\n\n"
+                "    private int resolveConvertApkStatusBarColor(String raw) {\n"
+                "        String value = raw == null ? \"\" : raw.trim();\n"
+                "        if (\"transparent\".equalsIgnoreCase(value) || \"@android:color/transparent\".equalsIgnoreCase(value)) {\n"
+                "            return Color.TRANSPARENT;\n"
+                "        }\n"
+                "        try {\n"
+                "            return Color.parseColor(value);\n"
+                "        } catch (Exception ignored) {\n"
+                "            return Color.WHITE;\n"
+                "        }\n"
+                "    }\n"
+                "    // ConvertAPK：状态栏颜色结束（极简）\n"
+            )
+        class_close = text.rfind("}")
+        if class_close != -1:
+            text = text[:class_close] + "\n" + method_block + "\n" + text[class_close:]
+    if text != original:
+        main_activity.write_text(text, encoding="utf-8")
+        _log(
+            on_log,
+            f"[MainActivity] {'enabled' if enable else 'disabled'} minimal status-bar-color: {main_activity}",
         )
 
 def _sync_minimal_double_click_exit(
@@ -3344,16 +3711,14 @@ def run_local_build(
                 f'        versionName = "{env.get("VERSION_NAME", "1.0.0")}"',
                 gradle_text,
             )
-            status_bar_hidden = "true" if str(env.get("STATUS_BAR_HIDDEN", "false")).lower() == "true" else "false"
-            status_bar_color = str(env.get("STATUS_BAR_COLOR", "#FFFFFF")).strip().lower()
             task_mode = str(env.get("TASK_MODE", "convert")).strip().lower()
-            if (
-                task_mode == "convert"
-                and status_bar_hidden != "true"
-                and status_bar_color in {"transparent", "@android:color/transparent"}
-            ):
-                status_bar_color = "#ffffff"
-            status_bar_background = "white" if status_bar_color in {"#ffffff", "white", "#ffffffff"} else "transparent"
+            status_bar_hidden = "true" if str(env.get("STATUS_BAR_HIDDEN", "false")).lower() == "true" else "false"
+            status_bar_color = _normalize_status_bar_color_for_android(
+                env.get("STATUS_BAR_COLOR", "#FFFFFF"),
+                task_mode,
+                status_bar_hidden == "true",
+            )
+            status_bar_background = "transparent" if status_bar_hidden == "true" else status_bar_color
             status_bar_style = str(env.get("STATUS_BAR_STYLE", "light")).strip().lower()
             light_status_bar_icons = "true" if status_bar_style == "dark" else "false"
             double_click_exit = "true" if str(env.get("DOUBLE_CLICK_EXIT", "true")).lower() == "true" else "false"
@@ -3615,6 +3980,7 @@ def run_local_build(
         permissions,
         on_log=on_log,
     )
+    _patch_android_status_bar_styles(android_app_dir, env, on_log=on_log)
     if is_native_task:
         _patch_native_android_app_label(android_app_dir, env.get("APP_NAME", "MyApp"), on_log=on_log)
         logo = task_input_dir / "logo.png"
@@ -3636,6 +4002,12 @@ def run_local_build(
         raw_download_mode = str(env.get("DOWNLOAD_MODE", "picker")).strip().lower()
         if raw_download_mode not in {"silent", "picker"}:
             raw_download_mode = "picker"
+        minimal_status_bar_background = _normalize_status_bar_color_for_android(
+            env.get("STATUS_BAR_COLOR", "#FFFFFF"),
+            task_mode,
+            status_bar_hidden_enabled,
+        )
+        minimal_light_status_bar_icons = str(env.get("STATUS_BAR_STYLE", "light")).strip().lower() == "dark"
         minimal_download_listener_enabled = task_mode == "convert"
         main_candidates = list(android_app_dir.rglob("MainActivity.kt")) + list(
             android_app_dir.rglob("MainActivity.java")
@@ -3653,6 +4025,13 @@ def run_local_build(
             _sync_minimal_status_bar_hidden(
                 main_candidates[0],
                 enable=status_bar_hidden_enabled,
+                on_log=on_log,
+            )
+            _sync_minimal_status_bar_color(
+                main_candidates[0],
+                enable=not status_bar_hidden_enabled,
+                status_bar_background=minimal_status_bar_background,
+                light_status_bar_icons=minimal_light_status_bar_icons,
                 on_log=on_log,
             )
             _sync_minimal_double_click_exit(

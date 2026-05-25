@@ -29,7 +29,7 @@ android {
         )
         // 是否隐藏系统状态栏
         buildConfigField("boolean", "HIDE_STATUS_BAR", "false")
-        // 状态栏背景： "transparent" 或 "white"
+        // 状态栏背景：支持 "transparent" 或 #RRGGBB
         buildConfigField("String", "STATUS_BAR_BACKGROUND", "\"transparent\"")
         // 状态栏图标风格：true=深色图标（适合白底）；false=浅色图标（适合透明/深色）
         buildConfigField("boolean", "LIGHT_STATUS_BAR_ICONS", "true")

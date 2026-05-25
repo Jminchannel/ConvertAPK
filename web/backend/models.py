@@ -52,14 +52,14 @@ class AppConfig(BaseModel):
     output_format: str = "apk"
     desktop_runtime: str = "electron"
     desktop_installer_mode: str = "portable"
-    # portrait / landscape / auto (auto = follow system, do not force in AndroidManifest)
+    # 屏幕方向：auto 表示跟随系统，不强制写入 AndroidManifest。
     orientation: str = "auto"
-    # Double-click back to exit
+    # 是否双击返回键退出应用。
     double_click_exit: bool = True
-    # Status Bar
+    # 状态栏配置。
     status_bar_hidden: bool = False
     status_bar_style: str = "light"  # light | dark
-    status_bar_color: str = "#FFFFFF"  # transparent | #FFFFFF
+    status_bar_color: str = "#FFFFFF"  # 支持 transparent、#RRGGBB 或 #AARRGGBB
     # WebView UA (web mode)
     webview_user_agent: str = "android"  # android | pc
     # HTML mode download behavior: silent (save directly) | picker (system file manager)
@@ -142,11 +142,10 @@ class AppConfig(BaseModel):
             return "transparent"
         if lower in {"white", "#ffffff", "#ffffffff"}:
             return "#FFFFFF"
-        # accept hex colors (#RRGGBB / #AARRGGBB)
+        # 仅接受透明或十六进制颜色，避免写入非法 Android XML 值。
         if re.fullmatch(r"#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{8})", raw):
             return raw.upper()
-        # fallback: keep as-is (lets advanced users pass custom references)
-        return raw
+        return "#FFFFFF"
 
     @field_validator("webview_user_agent")
     @classmethod
@@ -364,12 +363,12 @@ class UpdateTaskRequest(BaseModel):
     desktop_installer_mode: Optional[str] = None  # 仅支持 portable（可选）
     desktop_runtime: Optional[str] = None
     desktop_port: Optional[int] = None
-    # APK style overrides (optional)
+    # APK 样式覆盖项（可选）
     orientation: Optional[str] = None
     double_click_exit: Optional[bool] = None
     status_bar_hidden: Optional[bool] = None
     status_bar_style: Optional[str] = None  # light | dark
-    status_bar_color: Optional[str] = None  # transparent | #FFFFFF
+    status_bar_color: Optional[str] = None  # 支持 transparent、#RRGGBB 或 #AARRGGBB
     webview_user_agent: Optional[str] = None  # android | pc (web mode)
     download_mode: Optional[str] = None  # silent | picker (html mode)
     web_fill_mode: Optional[str] = None

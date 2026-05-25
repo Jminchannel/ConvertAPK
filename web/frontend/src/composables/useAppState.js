@@ -54,6 +54,7 @@ export const useAppState = () => {
   const currentTheme = ref(getSavedTheme())
   const currentLang = ref(getSavedLanguage())
   const showLangMenu = ref(false)
+  const appBootLoading = ref(true)
   const openDownloadMenu = ref(null)
   const githubRepoUrl = ref('https://github.com/Jminchannel/ConvertAPK-Desktop')
   const githubStarCount = ref(null)
@@ -78,6 +79,16 @@ export const useAppState = () => {
 
   const i18n = ref(createI18n(currentLang.value))
   const t = (key, params) => i18n.value.t(key, params)
+  const appBootLoadingTitle = computed(() => {
+    if (currentLang.value === 'zh-CN') return '正在准备构建工作台'
+    if (currentLang.value === 'zh-TW') return '正在準備建置工作台'
+    return 'Preparing your build workspace'
+  })
+  const appBootLoadingText = computed(() => {
+    if (currentLang.value === 'zh-CN') return '正在加载任务、功能开关和账号状态，请稍候。'
+    if (currentLang.value === 'zh-TW') return '正在載入任務、功能開關與帳號狀態，請稍候。'
+    return 'Loading tasks, feature switches, and account status. Please wait.'
+  })
 
   const applyTheme = (theme) => {
     if (theme === 'light') document.documentElement.classList.add('light-theme')
@@ -977,6 +988,41 @@ export const useAppState = () => {
     keystore_password: '',
     key_password: ''
   })
+
+  const normalizeStatusBarColor = (raw) => {
+    let value = String(raw || '').trim()
+    if (!value) return '#FFFFFF'
+    if (value.toLowerCase() === 'transparent') return 'transparent'
+    if (/^[0-9a-fA-F]{6}$/.test(value) || /^[0-9a-fA-F]{8}$/.test(value)) {
+      value = `#${value}`
+    }
+    if (/^#[0-9a-fA-F]{3}$/.test(value)) {
+      value = `#${value.slice(1).split('').map((item) => item + item).join('')}`
+    }
+    if (/^#[0-9a-fA-F]{6}$/.test(value) || /^#[0-9a-fA-F]{8}$/.test(value)) {
+      return value.toUpperCase()
+    }
+    return '#FFFFFF'
+  }
+
+  const statusBarColorPickerValue = computed(() => {
+    const normalized = normalizeStatusBarColor(config.value.status_bar_color)
+    if (/^#[0-9A-F]{8}$/.test(normalized)) {
+      return `#${normalized.slice(3)}`
+    }
+    if (/^#[0-9A-F]{6}$/.test(normalized)) {
+      return normalized
+    }
+    return '#FFFFFF'
+  })
+
+  const handleStatusBarColorPickerInput = (event) => {
+    config.value.status_bar_color = normalizeStatusBarColor(event?.target?.value)
+  }
+
+  const normalizeStatusBarColorInput = () => {
+    config.value.status_bar_color = normalizeStatusBarColor(config.value.status_bar_color)
+  }
 
   const applyQuickGenerateDefaults = () => {
     // 一键生成使用后端默认图标与签名文件，进入时清理用户已上传的内容。
@@ -3494,6 +3540,9 @@ export const useAppState = () => {
           webUrl.value = normalizedWebUrl
         }
       }
+      if (mode.value === 'convert' || mode.value === 'web' || mode.value === 'html') {
+        normalizeStatusBarColorInput()
+      }
 
       const isQuickGenerate = quickGenerate.value && quickGenerateSupportedModes.has(mode.value) && !updatingTaskId.value
 
@@ -3520,7 +3569,7 @@ export const useAppState = () => {
           double_click_exit: config.value.double_click_exit,
           status_bar_hidden: config.value.status_bar_hidden,
           status_bar_style: config.value.status_bar_style,
-          status_bar_color: config.value.status_bar_color,
+          status_bar_color: normalizeStatusBarColor(config.value.status_bar_color),
           webview_user_agent: config.value.webview_user_agent,
           download_mode: config.value.download_mode,
           web_fill_mode: config.value.web_fill_mode,
@@ -3560,7 +3609,7 @@ export const useAppState = () => {
             double_click_exit: config.value.double_click_exit,
             status_bar_hidden: config.value.status_bar_hidden,
             status_bar_style: config.value.status_bar_style,
-            status_bar_color: config.value.status_bar_color,
+            status_bar_color: normalizeStatusBarColor(config.value.status_bar_color),
             webview_user_agent: config.value.webview_user_agent,
             download_mode: config.value.download_mode,
             web_fill_mode: config.value.web_fill_mode,
@@ -3916,11 +3965,15 @@ export const useAppState = () => {
     if (mode.value === 'native') {
       mode.value = 'convert'
     }
-    await fetchBuildQuotaContext()
+    const buildQuotaPromise = fetchBuildQuotaContext()
     if (!isAuthEntryEnabled.value) {
       if (showAuthModal.value) {
         closeAuthModal()
       }
+      await Promise.allSettled([
+        buildQuotaPromise,
+        refreshClientFreezeStatus()
+      ])
       return
     }
     if (authMode.value === 'register' && !isClientRegisterEnabled.value && isClientLoginEnabled.value) {
@@ -3934,7 +3987,10 @@ export const useAppState = () => {
       authSmsSending.value = false
       stopAuthSmsCountdown()
     }
-    await refreshClientFreezeStatus()
+    await Promise.allSettled([
+      buildQuotaPromise,
+      refreshClientFreezeStatus()
+    ])
   }
   const fetchAnnouncements = async () => {
     try {
@@ -4125,41 +4181,51 @@ export const useAppState = () => {
   }
 
   onMounted(async () => {
-    updateMobileShell()
-    applyTheme(currentTheme.value)
-    // 首次加载时应用保存的语言到 html[lang]，便于辅助技术发音
-    applyDocumentLang(currentLang.value)
-    showComplianceNotice.value = true
-    document.addEventListener('click', handleClickOutside)
-    document.addEventListener('visibilitychange', handleDocumentVisibilityChange)
-    document.addEventListener('keydown', handleGlobalEscape)
-    window.addEventListener('resize', updateMobileShell)
-    window.addEventListener('pagehide', releaseDesktopOutputsOnPageExit)
-    window.addEventListener('beforeunload', releaseDesktopOutputsOnPageExit)
-    startDesktopOutputHeartbeat()
-    const githubCallbackResult = consumeGithubCallbackHash()
-    const authReady = await syncAuthUser({ silent: true })
-    if (githubCallbackResult.handled) {
-      if (githubCallbackResult.success && authReady) {
-        showToast(t('auth.githubLoginSuccess'), 'success')
-      } else if (githubCallbackResult.error) {
-        showToast(resolveAuthErrorMessage(githubCallbackResult.error), 'error')
+    appBootLoading.value = true
+    try {
+      updateMobileShell()
+      applyTheme(currentTheme.value)
+      // 首次加载时应用保存的语言到 html[lang]，便于辅助技术发音
+      applyDocumentLang(currentLang.value)
+      showComplianceNotice.value = true
+      document.addEventListener('click', handleClickOutside)
+      document.addEventListener('visibilitychange', handleDocumentVisibilityChange)
+      document.addEventListener('keydown', handleGlobalEscape)
+      window.addEventListener('resize', updateMobileShell)
+      window.addEventListener('pagehide', releaseDesktopOutputsOnPageExit)
+      window.addEventListener('beforeunload', releaseDesktopOutputsOnPageExit)
+      startDesktopOutputHeartbeat()
+      const githubCallbackResult = consumeGithubCallbackHash()
+      const [
+        authReadyResult
+      ] = await Promise.allSettled([
+        syncAuthUser({ silent: true }),
+        fetchAdminFeatures(),
+        refreshTasks(),
+        fetchAnnouncements(),
+        loadSystemInfo()
+      ])
+      const authReady = authReadyResult.status === 'fulfilled' && Boolean(authReadyResult.value)
+      if (githubCallbackResult.handled) {
+        if (githubCallbackResult.success && authReady) {
+          showToast(t('auth.githubLoginSuccess'), 'success')
+        } else if (githubCallbackResult.error) {
+          showToast(resolveAuthErrorMessage(githubCallbackResult.error), 'error')
+        }
       }
-    }
-    await fetchAdminFeatures()
-    await refreshTasks()
-    await fetchAnnouncements()
-    await loadSystemInfo()
-    refreshGithubRepoStats()
-    githubStatsInterval = setInterval(() => {
       refreshGithubRepoStats()
-    }, 10 * 60 * 1000)
-    if (window.windowControls?.isMaximized) {
-      try {
-        isMaximized.value = await window.windowControls.isMaximized()
-      } catch {
-        // ignore
+      githubStatsInterval = setInterval(() => {
+        refreshGithubRepoStats()
+      }, 10 * 60 * 1000)
+      if (window.windowControls?.isMaximized) {
+        try {
+          isMaximized.value = await window.windowControls.isMaximized()
+        } catch {
+          // ignore
+        }
       }
+    } finally {
+      appBootLoading.value = false
     }
   })
 
@@ -4217,6 +4283,9 @@ export const useAppState = () => {
     currentTheme,
     currentLang,
     showLangMenu,
+    appBootLoading,
+    appBootLoadingTitle,
+    appBootLoadingText,
     openDownloadMenu,
     githubRepoUrl,
     githubStarCount,
@@ -4297,6 +4366,9 @@ export const useAppState = () => {
     scrollToProjectSection,
     openFirstTaskGuide,
     handleModeChange,
+    statusBarColorPickerValue,
+    handleStatusBarColorPickerInput,
+    normalizeStatusBarColorInput,
     jsTemplate,
     copyJsCode,
     permissionsList,

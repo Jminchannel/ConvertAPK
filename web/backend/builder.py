@@ -5,6 +5,7 @@ APK Builder 模块
 """
 import os
 import json
+import re
 import shutil
 import stat
 import subprocess
@@ -79,6 +80,36 @@ elif not DATA_VOLUME:
     TEMPLATES_DIR = str(_templates_candidate) if _templates_candidate.exists() else ""
 else:
     TEMPLATES_DIR = ""
+DATA_VOLUME_TEMPLATE_SUBDIR = Path("ConvertAPK-Desktop") / "templates"
+DATA_VOLUME_TEMPLATE_CONTAINER_DIR = f"/data/{DATA_VOLUME_TEMPLATE_SUBDIR.as_posix()}"
+ANDROID_TEMPLATE_NAMES = ("Tubbim", "HTML2APK")
+
+
+def _is_android_templates_ready(root: Path) -> bool:
+    return all((root / name / "gradlew").exists() for name in ANDROID_TEMPLATE_NAMES)
+
+
+def _sync_android_templates_to_data_volume(on_log: Optional[Callable[[str], None]] = None) -> str:
+    """同步 Android 模板到共享数据卷，供 apk-builder 子容器读取。"""
+    if not DATA_VOLUME:
+        return ""
+    source_root = PROJECT_ROOT / "templates"
+    target_root = DATA_DIR / DATA_VOLUME_TEMPLATE_SUBDIR
+    if not source_root.exists():
+        return DATA_VOLUME_TEMPLATE_CONTAINER_DIR if _is_android_templates_ready(target_root) else ""
+
+    target_root.mkdir(parents=True, exist_ok=True)
+    ignore = shutil.ignore_patterns(".git", ".gradle", ".gradle-home", ".kotlin", "build", "node_modules")
+    copied = False
+    for template_name in ANDROID_TEMPLATE_NAMES:
+        source_dir = source_root / template_name
+        if not source_dir.exists():
+            continue
+        shutil.copytree(source_dir, target_root / template_name, dirs_exist_ok=True, ignore=ignore)
+        copied = True
+    if copied and on_log:
+        on_log(f"[Templates] Android 模板已同步到 {target_root}")
+    return DATA_VOLUME_TEMPLATE_CONTAINER_DIR if _is_android_templates_ready(target_root) else ""
 
 
 def _ensure_writable_data_dir(preferred_dir: Path) -> Path:
@@ -443,6 +474,20 @@ def _is_light_color(color: str) -> bool:
     r, g, b = rgb
     luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255.0
     return luminance >= 0.6
+
+
+def _normalize_status_bar_color(color: str) -> str:
+    value = str(color or "").strip()
+    if not value:
+        return "#FFFFFF"
+    lower = value.lower()
+    if lower in {"transparent", "@android:color/transparent"}:
+        return "transparent"
+    if lower == "white":
+        return "#FFFFFF"
+    if re.fullmatch(r"#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{8})", value):
+        return value.upper()
+    return "#FFFFFF"
 
 
 def _iter_zip_entries(zip_file: zipfile.ZipFile):
@@ -942,9 +987,7 @@ class APKBuilder:
             parsed_desktop_port = 0
         if 1024 <= parsed_desktop_port <= 65535:
             desktop_port_normalized = parsed_desktop_port
-        status_bar_color_normalized = str(status_bar_color or "").strip()
-        if not status_bar_color_normalized:
-            status_bar_color_normalized = "#FFFFFF"
+        status_bar_color_normalized = _normalize_status_bar_color(status_bar_color)
         if (
             task_mode_normalized == "convert"
             and not status_bar_hidden
@@ -1111,7 +1154,13 @@ class APKBuilder:
 
             cmd = ["docker", "run", "--rm"]
             cmd += task_mount_args
-            if TEMPLATES_DIR and not is_desktop_task:
+            if task_data_volume and not is_desktop_task:
+                template_root = _sync_android_templates_to_data_volume(log)
+                if template_root:
+                    cmd += ["-e", f"TEMPLATES_DIR={template_root}"]
+                else:
+                    log("[Templates] 数据卷中没有可用的 Android 模板")
+            elif TEMPLATES_DIR and not is_desktop_task:
                 cmd += ["-v", f"{TEMPLATES_DIR}:/workspace/templates:ro"]
             cmd += ["-v", gradle_mount]
             cmd += ["--memory=6g", "--cpus=4"]

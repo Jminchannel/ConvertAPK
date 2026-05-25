@@ -1,5 +1,6 @@
 package osa.cosa.html2apk
 
+import android.graphics.Color
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -46,6 +47,22 @@ object AppConfig {
 
     val statusBarBackground: String
         get() = BuildConfig.STATUS_BAR_BACKGROUND
+
+    val statusBarDrawBehind: Boolean
+        get() {
+            val value = statusBarBackground.trim()
+            return value.equals("transparent", ignoreCase = true) ||
+                value.equals("@android:color/transparent", ignoreCase = true)
+        }
+
+    val statusBarColor: Int
+        get() {
+            val value = statusBarBackground.trim()
+            if (value.equals("transparent", ignoreCase = true) || value.equals("@android:color/transparent", ignoreCase = true)) {
+                return Color.TRANSPARENT
+            }
+            return runCatching { Color.parseColor(value) }.getOrDefault(Color.WHITE)
+        }
 
     val lightStatusBarIcons: Boolean
         get() = BuildConfig.LIGHT_STATUS_BAR_ICONS

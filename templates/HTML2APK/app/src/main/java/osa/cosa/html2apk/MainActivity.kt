@@ -6,7 +6,6 @@ import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
-import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
@@ -29,9 +28,14 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.windowInsetsTopHeight
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -39,6 +43,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color as ComposeColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
@@ -56,9 +61,19 @@ class MainActivity : ComponentActivity() {
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
         setContent {
             HTML2APKTheme {
-                val paddingModifier = if (AppConfig.hideSystemBars) Modifier else Modifier.systemBarsPadding()
-                Box(modifier = Modifier.fillMaxSize().then(paddingModifier)) {
-                    Html2ApkWebView(startUrl = START_URL, modifier = Modifier.fillMaxSize())
+                Box(modifier = Modifier.fillMaxSize()) {
+                    val paddingModifier = if (AppConfig.hideSystemBars) Modifier else Modifier.systemBarsPadding()
+                    Box(modifier = Modifier.fillMaxSize().then(paddingModifier)) {
+                        Html2ApkWebView(startUrl = START_URL, modifier = Modifier.fillMaxSize())
+                    }
+                    if (!AppConfig.hideSystemBars && !AppConfig.statusBarDrawBehind) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .windowInsetsTopHeight(WindowInsets.statusBars)
+                                .background(ComposeColor(AppConfig.statusBarColor)),
+                        )
+                    }
                 }
             }
         }
@@ -72,10 +87,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun applySystemBars() {
-        val statusBarBackground = AppConfig.statusBarBackground.trim().lowercase()
-        val drawBehind = statusBarBackground == "transparent"
-        WindowCompat.setDecorFitsSystemWindows(window, !drawBehind)
-        window.statusBarColor = if (drawBehind) Color.TRANSPARENT else Color.WHITE
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        val statusBarColor = AppConfig.statusBarColor
+        @Suppress("DEPRECATION")
+        window.statusBarColor = statusBarColor
+        window.decorView.setBackgroundColor(statusBarColor)
 
         val controller = WindowInsetsControllerCompat(window, window.decorView)
         controller.isAppearanceLightStatusBars = AppConfig.lightStatusBarIcons

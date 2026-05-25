@@ -311,7 +311,6 @@ override fun onWindowFocusChanged(hasFocus: Boolean) {
 
     private fun applyNavigationInsets() {
         val root = window.decorView
-        val drawBehindStatusBar = AppConfig.systemBars.drawBehindStatusBar
         val hideStatusBar = AppConfig.systemBars.hideStatusBar
         ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
             val nav = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
@@ -319,7 +318,7 @@ override fun onWindowFocusChanged(hasFocus: Boolean) {
             val statusStable = insets.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.statusBars())
             val cutout = insets.getInsets(WindowInsetsCompat.Type.displayCutout())
             val topSystemInset = maxOf(status.top, statusStable.top, cutout.top)
-            val shouldApplyTopInset = drawBehindStatusBar || hideStatusBar
+            val shouldApplyTopInset = !hideStatusBar
             val topInset = if (shouldApplyTopInset) topSystemInset else 0
             webView.setPadding(nav.left, topInset, nav.right, nav.bottom)
             webView.post {
@@ -337,9 +336,10 @@ override fun onWindowFocusChanged(hasFocus: Boolean) {
 
     private fun applySystemBarsConfig(config: SystemBarsConfig) {
         // 透明状态栏一般需要“内容绘制到状态栏下方”
-        WindowCompat.setDecorFitsSystemWindows(window, !config.drawBehindStatusBar)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
         @Suppress("DEPRECATION")
         window.statusBarColor = config.statusBarColor
+        window.decorView.setBackgroundColor(config.statusBarColor)
 
         val controller = WindowInsetsControllerCompat(window, window.decorView)
         controller.isAppearanceLightStatusBars = config.lightStatusBarIcons

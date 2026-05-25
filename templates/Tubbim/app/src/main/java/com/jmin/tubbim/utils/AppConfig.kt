@@ -47,7 +47,7 @@ data class SystemBarsConfig(
     val hideStatusBar: Boolean,
 
     /**
-     * 状态栏背景（白底/透明）
+     * 状态栏背景颜色。
      */
     val statusBarBackground: StatusBarBackground,
 
@@ -64,33 +64,28 @@ data class SystemBarsConfig(
      * 是否允许内容绘制到状态栏下方（透明状态栏一般需要）
      */
     val drawBehindStatusBar: Boolean
-        get() = statusBarBackground == StatusBarBackground.TRANSPARENT
+        get() = statusBarBackground.drawBehind
 
     val statusBarColor: Int
-        get() = when (statusBarBackground) {
-            StatusBarBackground.TRANSPARENT -> Color.TRANSPARENT
-            StatusBarBackground.WHITE -> Color.WHITE
-        }
+        get() = statusBarBackground.color
 }
 
-enum class StatusBarBackground {
-    TRANSPARENT,
-    WHITE;
-
+data class StatusBarBackground private constructor(
+    val color: Int,
+    val drawBehind: Boolean,
+) {
     companion object {
         /**
-         * 允许从 BuildConfig 的字符串读取（忽略大小写）：
-         * - "transparent"
-         * - "white"
+         * 允许从 BuildConfig 读取透明或十六进制颜色。
          */
         fun from(raw: String?): StatusBarBackground {
-            return when (raw?.trim()?.lowercase()) {
-                "white" -> WHITE
-                "transparent" -> TRANSPARENT
-                else -> TRANSPARENT
+            val value = raw.orEmpty().trim()
+            if (value.equals("transparent", ignoreCase = true) || value.equals("@android:color/transparent", ignoreCase = true)) {
+                return StatusBarBackground(Color.TRANSPARENT, true)
             }
+            val color = runCatching { Color.parseColor(value) }.getOrDefault(Color.WHITE)
+            return StatusBarBackground(color, false)
         }
     }
 }
-
 

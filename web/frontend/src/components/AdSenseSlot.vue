@@ -77,6 +77,8 @@ const adStyle = computed(() => `display:block;min-height:${props.minHeight}px`)
 const ensureAdsenseScript = () => {
   if (typeof document === 'undefined') return
   if (document.getElementById('google-adsense-script')) return
+  const existingScript = document.querySelector('script[src*="pagead2.googlesyndication.com/pagead/js/adsbygoogle.js"]')
+  if (existingScript) return
   const script = document.createElement('script')
   script.id = 'google-adsense-script'
   script.async = true
