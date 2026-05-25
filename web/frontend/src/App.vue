@@ -1320,7 +1320,14 @@
             <div class="compliance-effective">
               {{ complianceNotice.effectiveDateLabel }}: {{ complianceNotice.effectiveDate }}
             </div>
-            <p class="compliance-intro">{{ complianceNotice.intro }}</p>
+            <p v-if="complianceNotice.intro" class="compliance-intro">{{ complianceNotice.intro }}</p>
+            <p
+              v-for="(paragraph, paragraphIndex) in complianceNotice.paragraphs || []"
+              :key="`compliance-paragraph-${paragraphIndex}`"
+              class="compliance-intro compliance-custom-paragraph"
+            >
+              {{ paragraph }}
+            </p>
             <div
               v-for="(section, sectionIndex) in complianceNotice.sections"
               :key="section.title"
@@ -1331,7 +1338,7 @@
                 <li v-for="line in section.lines" :key="line">{{ line }}</li>
               </ul>
             </div>
-            <div class="compliance-law">{{ complianceNotice.legalReferences }}</div>
+            <div v-if="complianceNotice.legalReferences" class="compliance-law">{{ complianceNotice.legalReferences }}</div>
           </div>
           <div class="compliance-dialog-footer">
             <button class="btn btn-secondary btn-sm" @click="rejectComplianceNotice">

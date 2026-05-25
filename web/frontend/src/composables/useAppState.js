@@ -134,6 +134,12 @@ export const useAppState = () => {
     rewarded_build_ads_enabled: false,
     donation_popup_probability: 10,
     donation_popup_message: '',
+    compliance_notice_enabled: false,
+    compliance_notice_title: 'User Agreement and Terms of Service',
+    compliance_notice_effective_date: '2026-05-13',
+    compliance_notice_content: '',
+    compliance_notice_accept_button: 'Agree and Continue',
+    compliance_notice_reject_button: 'Decline and Exit',
     client_login_enabled: true,
     client_sms_login_enabled: false,
     client_register_enabled: true,
@@ -172,6 +178,12 @@ export const useAppState = () => {
     const text = String(featureFlags.value.donation_popup_message || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim()
     return text
   })
+  const complianceNoticeEnabled = computed(() => featureFlags.value.compliance_notice_enabled === true)
+  const normalizeComplianceNoticeText = (value, maxLength, fallback = '') => {
+    const text = String(value || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim()
+    if (!text) return fallback
+    return text.slice(0, maxLength)
+  }
   const desktopPortMin = 1024
   const desktopPortMax = 65535
   const desktopPortDefaultMin = 20000
@@ -662,7 +674,7 @@ export const useAppState = () => {
     if (lines.length <= 1) return ''
     return lines.slice(1).join(' ')
   })
-  const showComplianceNotice = ref(true)
+  const showComplianceNotice = ref(false)
   const taskComplianceAck = ref(false)
   const previousVersionName = ref('')
   const clientFreezeState = ref({
@@ -870,9 +882,25 @@ export const useAppState = () => {
     }
   }
   const complianceNotice = computed(() => {
-    if (currentLang.value === 'zh-CN') return complianceNoticeByLang['zh-CN']
-    if (currentLang.value === 'zh-TW') return complianceNoticeByLang['zh-TW']
-    return complianceNoticeByLang.en
+    const defaultNotice = currentLang.value === 'zh-CN'
+      ? complianceNoticeByLang['zh-CN']
+      : (currentLang.value === 'zh-TW' ? complianceNoticeByLang['zh-TW'] : complianceNoticeByLang.en)
+    const customContent = normalizeComplianceNoticeText(featureFlags.value.compliance_notice_content, 8000)
+    if (!customContent) return defaultNotice
+    return {
+      title: normalizeComplianceNoticeText(featureFlags.value.compliance_notice_title, 160, defaultNotice.title),
+      effectiveDateLabel: defaultNotice.effectiveDateLabel,
+      effectiveDate: normalizeComplianceNoticeText(featureFlags.value.compliance_notice_effective_date, 32, defaultNotice.effectiveDate),
+      intro: '',
+      paragraphs: customContent
+        .split(/\n{2,}/)
+        .map((paragraph) => paragraph.trim())
+        .filter((paragraph) => paragraph),
+      sections: [],
+      legalReferences: '',
+      acceptButton: normalizeComplianceNoticeText(featureFlags.value.compliance_notice_accept_button, 80, defaultNotice.acceptButton),
+      rejectButton: normalizeComplianceNoticeText(featureFlags.value.compliance_notice_reject_button, 80, defaultNotice.rejectButton)
+    }
   })
   const taskComplianceError = computed(() => {
     if (clientFreezeState.value.frozen) {
@@ -3929,6 +3957,12 @@ export const useAppState = () => {
         rewarded_build_ads_enabled: Boolean(result?.rewarded_build_ads_enabled),
         donation_popup_probability: normalizeDonationPopupProbability(result?.donation_popup_probability),
         donation_popup_message: String(result?.donation_popup_message || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n'),
+        compliance_notice_enabled: result?.compliance_notice_enabled === true,
+        compliance_notice_title: String(result?.compliance_notice_title || 'User Agreement and Terms of Service'),
+        compliance_notice_effective_date: String(result?.compliance_notice_effective_date || '2026-05-13'),
+        compliance_notice_content: String(result?.compliance_notice_content || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n'),
+        compliance_notice_accept_button: String(result?.compliance_notice_accept_button || 'Agree and Continue'),
+        compliance_notice_reject_button: String(result?.compliance_notice_reject_button || 'Decline and Exit'),
         client_login_enabled: result?.client_login_enabled === undefined ? true : Boolean(result?.client_login_enabled),
         client_sms_login_enabled: result?.client_sms_login_enabled === true,
         client_register_enabled: result?.client_register_enabled === undefined ? true : Boolean(result?.client_register_enabled),
@@ -3941,6 +3975,12 @@ export const useAppState = () => {
         rewarded_build_ads_enabled: false,
         donation_popup_probability: 10,
         donation_popup_message: '',
+        compliance_notice_enabled: false,
+        compliance_notice_title: 'User Agreement and Terms of Service',
+        compliance_notice_effective_date: '2026-05-13',
+        compliance_notice_content: '',
+        compliance_notice_accept_button: 'Agree and Continue',
+        compliance_notice_reject_button: 'Decline and Exit',
         client_login_enabled: true,
         client_sms_login_enabled: false,
         client_register_enabled: true,
@@ -3955,6 +3995,7 @@ export const useAppState = () => {
     if (mode.value === 'native') {
       mode.value = 'convert'
     }
+    showComplianceNotice.value = complianceNoticeEnabled.value
     const buildQuotaPromise = fetchBuildQuotaContext()
     if (!isAuthEntryEnabled.value) {
       if (showAuthModal.value) {
@@ -4177,7 +4218,6 @@ export const useAppState = () => {
       applyTheme(currentTheme.value)
       // 首次加载时应用保存的语言到 html[lang]，便于辅助技术发音
       applyDocumentLang(currentLang.value)
-      showComplianceNotice.value = true
       document.addEventListener('click', handleClickOutside)
       document.addEventListener('visibilitychange', handleDocumentVisibilityChange)
       document.addEventListener('keydown', handleGlobalEscape)

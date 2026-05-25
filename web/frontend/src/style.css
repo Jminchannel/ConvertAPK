@@ -1780,6 +1780,10 @@ html.light-theme .html-editor-toolbar {
   color: var(--text-main);
 }
 
+.compliance-custom-paragraph {
+  white-space: pre-line;
+}
+
 .compliance-section + .compliance-section {
   margin-top: 12px;
 }

@@ -273,6 +273,12 @@ def fetch_feature_flags(client_id: str = "", force: bool = False) -> Dict[str, A
         "rewarded_build_ads_enabled": False,
         "donation_popup_probability": _DONATION_POPUP_PROBABILITY_DEFAULT,
         "donation_popup_message": "",
+        "compliance_notice_enabled": False,
+        "compliance_notice_title": "User Agreement and Terms of Service",
+        "compliance_notice_effective_date": "2026-05-13",
+        "compliance_notice_content": "",
+        "compliance_notice_accept_button": "Agree and Continue",
+        "compliance_notice_reject_button": "Decline and Exit",
         "client_login_enabled": True,
         "client_sms_login_enabled": False,
         "client_register_enabled": True,
@@ -365,6 +371,17 @@ def fetch_feature_flags(client_id: str = "", force: bool = False) -> Dict[str, A
         if "donation_popup_message" in data:
             message = str(data.get("donation_popup_message") or "").replace("\r\n", "\n").replace("\r", "\n").strip()
             result["donation_popup_message"] = message
+        if "compliance_notice_enabled" in data:
+            result["compliance_notice_enabled"] = bool(data.get("compliance_notice_enabled"))
+        for field_name in (
+            "compliance_notice_title",
+            "compliance_notice_effective_date",
+            "compliance_notice_content",
+            "compliance_notice_accept_button",
+            "compliance_notice_reject_button",
+        ):
+            if field_name in data:
+                result[field_name] = str(data.get(field_name) or "").replace("\r\n", "\n").replace("\r", "\n").strip()
         if "client_login_enabled" in data:
             result["client_login_enabled"] = bool(data.get("client_login_enabled"))
         if "client_sms_login_enabled" in data:
