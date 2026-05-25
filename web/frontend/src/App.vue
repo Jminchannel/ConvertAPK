@@ -17,7 +17,7 @@
         class="app-boot-overlay"
         role="status"
         aria-live="polite"
-        :aria-label="appBootLoadingTitle"
+        aria-label="页面加载中"
       >
         <div class="app-boot-panel">
           <div class="app-boot-gooey" aria-hidden="true">

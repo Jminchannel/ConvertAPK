@@ -79,16 +79,6 @@ export const useAppState = () => {
 
   const i18n = ref(createI18n(currentLang.value))
   const t = (key, params) => i18n.value.t(key, params)
-  const appBootLoadingTitle = computed(() => {
-    if (currentLang.value === 'zh-CN') return '正在准备构建工作台'
-    if (currentLang.value === 'zh-TW') return '正在準備建置工作台'
-    return 'Preparing your build workspace'
-  })
-  const appBootLoadingText = computed(() => {
-    if (currentLang.value === 'zh-CN') return '正在加载任务、功能开关和账号状态，请稍候。'
-    if (currentLang.value === 'zh-TW') return '正在載入任務、功能開關與帳號狀態，請稍候。'
-    return 'Loading tasks, feature switches, and account status. Please wait.'
-  })
 
   const applyTheme = (theme) => {
     if (theme === 'light') document.documentElement.classList.add('light-theme')
@@ -4284,8 +4274,6 @@ export const useAppState = () => {
     currentLang,
     showLangMenu,
     appBootLoading,
-    appBootLoadingTitle,
-    appBootLoadingText,
     openDownloadMenu,
     githubRepoUrl,
     githubStarCount,
