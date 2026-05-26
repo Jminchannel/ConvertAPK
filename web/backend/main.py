@@ -220,7 +220,7 @@ def _to_runtime_bool(value, default: bool = False) -> bool:
     return default
 
 
-def _load_client_feature_flags(client_id: str | None = None) -> dict:
+def _load_client_feature_flags(client_id: str | None = None, force: bool = False) -> dict:
     sms_login_default_enabled = _env_bool(
         "CLIENT_SMS_LOGIN_ENABLED",
         default=bool(str(os.getenv("AUTH_SMS_REDIS_URL") or "").strip()),
@@ -275,7 +275,7 @@ def _load_client_feature_flags(client_id: str | None = None) -> dict:
         ),
     }
     try:
-        data = fetch_feature_flags(client_id=_normalize_client_id(client_id))
+        data = fetch_feature_flags(client_id=_normalize_client_id(client_id), force=force)
     except Exception:
         data = None
     if isinstance(data, dict):
@@ -385,8 +385,8 @@ def _is_client_sms_login_enabled(client_id: str | None = None) -> bool:
     return bool(flags.get("client_sms_login_enabled", False))
 
 
-def _get_upload_max_size_mb(client_id: str | None = None) -> int:
-    flags = _load_client_feature_flags(client_id=client_id)
+def _get_upload_max_size_mb(client_id: str | None = None, force: bool = False) -> int:
+    flags = _load_client_feature_flags(client_id=client_id, force=force)
     return _normalize_upload_max_size_mb(flags.get("upload_max_size_mb"))
 
 
@@ -5606,7 +5606,7 @@ async def upload_file(client_id: str | None = None, file: UploadFile = File(...)
     if not normalized_name.lower().endswith('.zip'):
         raise HTTPException(status_code=400, detail="只支持ZIP文件")
     
-    max_size_mb = _get_upload_max_size_mb(client_id)
+    max_size_mb = _get_upload_max_size_mb(client_id, force=True)
     max_size_bytes = max_size_mb * 1024 * 1024
     file_id = str(uuid.uuid4())
     filename = f"{file_id}_{normalized_name}"
@@ -5654,7 +5654,7 @@ async def upload_html(client_id: str | None = None, file: UploadFile = File(...)
     if not (filename_lower.endswith(".html") or filename_lower.endswith(".htm")):
         raise HTTPException(status_code=400, detail="只支持HTML文件")
 
-    max_size_mb = _get_upload_max_size_mb(client_id)
+    max_size_mb = _get_upload_max_size_mb(client_id, force=True)
     max_size_bytes = max_size_mb * 1024 * 1024
     file_id = str(uuid.uuid4())
     filename = f"{file_id}_{normalized_name}"
@@ -7459,8 +7459,8 @@ async def adminhub_announcements():
 
 
 @app.get("/api/adminhub/features")
-async def adminhub_features(client_id: str | None = None):
-    return _to_public_client_feature_flags(_load_client_feature_flags(client_id=client_id))
+async def adminhub_features(client_id: str | None = None, force: bool = False):
+    return _to_public_client_feature_flags(_load_client_feature_flags(client_id=client_id, force=force))
 
 
 @app.get("/api/adminhub/build-quota")

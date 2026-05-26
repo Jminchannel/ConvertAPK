@@ -143,6 +143,7 @@ export const useAppState = () => {
     client_login_enabled: true,
     client_sms_login_enabled: false,
     client_register_enabled: true,
+    upload_max_size_mb: 200,
   })
   const buildQuotaContext = ref({
     build_code_enabled: false,
@@ -166,6 +167,13 @@ export const useAppState = () => {
   const isClientRegisterEnabled = computed(() => featureFlags.value.client_register_enabled !== false)
   const isAuthEntryEnabled = computed(() => isClientLoginEnabled.value || isClientRegisterEnabled.value)
   const isBuildQuotaUnlimited = computed(() => Boolean(buildQuotaContext.value.is_unlimited))
+  const normalizeUploadMaxSizeMb = (value) => {
+    const num = Number(value)
+    if (!Number.isFinite(num)) return 200
+    if (num < 1) return 1
+    if (num > 10240) return 10240
+    return Math.round(num)
+  }
   const normalizeDonationPopupProbability = (value) => {
     const num = Number(value)
     if (!Number.isFinite(num)) return 10
@@ -2554,10 +2562,44 @@ export const useAppState = () => {
   }
 
   // Upload
+  const refreshUploadLimitForValidation = async () => {
+    try {
+      const result = await api.getAdminFeatures({ force: true })
+      if (result && Object.prototype.hasOwnProperty.call(result, 'upload_max_size_mb')) {
+        featureFlags.value = {
+          ...featureFlags.value,
+          upload_max_size_mb: normalizeUploadMaxSizeMb(result.upload_max_size_mb)
+        }
+      }
+    } catch {
+      // 上传前刷新失败时保留本地缓存，最终仍由后端限制兜底。
+    }
+  }
+
+  const validateUploadFileSize = async (file) => {
+    const fileSize = Number(file?.size)
+    if (!Number.isFinite(fileSize) || fileSize <= 0) return true
+    await refreshUploadLimitForValidation()
+    const maxSizeMb = normalizeUploadMaxSizeMb(featureFlags.value.upload_max_size_mb)
+    const maxSizeBytes = maxSizeMb * 1024 * 1024
+    if (fileSize <= maxSizeBytes) return true
+    showToast(
+      t('toast.uploadTooLarge', {
+        size: formatFileSize(fileSize),
+        limit: `${maxSizeMb} MB`
+      }),
+      'error'
+    )
+    return false
+  }
+
   const triggerFileInput = () => fileInput.value?.click?.()
   const handleFileSelect = async (event) => {
     const file = event.target.files[0]
-    if (file) await uploadFile(file)
+    if (file) {
+      const uploaded = await uploadFile(file)
+      if (!uploaded && event.target) event.target.value = ''
+    }
   }
   const handleDrop = async (event) => {
     isDragging.value = false
@@ -2566,6 +2608,10 @@ export const useAppState = () => {
     else showToast('请上传 ZIP 文件', 'error')
   }
   const uploadFile = async (file) => {
+    if (!(await validateUploadFileSize(file))) {
+      uploadProgress.value = 0
+      return false
+    }
     try {
       resetCdnLocalizationState(false)
       uploadProgress.value = 0
@@ -2576,25 +2622,33 @@ export const useAppState = () => {
         await scanUploadedExternalLinks({ mode: 'convert', filename: result.filename }, { openModal: true })
       }
       showToast(t('toast.uploadSuccess'), 'success')
+      return true
     } catch (error) {
       showErrorToast('toast.uploadFailed', error)
+      return false
     }
   }
 
   const handleHtmlSelect = async (event) => {
     const file = event.target.files[0]
     if (!file) return
+    if (!(await validateUploadFileSize(file))) {
+      if (event.target) event.target.value = ''
+      return
+    }
     const previewContent = await syncHtmlEditorContent(file)
-    await uploadHtml(file, { previewContent })
-    htmlEditorDirty.value = false
+    const uploaded = await uploadHtml(file, { previewContent, skipSizeCheck: true })
+    if (uploaded) htmlEditorDirty.value = false
+    else if (event.target) event.target.value = ''
   }
   const handleHtmlDrop = async (event) => {
     isHtmlDragging.value = false
     const file = event.dataTransfer.files[0]
     if (file && /\.(html|htm)$/i.test(file.name)) {
+      if (!(await validateUploadFileSize(file))) return
       const previewContent = await syncHtmlEditorContent(file)
-      await uploadHtml(file, { previewContent })
-      htmlEditorDirty.value = false
+      const uploaded = await uploadHtml(file, { previewContent, skipSizeCheck: true })
+      if (uploaded) htmlEditorDirty.value = false
     } else {
       showToast(t('html.htmlRequired'), 'error')
     }
@@ -2644,6 +2698,10 @@ export const useAppState = () => {
     const previewContent = typeof options.previewContent === 'string' ? options.previewContent : ''
     const savedFromEditor = options.savedFromEditor === true
     const silentSuccess = options.silentSuccess === true
+    if (options.skipSizeCheck !== true && !(await validateUploadFileSize(file))) {
+      htmlUploadProgress.value = 0
+      return null
+    }
     try {
       resetCdnLocalizationState(false)
       htmlUploadProgress.value = 0
@@ -3966,6 +4024,7 @@ export const useAppState = () => {
         client_login_enabled: result?.client_login_enabled === undefined ? true : Boolean(result?.client_login_enabled),
         client_sms_login_enabled: result?.client_sms_login_enabled === true,
         client_register_enabled: result?.client_register_enabled === undefined ? true : Boolean(result?.client_register_enabled),
+        upload_max_size_mb: normalizeUploadMaxSizeMb(result?.upload_max_size_mb),
       }
     } catch {
       featureFlags.value = {
@@ -3984,6 +4043,7 @@ export const useAppState = () => {
         client_login_enabled: true,
         client_sms_login_enabled: false,
         client_register_enabled: true,
+        upload_max_size_mb: 200,
       }
     }
     if (!isWebModeEnabled.value && mode.value === 'web') {

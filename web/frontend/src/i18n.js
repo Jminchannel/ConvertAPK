@@ -331,6 +331,7 @@ export const messages = {
     toast: {
       uploadSuccess: 'File uploaded successfully',
       uploadFailed: 'Upload failed',
+      uploadTooLarge: 'The selected file is {size}, which exceeds the current upload limit of {limit}. Please compress it and try again.',
       taskCreated: 'Build task created',
       taskStarted: 'Build task started',
       desktopModeDisabled: 'Electron desktop mode is disabled',
@@ -794,6 +795,7 @@ export const messages = {
     toast: {
       uploadSuccess: '文件上传成功',
       uploadFailed: '上传失败',
+      uploadTooLarge: '当前文件大小为 {size}，超过当前上传限制 {limit}，请压缩后重试。',
       taskCreated: '构建任务已创建',
       taskStarted: '构建任务已启动',
       desktopModeDisabled: 'Electron 桌面模式已关闭',
@@ -1256,6 +1258,7 @@ export const messages = {
     toast: {
       uploadSuccess: '檔案上傳成功',
       uploadFailed: '上傳失敗',
+      uploadTooLarge: '目前檔案大小為 {size}，超過目前上傳限制 {limit}，請壓縮後重試。',
       taskCreated: '建構任務已建立',
       taskStarted: '建構任務已啟動',
       desktopModeDisabled: 'Electron 桌面模式已關閉',

@@ -470,9 +470,12 @@ export const getAdminAnnouncements = async () => {
 }
 
 // 获取管理端下发的功能开关配置
-export const getAdminFeatures = async () => {
+export const getAdminFeatures = async (options = {}) => {
   const response = await api.get('/adminhub/features', {
-    params: { client_id: getClientId() }
+    params: {
+      client_id: getClientId(),
+      force: options.force === true ? true : undefined
+    }
   })
   return response.data
 }
