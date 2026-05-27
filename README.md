@@ -206,7 +206,6 @@ npm run dev
 ## 更多文档
 
 - Ubuntu 部署：[docs/DEPLOY_UBUNTU.md](docs/DEPLOY_UBUNTU.md)
-- GitHub 增长清单：[docs/GITHUB_GROWTH_CHECKLIST.md](docs/GITHUB_GROWTH_CHECKLIST.md)
 
 ## 参与贡献
 
