@@ -7,7 +7,7 @@
 Description：
 
 ```text
-Convert Web projects, PWA, Vue/React/Vite apps, and HTML pages into Android APK/AAB packages with Docker-based build logs and signing options.
+Source-available Web-to-APK/AAB tool for packaging authorized Web projects, PWA, Vue/React/Vite apps, and HTML pages with Docker build logs and signing options.
 ```
 
 Website：
@@ -71,6 +71,7 @@ Docker build logs, signing options, and app release workflow
 - [ ] 首屏包含在线体验地址。
 - [ ] 首屏后包含产品预览图、三步流程图、能力地图和系统架构图。
 - [ ] 首屏包含适合人群。
+- [ ] 清楚标注 source-available non-commercial 许可证，不把项目描述为严格意义上的开源。
 - [ ] 包含 Star History 或其他社区反馈图表。
 - [ ] 快速启动命令不超过 5 步。
 - [ ] 合规提醒清楚，但不压过核心价值。
@@ -148,7 +149,7 @@ docker compose up -d --build
 中文短文案：
 
 ```text
-我做了一个开源 Web-to-APK/AAB 工具 ConvertAPK，可以把授权的 Web 项目、PWA、Vite/Vue/React 项目或单页 HTML 打包成 Android APK/AAB。它支持 Docker 构建、构建日志、签名配置和管理端任务看板，适合学习 Android 发布流程或搭建内部打包工具。
+我做了一个源码可见、非商业授权的 Web-to-APK/AAB 工具 ConvertAPK，可以把授权的 Web 项目、PWA、Vite/Vue/React 项目或单页 HTML 打包成 Android APK/AAB。它支持 Docker 构建、构建日志、签名配置和管理端任务看板，适合学习 Android 发布流程或搭建内部打包工具。
 
 在线体验：https://gentsergame.com/
 GitHub：https://github.com/Jminchannel/ConvertAPK

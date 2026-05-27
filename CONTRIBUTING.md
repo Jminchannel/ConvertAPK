@@ -65,3 +65,7 @@ python -m py_compile app/main.py
 ## 合规边界
 
 本项目只适用于合法授权的学习、研究、内部工具和应用打包场景。请不要提交任何支持钓鱼、盗版、恶意软件、绕过平台审核或侵犯第三方权益的功能。
+
+## 贡献许可
+
+除非另有书面约定，你提交到本仓库的贡献将按照仓库根目录 [LICENSE](LICENSE) 中的 `ConvertAPK Source-Available Non-Commercial License v1.0` 授权。提交贡献前，请确认你有权提交相关代码、文档或素材。

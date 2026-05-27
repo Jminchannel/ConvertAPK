@@ -3,8 +3,9 @@
 [![Website](https://img.shields.io/badge/Website-gentsergame.com-0f766e)](https://gentsergame.com/)
 [![GitHub stars](https://img.shields.io/github/stars/Jminchannel/ConvertAPK?style=social)](https://github.com/Jminchannel/ConvertAPK)
 [![Docker](https://img.shields.io/badge/Docker-supported-2563eb)](#docker-快速启动)
+[![License](https://img.shields.io/badge/License-Source--Available%20Non--Commercial-f97316)](LICENSE)
 
-ConvertAPK 是一套把 **Web 项目、PWA、单页 HTML** 打包成 **Android APK/AAB** 的开源工具链，也包含管理端、构建端和 Electron/Tauri 桌面端能力。它适合开发者、小团队和工具站作者快速验证自己的 Web 应用在 Android WebView/Capacitor 容器中的发布效果。
+ConvertAPK 是一套把 **Web 项目、PWA、单页 HTML** 打包成 **Android APK/AAB** 的源码可见工具链，也包含管理端、构建端和 Electron/Tauri 桌面端能力。它适合开发者、小团队和工具站作者快速验证自己的 Web 应用在 Android WebView/Capacitor 容器中的发布效果。
 
 在线体验：[https://gentsergame.com/](https://gentsergame.com/)
 
@@ -193,6 +194,14 @@ npm run dev
 6. 其他违反法律法规、公序良俗或平台协议的行为。
 
 不要提交真实 `.env`、数据库密码、Token、证书、签名文件或 keystore。生产环境必须修改默认账号、JWT 密钥、客户端 Token 和数据库密码。
+
+## 许可证
+
+本仓库采用 [ConvertAPK Source-Available Non-Commercial License v1.0](LICENSE)。源码可用于学习、研究、评估、安全审查、个人非商业使用和贡献回仓库。
+
+未经单独书面授权，不允许商用、转卖、SaaS 化、作为付费构建服务、给客户部署交付，或在营利性组织中用于生产和经营用途。这个许可证不是 OSI 认可的开源许可证，因此请不要把本项目描述为严格意义上的 open source。
+
+该许可证不主张拥有你合法上传的独立项目源码、素材、签名文件或由这些材料生成的构建产物；但如果把 ConvertAPK 本身用于商业工作流，仍需获得单独授权。
 
 ## 更多文档
 

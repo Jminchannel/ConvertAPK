@@ -1,0 +1,114 @@
+ConvertAPK Source-Available Non-Commercial License v1.0
+
+Copyright (c) 2026 Jminchannel. All rights reserved except as expressly granted
+in this license.
+
+1. Definitions
+
+"Software" means the ConvertAPK source code, documentation, configuration files,
+scripts, templates, and other materials distributed in this repository.
+
+"Licensor" means the copyright holder or other authorized owner of the Software.
+
+"You" means an individual or legal entity exercising permissions granted by this
+license.
+
+"Non-Commercial Use" means use that is not intended for, directed toward, or
+connected with commercial advantage, monetary compensation, revenue generation,
+business operations, client services, or a commercial product or service.
+
+"Commercial Use" includes, without limitation:
+
+- offering the Software as a hosted service, SaaS, API, desktop product, build
+  service, integration service, or paid tool;
+- using the Software to provide services to clients, customers, employers, or
+  other third parties;
+- using the Software inside a for-profit organization for production,
+  operational, or revenue-related purposes;
+- selling, renting, sublicensing, reselling, or otherwise monetizing the
+  Software or any modified version of it;
+- bundling the Software with a commercial product or service.
+
+2. Non-Commercial License Grant
+
+Subject to the terms of this license, the Licensor grants You a worldwide,
+royalty-free, non-exclusive, non-transferable license to view, fork, clone,
+copy, run, modify, and create derivative works of the Software solely for
+Non-Commercial Use, including personal learning, research, evaluation, security
+review, internal non-commercial testing, and contributions back to this
+repository.
+
+3. Commercial Authorization Required
+
+Any Commercial Use requires a separate written commercial license or other
+written authorization from the Licensor before such use begins. This license
+does not grant any Commercial Use rights.
+
+4. Distribution
+
+You may distribute copies or modified copies of the Software only for
+Non-Commercial Use, and only if You:
+
+- include this license file and all copyright notices;
+- clearly mark any material modifications You made;
+- do not imply endorsement by the Licensor;
+- do not remove or alter security, compliance, or attribution notices.
+
+5. User Content and Build Outputs
+
+This license does not claim ownership over independent source code, assets,
+documents, signing files, or other materials that You lawfully provide as input
+to the Software. This license also does not claim ownership over build outputs
+created from those independent materials. However, using the Software itself in
+a Commercial Use workflow still requires separate written authorization.
+
+6. Prohibited Uses
+
+You may not use the Software to create, package, distribute, support, or
+facilitate phishing software, malware, spyware, trojans, viruses, backdoors,
+pirated applications, impersonation applications, unauthorized repackaging,
+privacy-invasive applications, or any activity that violates applicable law,
+platform rules, third-party rights, or user safety.
+
+7. No Trademark License
+
+This license does not grant rights to use the names, logos, trademarks, service
+marks, or branding of ConvertAPK, Jminchannel, or the Licensor except as needed
+for reasonable attribution.
+
+8. Contributions
+
+Unless otherwise agreed in writing, any contribution You submit to this
+repository is licensed to the Licensor and all downstream users under this same
+license. You represent that You have the right to submit the contribution.
+
+9. Third-Party Components
+
+Third-party dependencies, libraries, tools, templates, or assets may be governed
+by their own licenses. This license does not change the terms of those
+third-party licenses.
+
+10. Termination
+
+If You violate this license, all permissions granted to You under this license
+terminate automatically. Termination does not limit any rights or remedies that
+may be available to the Licensor.
+
+11. Disclaimer of Warranty
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT. YOU USE THE SOFTWARE AT YOUR
+OWN RISK.
+
+12. Limitation of Liability
+
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT SHALL THE
+LICENSOR BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN
+ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF, OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OF OR OTHER DEALINGS IN THE SOFTWARE.
+
+13. Not Open Source
+
+This is a source-available, non-commercial license. It is not an Open Source
+Initiative approved open source license and should not be represented as such.
