@@ -69,11 +69,34 @@ Docker build logs, signing options, and app release workflow
 
 - [ ] 10 秒内能看懂项目解决什么问题。
 - [ ] 首屏包含在线体验地址。
+- [ ] 首屏后包含产品预览图、三步流程图、能力地图和系统架构图。
 - [ ] 首屏包含适合人群。
 - [ ] 包含 Star History 或其他社区反馈图表。
 - [ ] 快速启动命令不超过 5 步。
 - [ ] 合规提醒清楚，但不压过核心价值。
 - [ ] 有常见问题，尤其是 Docker、HTML 模式、源码 ZIP 模式、管理端公网暴露。
+
+## README 图文展示资产
+
+推荐在 README 的 `项目展示` 区块嵌入这些图片：
+
+```markdown
+<p align="center">
+  <img src="docs/assets/readme-product-showcase.svg" alt="ConvertAPK 产品预览" width="960">
+</p>
+
+<p align="center">
+  <img src="docs/assets/readme-workflow.svg" alt="ConvertAPK 三步构建流程" width="920">
+</p>
+
+<p align="center">
+  <img src="docs/assets/readme-capabilities.svg" alt="ConvertAPK 能力地图" width="920">
+</p>
+
+<p align="center">
+  <img src="docs/assets/readme-architecture.svg" alt="ConvertAPK 系统架构" width="920">
+</p>
+```
 
 ## README 图表组件
 

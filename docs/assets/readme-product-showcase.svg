@@ -1,0 +1,40 @@
+<svg width="1200" height="680" viewBox="0 0 1200 680" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="680" rx="32" fill="#f8fafc"/>
+  <rect x="44" y="44" width="1112" height="592" rx="28" fill="#ffffff" stroke="#dbeafe" stroke-width="2"/>
+  <rect x="80" y="84" width="1040" height="74" rx="18" fill="#0f172a"/>
+  <circle cx="120" cy="121" r="10" fill="#ef4444"/>
+  <circle cx="150" cy="121" r="10" fill="#f59e0b"/>
+  <circle cx="180" cy="121" r="10" fill="#22c55e"/>
+  <text x="220" y="130" fill="#ffffff" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="26" font-weight="800">ConvertAPK 控制台</text>
+  <text x="878" y="130" fill="#bfdbfe" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="18">Web to APK/AAB</text>
+  <rect x="80" y="190" width="320" height="354" rx="20" fill="#eff6ff" stroke="#bfdbfe" stroke-width="2"/>
+  <text x="112" y="235" fill="#1e3a8a" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="24" font-weight="800">上传项目</text>
+  <rect x="112" y="262" width="256" height="112" rx="16" fill="#ffffff" stroke="#93c5fd" stroke-width="2" stroke-dasharray="10 8"/>
+  <path d="M240 296V340M218 318L240 296L262 318" stroke="#2563eb" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="144" y="410" fill="#334155" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="18">Vite / Vue / React ZIP</text>
+  <text x="144" y="444" fill="#334155" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="18">单页 HTML / PWA</text>
+  <text x="144" y="478" fill="#334155" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="18">图标与签名文件</text>
+  <rect x="440" y="190" width="320" height="354" rx="20" fill="#f0fdfa" stroke="#99f6e4" stroke-width="2"/>
+  <text x="472" y="235" fill="#115e59" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="24" font-weight="800">配置应用</text>
+  <rect x="472" y="266" width="256" height="42" rx="10" fill="#ffffff" stroke="#5eead4"/>
+  <text x="492" y="294" fill="#0f766e" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="17">应用名：My App</text>
+  <rect x="472" y="326" width="256" height="42" rx="10" fill="#ffffff" stroke="#5eead4"/>
+  <text x="492" y="354" fill="#0f766e" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="17">包名：com.example.app</text>
+  <rect x="472" y="386" width="120" height="80" rx="14" fill="#0f766e"/>
+  <text x="502" y="435" fill="#ffffff" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="22" font-weight="800">APK</text>
+  <rect x="608" y="386" width="120" height="80" rx="14" fill="#2563eb"/>
+  <text x="638" y="435" fill="#ffffff" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="22" font-weight="800">AAB</text>
+  <text x="472" y="503" fill="#334155" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="18">版本、状态栏、横竖屏、签名</text>
+  <rect x="800" y="190" width="320" height="354" rx="20" fill="#fff7ed" stroke="#fed7aa" stroke-width="2"/>
+  <text x="832" y="235" fill="#9a3412" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="24" font-weight="800">查看产物</text>
+  <rect x="832" y="266" width="256" height="154" rx="14" fill="#111827"/>
+  <text x="856" y="303" fill="#86efac" font-family="Consolas, Menlo, monospace" font-size="18">npm run build</text>
+  <text x="856" y="336" fill="#93c5fd" font-family="Consolas, Menlo, monospace" font-size="18">gradle assemble</text>
+  <text x="856" y="369" fill="#fcd34d" font-family="Consolas, Menlo, monospace" font-size="18">signing release</text>
+  <text x="856" y="402" fill="#e5e7eb" font-family="Consolas, Menlo, monospace" font-size="18">build success</text>
+  <rect x="832" y="454" width="116" height="54" rx="14" fill="#f97316"/>
+  <text x="858" y="489" fill="#ffffff" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="20" font-weight="800">下载</text>
+  <rect x="972" y="454" width="116" height="54" rx="14" fill="#ea580c"/>
+  <text x="998" y="489" fill="#ffffff" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="20" font-weight="800">日志</text>
+  <text x="112" y="598" fill="#64748b" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="22">从上传、配置、构建到下载，一个界面完成授权 Web 应用的 Android 发布验证。</text>
+</svg>

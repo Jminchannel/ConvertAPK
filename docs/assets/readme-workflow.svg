@@ -1,0 +1,28 @@
+<svg width="1200" height="430" viewBox="0 0 1200 430" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="430" rx="28" fill="#ffffff"/>
+  <rect x="32" y="32" width="1136" height="366" rx="24" fill="#f8fafc" stroke="#dbeafe" stroke-width="2"/>
+  <text x="70" y="86" fill="#0f172a" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="32" font-weight="800">三步完成 Web-to-APK/AAB</text>
+  <text x="70" y="124" fill="#475569" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="20">面向合法授权项目，把常见打包动作拆成可追踪的任务流。</text>
+  <rect x="78" y="172" width="270" height="156" rx="22" fill="#eff6ff" stroke="#93c5fd" stroke-width="2"/>
+  <circle cx="124" cy="218" r="24" fill="#2563eb"/>
+  <text x="116" y="227" fill="#ffffff" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="24" font-weight="800">1</text>
+  <text x="164" y="217" fill="#1e3a8a" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="24" font-weight="800">上传源码或 HTML</text>
+  <text x="112" y="264" fill="#334155" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="18">ZIP、PWA、静态页面</text>
+  <text x="112" y="295" fill="#334155" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="18">校验文件类型和大小</text>
+  <path d="M368 250H448" stroke="#94a3b8" stroke-width="8" stroke-linecap="round"/>
+  <path d="M426 225L452 250L426 275" stroke="#94a3b8" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="472" y="172" width="270" height="156" rx="22" fill="#f0fdfa" stroke="#5eead4" stroke-width="2"/>
+  <circle cx="518" cy="218" r="24" fill="#0f766e"/>
+  <text x="510" y="227" fill="#ffffff" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="24" font-weight="800">2</text>
+  <text x="558" y="217" fill="#115e59" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="24" font-weight="800">填写应用配置</text>
+  <text x="506" y="264" fill="#334155" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="18">应用名、包名、版本</text>
+  <text x="506" y="295" fill="#334155" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="18">图标、签名、状态栏</text>
+  <path d="M762 250H842" stroke="#94a3b8" stroke-width="8" stroke-linecap="round"/>
+  <path d="M820 225L846 250L820 275" stroke="#94a3b8" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="866" y="172" width="270" height="156" rx="22" fill="#fff7ed" stroke="#fdba74" stroke-width="2"/>
+  <circle cx="912" cy="218" r="24" fill="#f97316"/>
+  <text x="904" y="227" fill="#ffffff" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="24" font-weight="800">3</text>
+  <text x="952" y="217" fill="#9a3412" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="24" font-weight="800">构建并下载</text>
+  <text x="900" y="264" fill="#334155" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="18">查看日志和失败诊断</text>
+  <text x="900" y="295" fill="#334155" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="18">下载 APK 或 AAB</text>
+</svg>

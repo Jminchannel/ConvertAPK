@@ -10,6 +10,32 @@ ConvertAPK 是一套把 **Web 项目、PWA、单页 HTML** 打包成 **Android A
 
 示例视频：[Bilibili BV1XakbBGE16](https://www.bilibili.com/video/BV1XakbBGE16/)
 
+## 项目展示
+
+ConvertAPK 的核心路径是：上传授权 Web 项目，填写 Android 应用配置，交给 Docker 构建器生成 APK/AAB，并在任务页查看日志与下载产物。
+
+<p align="center">
+  <img src="docs/assets/readme-product-showcase.svg" alt="ConvertAPK 产品预览" width="960">
+</p>
+
+### 从上传到产物
+
+<p align="center">
+  <img src="docs/assets/readme-workflow.svg" alt="ConvertAPK 三步构建流程" width="920">
+</p>
+
+### 能力地图
+
+<p align="center">
+  <img src="docs/assets/readme-capabilities.svg" alt="ConvertAPK 能力地图" width="920">
+</p>
+
+### 系统架构
+
+<p align="center">
+  <img src="docs/assets/readme-architecture.svg" alt="ConvertAPK 系统架构" width="920">
+</p>
+
 ## 适合谁
 
 - 想把 Vite、Vue、React、PWA 或静态 HTML 项目快速打包成 Android 安装包的开发者。

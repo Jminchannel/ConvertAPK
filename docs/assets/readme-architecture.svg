@@ -1,0 +1,39 @@
+<svg width="1200" height="560" viewBox="0 0 1200 560" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="560" rx="28" fill="#0f172a"/>
+  <text x="62" y="74" fill="#ffffff" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="34" font-weight="800">系统架构</text>
+  <text x="62" y="112" fill="#cbd5e1" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="20">客户端、管理端、构建端和桌面端分层协作，核心任务链路清晰可追踪。</text>
+  <rect x="62" y="160" width="260" height="118" rx="20" fill="#eff6ff" stroke="#93c5fd" stroke-width="2"/>
+  <text x="92" y="205" fill="#1e3a8a" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="24" font-weight="800">用户端前端</text>
+  <text x="92" y="242" fill="#334155" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="18">Vue 3 + Vite</text>
+  <text x="92" y="268" fill="#334155" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="18">上传、配置、日志、下载</text>
+  <rect x="62" y="332" width="260" height="118" rx="20" fill="#f0fdfa" stroke="#5eead4" stroke-width="2"/>
+  <text x="92" y="377" fill="#115e59" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="24" font-weight="800">Electron / Tauri</text>
+  <text x="92" y="414" fill="#334155" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="18">桌面端启动本地后端</text>
+  <rect x="470" y="160" width="260" height="118" rx="20" fill="#ffffff" stroke="#dbeafe" stroke-width="2"/>
+  <text x="500" y="205" fill="#0f172a" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="24" font-weight="800">用户端后端</text>
+  <text x="500" y="242" fill="#334155" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="18">FastAPI + Pydantic</text>
+  <text x="500" y="268" fill="#334155" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="18">任务、文件、构建编排</text>
+  <rect x="470" y="332" width="260" height="118" rx="20" fill="#fff7ed" stroke="#fdba74" stroke-width="2"/>
+  <text x="500" y="377" fill="#9a3412" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="24" font-weight="800">apk-worker</text>
+  <text x="500" y="414" fill="#334155" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="18">Docker + Android SDK</text>
+  <text x="500" y="440" fill="#334155" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="18">Node、Gradle、Capacitor</text>
+  <rect x="878" y="160" width="260" height="118" rx="20" fill="#f5f3ff" stroke="#c4b5fd" stroke-width="2"/>
+  <text x="908" y="205" fill="#5b21b6" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="24" font-weight="800">管理端</text>
+  <text x="908" y="242" fill="#334155" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="18">任务、公告、反馈、发布</text>
+  <text x="908" y="268" fill="#334155" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="18">统计、额度、审计扩展</text>
+  <rect x="878" y="332" width="260" height="118" rx="20" fill="#ecfdf5" stroke="#86efac" stroke-width="2"/>
+  <text x="908" y="377" fill="#166534" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="24" font-weight="800">数据与产物</text>
+  <text x="908" y="414" fill="#334155" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="18">PostgreSQL、任务数据</text>
+  <text x="908" y="440" fill="#334155" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="18">上传缓存、输出文件</text>
+  <path d="M322 219H470" stroke="#93c5fd" stroke-width="6" stroke-linecap="round"/>
+  <path d="M448 199L470 219L448 239" stroke="#93c5fd" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M600 278V332" stroke="#fdba74" stroke-width="6" stroke-linecap="round"/>
+  <path d="M582 310L600 332L618 310" stroke="#fdba74" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M730 219H878" stroke="#c4b5fd" stroke-width="6" stroke-linecap="round"/>
+  <path d="M856 199L878 219L856 239" stroke="#c4b5fd" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M730 391H878" stroke="#86efac" stroke-width="6" stroke-linecap="round"/>
+  <path d="M856 371L878 391L856 411" stroke="#86efac" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M322 391H470" stroke="#5eead4" stroke-width="6" stroke-linecap="round" stroke-dasharray="10 12"/>
+  <path d="M448 371L470 391L448 411" stroke="#5eead4" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="62" y="512" fill="#94a3b8" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="19">默认对外暴露用户端；管理端建议放在内网、VPN、隧道或受控反向代理之后。</text>
+</svg>
