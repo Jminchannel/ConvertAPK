@@ -849,8 +849,8 @@
                       @blur="normalizeStatusBarColorInput"
                     />
                   </div>
-                  <div class="form-hint">
-                    {{ config.status_bar_hidden ? t('config.statusBarColorHiddenHint') : t('config.statusBarColorHint') }}
+                  <div v-if="config.status_bar_hidden" class="form-hint">
+                    {{ t('config.statusBarColorHiddenHint') }}
                   </div>
                 </div>
                 <div class="form-group status-bar-toggle-group">
