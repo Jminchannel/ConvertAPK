@@ -1,0 +1,61 @@
+name: Bug 报告
+description: 报告构建失败、页面异常、接口错误或部署问题
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈问题。请尽量提供可复现信息，构建类问题请附关键日志片段。
+  - type: dropdown
+    id: area
+    attributes:
+      label: 影响范围
+      options:
+        - 用户端前端
+        - 用户端后端
+        - 管理端前端
+        - 管理端后端
+        - APK/AAB 构建端
+        - Electron/Tauri 桌面端
+        - Docker 部署
+        - 文档
+        - 不确定
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: 问题描述
+      description: 请说明你遇到了什么问题，以及期望结果是什么。
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. 打开 ...
+        2. 上传 ...
+        3. 点击 ...
+        4. 看到 ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 关键日志
+      description: 请删除 Token、密码、证书、私有域名、keystore 路径等敏感信息。
+      render: text
+  - type: input
+    id: environment
+    attributes:
+      label: 运行环境
+      placeholder: "例如 Windows 11 / Ubuntu 24.04 / Docker Desktop / Node 18 / Python 3.10"
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: 安全确认
+      options:
+        - label: 我确认没有在本 Issue 中包含真实密钥、Token、证书、签名文件或用户隐私数据。
+          required: true

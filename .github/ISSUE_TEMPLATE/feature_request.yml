@@ -1,0 +1,51 @@
+name: 功能建议
+description: 提出新功能、兼容性改进或体验优化
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请尽量描述真实使用场景，方便判断优先级和实现边界。
+  - type: dropdown
+    id: area
+    attributes:
+      label: 相关模块
+      options:
+        - Web-to-APK/AAB 构建
+        - 上传与配置
+        - 构建日志与失败诊断
+        - 产物下载
+        - 管理端
+        - 桌面端
+        - Docker/部署
+        - 文档
+        - 其他
+    validations:
+      required: true
+  - type: textarea
+    id: scenario
+    attributes:
+      label: 使用场景
+      description: 你在什么情况下需要这个功能？
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 建议方案
+      description: 你希望它如何工作？
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 可接受的替代方案
+      description: 如果完整方案暂时做不到，有没有可接受的简化版本？
+  - type: checkboxes
+    id: compliance
+    attributes:
+      label: 合规确认
+      options:
+        - label: 这个功能用于合法授权的应用打包、学习研究或内部工具场景。
+          required: true

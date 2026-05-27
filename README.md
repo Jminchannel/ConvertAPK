@@ -1,402 +1,183 @@
-# ConvertAPK-EXE
+# ConvertAPK
 
-ConvertAPK-EXE 是一套把 Web 应用打包为 Android APK/AAB 与桌面安装包的完整工具链，包含用户端、管理端、构建端和 Electron/Tauri 桌面端。用户可以上传 ZIP 或 HTML，配置应用名称、包名、图标、版本、签名等信息，然后通过本地或 Docker 构建器生成产物。
-本项目仅作为学习、研究和技术交流用途，请勿用于任何商业用途或非法用途。
+[![Website](https://img.shields.io/badge/Website-gentsergame.com-0f766e)](https://gentsergame.com/)
+[![GitHub stars](https://img.shields.io/github/stars/Jminchannel/ConvertAPK?style=social)](https://github.com/Jminchannel/ConvertAPK)
+[![Docker](https://img.shields.io/badge/Docker-supported-2563eb)](#docker-快速启动)
 
-本工具旨在帮助开发者学习和理解应用打包、构建及分发流程，不得用于制作、打包、传播任何钓鱼应用、木马程序、病毒程序、恶意插件、盗版应用、侵权应用或其他可能危害用户设备、隐私、财产安全的内容。
+ConvertAPK 是一套把 **Web 项目、PWA、单页 HTML** 打包成 **Android APK/AAB** 的开源工具链，也包含管理端、构建端和 Electron/Tauri 桌面端能力。它适合开发者、小团队和工具站作者快速验证自己的 Web 应用在 Android WebView/Capacitor 容器中的发布效果。
 
-使用者在使用本项目时，应确保其打包的应用、代码、素材、签名文件及相关资源均拥有合法授权，并遵守所在地法律法规、应用商店规则以及第三方平台服务协议。
-
-严禁利用本项目从事以下行为：
-
-1. 制作、打包或分发钓鱼、诈骗、木马、病毒、后门等恶意程序；
-2. 伪装、仿冒他人应用、品牌、平台或官方客户端；
-3. 未经授权打包、修改、破解、二次分发他人应用；
-4. 收集、窃取、上传或滥用用户隐私数据；
-5. 绕过应用商店、系统安全机制或平台审核规则；
-6. 其他违反法律法规、公序良俗或平台协议的行为。
-
-因使用者违反上述规定，或因擅自用于商业、侵权、违法及不当用途所造成的任何风险、纠纷、损失或法律责任，均由使用者自行承担，与项目作者及本工具无关。
-
-项目作者保留对违规使用者停止服务、限制访问、删除相关数据及配合相关部门调查的权利。
+在线体验：[https://gentsergame.com/](https://gentsergame.com/)
 
 示例视频：[Bilibili BV1XakbBGE16](https://www.bilibili.com/video/BV1XakbBGE16/)
 
-## 功能特性
+## 适合谁
 
-- 上传 Web 项目 ZIP 或单页 HTML，一键创建构建任务。
-- 支持配置应用名、包名、版本号、图标、签名、启动页、状态栏、横竖屏等参数。
+- 想把 Vite、Vue、React、PWA 或静态 HTML 项目快速打包成 Android 安装包的开发者。
+- 想学习 Android 打包、签名、AAB、WebView、Capacitor 和 Docker 构建链路的人。
+- 想搭建自用 Web-to-APK/AAB 工具站或内部打包平台的小团队。
+- 想通过构建日志定位 Gradle、npm、资源文件、签名配置问题的项目维护者。
+
+## 主要能力
+
+- 上传 Web 项目 ZIP 或单页 HTML 后创建构建任务。
+- 配置应用名、包名、版本号、图标、启动页、状态栏、横竖屏和签名信息。
 - 支持 APK/AAB 构建、任务队列、构建日志、失败诊断和产物下载。
-- 用户端后端可在 Docker 模式下调用宿主机 Docker 中的 `apk-builder` 镜像完成 Android 构建。
-- 管理端支持任务看板、公告、反馈、版本发布、文件管理和概览统计。
-- Electron/Tauri 桌面端可启动本地后端并加载用户端界面，适合 Windows 本地使用。
+- 支持 Docker 构建器，后端可调用宿主机 Docker 中的 `apk-builder:latest` 镜像完成 Android 构建。
+- 提供管理端任务看板、公告、反馈、版本发布、文件管理和概览统计。
+- 提供 Electron/Tauri 桌面端，用于本地启动后端并加载用户端界面。
 
-## 技术栈
+## 快速体验
 
-- 用户端前端：Vue 3 + Vite
-- 用户端后端：FastAPI + Pydantic
-- 管理端前端：Vue 3 + Vite
-- 管理端后端：FastAPI + SQLAlchemy + PostgreSQL
-- 构建端：Docker + Node.js + JDK + Android SDK + Capacitor
-- 桌面端：Electron + electron-builder + Tauri
+访问在线站点：
 
-## 目录结构
+```text
+https://gentsergame.com/
+```
+
+推荐先上传一个你拥有完整授权的简单 Web 项目，例如 Vite/Vue/React 项目构建源码 ZIP，或一个单页 HTML 文件。创建任务后可以在页面中查看构建日志并下载 APK/AAB 产物。
+
+## Docker 快速启动
+
+```bash
+git clone https://github.com/Jminchannel/ConvertAPK.git
+cd ConvertAPK
+
+cp admin/backend/.env.example admin/backend/.env
+
+docker compose --profile builder build apk-builder
+docker compose up -d --build
+```
+
+启动后访问：
+
+```text
+用户端：http://localhost:8080
+用户端 API：http://localhost:8000/docs
+```
+
+如果需要 Windows 数据卷映射：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.windows.yml up -d --build
+```
+
+## 本地开发
+
+用户端后端：
+
+```bash
+cd web/backend
+pip install -r requirements.txt
+python main.py
+```
+
+用户端前端：
+
+```bash
+cd web/frontend
+npm install
+npm run dev
+```
+
+管理端后端：
+
+```bash
+cd admin/backend
+pip install -r requirements.txt
+copy .env.example .env
+uvicorn app.main:app --reload --host 127.0.0.1 --port 9001
+```
+
+管理端前端：
+
+```bash
+cd admin/frontend
+npm install
+npm run dev
+```
+
+桌面端：
+
+```bash
+cd desktop
+npm install
+npm run dev
+```
+
+也可以使用便捷脚本：
+
+```powershell
+.\scripts\dev-local.ps1
+```
+
+## 项目结构
 
 ```text
 .
 ├── web/                       用户端前后端
-│   ├── frontend/              用户端 Vue 前端
+│   ├── frontend/              用户端 Vue 3 + Vite 前端
 │   └── backend/               用户端 FastAPI 后端
 ├── admin/                     管理端前后端
-│   ├── frontend/              管理端 Vue 前端
-│   └── backend/               管理端 FastAPI 后端
-├── apk-worker/                Android/桌面构建镜像与构建脚本
+│   ├── frontend/              管理端 Vue 3 + Vite 前端
+│   └── backend/               管理端 FastAPI + SQLAlchemy 后端
+├── apk-worker/                Android/桌面构建镜像与脚本
 ├── desktop/                   Electron 桌面壳
 ├── templates/                 Android 模板工程与资源
-├── docs/                      额外部署文档
+├── docs/                      部署、接口和运营文档
 ├── scripts/                   本地联调脚本
 ├── data/                      运行时数据，默认不提交
 ├── docker-compose.yml         Docker 一体化编排
 └── docker-compose.windows.yml Windows 数据卷路径覆盖
 ```
 
-## 服务端口
-
-| 服务 | 本地开发地址 | Docker 默认地址 |
-| --- | --- | --- |
-| 用户端前端 | `http://localhost:3000` | `http://localhost:8080` |
-| 用户端后端 | `http://localhost:8000` | `http://localhost:8000` |
-| 管理端前端 | 本机开发访问 | 生产环境不要公网暴露 |
-| 管理端后端 | 本机开发访问 | 生产环境不要公网暴露 |
-
-## 环境要求
-
-Docker 部署推荐：
-
-- Linux：Ubuntu 22.04/24.04 或其他支持 Docker Compose 的发行版。
-- Windows：Windows 10/11 + Docker Desktop，建议使用 WSL2 后端。
-- CPU/内存：最低 2C/4G，推荐 4C/8G 以上。
-- 磁盘：建议预留 20GB 以上，首次构建会下载 Gradle、Node、Android 依赖。
-
-本地开发推荐：
-
-- Python 3.10+
-- Node.js 18+
-- Docker 与 Docker Compose
-- 如使用本地构建模式，需要配置 JDK、Android SDK、Node.js 等工具链。
-
-## Docker 一体化部署
-
-### 1. 获取代码
-
-```bash
-git clone <your-repo-url>
-cd ConvertAPK-EXE
-```
-
-### 2. 准备环境变量
-
-管理端后端在 Compose 中会读取 `admin/backend/.env`，首次部署可以从示例文件复制，确保 `env_file` 文件存在：
-
-```bash
-cp admin/backend/.env.example admin/backend/.env
-```
-
-注意：当前 `docker-compose.yml` 同时在 `environment` 中写入了默认测试值，Compose 的 `environment` 会覆盖 `admin/backend/.env`。生产环境请直接修改 `docker-compose.yml` 中的这些值，或改成 `${变量名}` 后放到根目录 `.env` 中统一管理：
-
-```dotenv
-ADMIN_USER=admin
-ADMIN_PASS=请改成强密码
-JWT_SECRET=请改成长随机字符串
-CLIENT_TOKEN=请改成长随机字符串
-POSTGRES_PASSWORD=请改成数据库强密码
-```
-
-同时需要同步修改：
-
-- `admin-db` 的 `POSTGRES_PASSWORD`
-- `admin-backend` 的 `DATABASE_URL` 数据库密码
-- `admin-backend` 的 `CLIENT_TOKEN`
-- `backend` 的 `ADMIN_CLIENT_TOKEN`
-
-其中 `ADMIN_CLIENT_TOKEN` 与 `CLIENT_TOKEN` 必须完全一致。默认 `docker-compose.yml` 中两者都是 `client-secret`，只适合本地测试。
-
-如需 GitHub 登录，Docker Compose 默认会读取根目录 `.env` 参与变量替换。可以参考 `.env.local.example` 创建根目录 `.env`：
-
-```bash
-cp .env.local.example .env
-```
-
-然后按实际域名配置：
-
-```dotenv
-AUTH_GITHUB_CLIENT_ID=your_github_oauth_client_id
-AUTH_GITHUB_CLIENT_SECRET=your_github_oauth_client_secret
-AUTH_GITHUB_CALLBACK_URL=https://example.com/api/auth/github/callback
-AUTH_DEFAULT_RETURN_URL=https://example.com/
-AUTH_REDIRECT_ALLOWED_ORIGINS=https://example.com
-```
-
-### 3. 准备数据目录
-
-Linux 默认数据卷绑定到 `/data`：
-
-```bash
-sudo mkdir -p /data/convertapk/gradle-cache
-sudo mkdir -p /data/convertapk-admin/db
-sudo mkdir -p /data/convertapk-admin/storage
-```
-
-Windows 使用 `docker-compose.windows.yml` 覆盖数据卷路径，当前配置指向：
-
-```text
-D:/Apps/ConvertAPK-EXE/data
-```
-
-如果项目不在这个目录，请先修改 `docker-compose.windows.yml` 中的 `device` 路径。
-
-### 4. 构建构建器镜像
-
-后端在 Docker 模式下会通过宿主机 Docker 调用 `apk-builder:latest`。首次部署或构建镜像变更后，需要先构建：
-
-```bash
-docker compose --profile builder build apk-builder
-```
-
-如果需要构建 Electron 桌面安装包，也构建桌面构建器：
-
-```bash
-docker compose --profile builder build desktop-builder
-```
-
-### 5. 启动服务
-
-Linux：
-
-```bash
-docker compose up -d --build
-```
-
-Windows：
-
-```powershell
-docker compose -f docker-compose.yml -f docker-compose.windows.yml up -d --build
-```
-
-查看服务状态：
-
-```bash
-docker compose ps
-```
-
-查看日志：
-
-```bash
-docker compose logs -f backend
-docker compose logs -f admin-backend
-```
-
-生产部署建议将 `admin-backend` 与 `admin-frontend` 的 `ports` 绑定到 `127.0.0.1`，或删除对外 `ports` 映射，仅保留容器内服务通信。需要远程管理时，再通过 VPN、SSH 隧道、堡垒机或带 IP 白名单的内网反向代理进入。
-
-### 6. 访问系统
-
-- 用户端：`http://服务器IP:8080`
-- 用户端 API：`http://服务器IP:8000/docs`
-
-管理端仅建议在内网、VPN、SSH 隧道或堡垒机环境访问，不建议直接暴露公网端口。生产部署时请限制管理端前后端端口的入站访问，或移除对外端口映射后通过内网反向代理访问。
-
-## Ubuntu 快速部署示例
-
-```bash
-apt update
-apt install -y docker.io docker-compose-plugin git
-systemctl enable --now docker
-
-git clone <your-repo-url>
-cd ConvertAPK-EXE
-
-cp admin/backend/.env.example admin/backend/.env
-mkdir -p /data/convertapk/gradle-cache /data/convertapk-admin/db /data/convertapk-admin/storage
-
-docker compose --profile builder build apk-builder
-docker compose up -d --build
-```
-
-如启用防火墙：
-
-```bash
-ufw allow 8080/tcp
-ufw allow 8000/tcp
-```
-
-更细的 Ubuntu 用户构建端说明见 [docs/DEPLOY_UBUNTU.md](docs/DEPLOY_UBUNTU.md)。
-
-## 反向代理与 HTTPS
-
-生产环境建议只对外暴露前端站点，通过 Nginx/Caddy 反代到容器端口，并启用 HTTPS。示例：
-
-```nginx
-server {
-    listen 80;
-    server_name example.com;
-
-    client_max_body_size 200m;
-
-    location / {
-        proxy_pass http://127.0.0.1:8080;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-}
-```
-
-管理端如需远程访问，建议只允许 VPN/内网来源访问，或通过带强鉴权与 IP 白名单的独立反向代理入口访问，不要直接开放管理端容器端口到公网。
-
-## 本地开发
-
-### 用户端
-
-后端：
-
-```powershell
-cd web/backend
-pip install -r requirements.txt
-python main.py
-```
-
-前端：
-
-```powershell
-cd web/frontend
-npm install
-npm run dev
-```
-
-访问：`http://localhost:3000`
-
-### 管理端
-
-后端：
-
-```powershell
-cd admin/backend
-pip install -r requirements.txt
-copy .env.example .env
-uvicorn app.main:app --reload --host 127.0.0.1
-```
-
-前端：
-
-```powershell
-cd admin/frontend
-npm install
-npm run dev
-```
-
-访问终端输出的本机开发地址，不要将管理端开发服务绑定到公网网卡。
-
-### 桌面端
-
-开发模式：
-
-```powershell
-cd desktop
-npm install
-npm run dev
-```
-
-一键启动本地后端与桌面端：
-
-```powershell
-.\scripts\dev-local.ps1
-```
-
-打包 Windows 安装包前，先构建用户端前端并准备后端产物，再执行：
-
-```powershell
-cd desktop
-npm run dist
-```
-
-## 常用运维命令
-
-升级代码并重建：
-
-```bash
-git pull
-docker compose --profile builder build apk-builder
-docker compose up -d --build
-```
-
-停止服务但保留数据卷：
-
-```bash
-docker compose down
-```
-
-停止服务并删除容器网络，不删除绑定目录中的数据：
-
-```bash
-docker compose down --remove-orphans
-```
-
-备份关键数据：
-
-```bash
-tar -czf convertapk-data-backup.tgz /data/convertapk /data/convertapk-admin
-```
-
-## 关键环境变量
-
-| 变量 | 所属服务 | 说明 |
-| --- | --- | --- |
-| `APK_BUILDER_MODE` | 用户端后端 | 构建模式，Docker 部署使用 `docker`，Windows 本地默认 `local` |
-| `APK_BUILDER_IMAGE` | 用户端后端 | APK 构建器镜像，默认 `apk-builder:latest` |
-| `DESKTOP_BUILDER_IMAGE` | 用户端后端 | 桌面构建器镜像，默认 `desktop-builder:latest` |
-| `APK_BUILDER_DATA_DIR` | 用户端后端 | 任务、日志、输出数据目录 |
-| `APK_BUILDER_TEMPLATES_DIR` | 用户端后端 | Android 模板目录 |
-| `ADMIN_API_URL` | 用户端后端 | 管理端后端地址 |
-| `ADMIN_CLIENT_TOKEN` | 用户端后端 | 用户端上报管理端的客户端 Token |
-| `CLIENT_TOKEN` | 管理端后端 | 管理端校验客户端上报的 Token |
-| `DATABASE_URL` | 管理端后端 | PostgreSQL 连接串 |
-| `ADMIN_USER` | 管理端后端 | 初始化管理员用户名 |
-| `ADMIN_PASS` | 管理端后端 | 初始化管理员密码 |
-| `JWT_SECRET` | 管理端后端 | 管理端 JWT 签名密钥 |
-| `AUTH_GITHUB_CLIENT_ID` | 用户端后端 | GitHub OAuth Client ID |
-| `AUTH_GITHUB_CLIENT_SECRET` | 用户端后端 | GitHub OAuth Client Secret |
-| `OPENROUTER_API_KEY` | 用户端后端 | 构建失败诊断使用的 OpenRouter Key，可选 |
+## 技术栈
+
+- 前端：Vue 3、Vite
+- 后端：FastAPI、Pydantic、SQLAlchemy
+- 构建端：Docker、Node.js、JDK、Android SDK、Capacitor、Gradle
+- 桌面端：Electron、Tauri
+- 数据库：PostgreSQL
 
 ## 常见问题
 
-### 构建任务提示找不到 Docker
+### 第一次构建为什么很慢？
 
-确认宿主机已安装 Docker，且 `backend` 服务已挂载 `/var/run/docker.sock`。当前 `docker-compose.yml` 已包含该挂载。
+首次构建会下载 npm、Gradle 和 Android 依赖。Compose 已将 Gradle 缓存挂载到 `convertapk-gradle-cache`，后续构建会明显加快。
 
-### 第一次构建很慢
+### 构建任务提示找不到 Docker 怎么办？
 
-首次构建会下载 npm、Gradle、Android 依赖。Compose 已将 Gradle 缓存挂载到 `convertapk-gradle-cache`，后续构建会明显加快。
+确认宿主机已安装 Docker，且后端容器能访问 `/var/run/docker.sock`。Docker 部署模式下，后端会通过宿主机 Docker 调用 `apk-builder:latest`。
 
-### 用户端能打开但任务无法同步到管理端
+### 上传 React/Vite/Vue 项目应该选什么模式？
 
-检查 `ADMIN_API_URL` 是否能从 `backend` 容器访问，并确认 `ADMIN_CLIENT_TOKEN` 与管理端的 `CLIENT_TOKEN` 完全一致。
+如果 ZIP 中包含 `package.json`，通常应使用源码转换构建链路，而不是单页 HTML 模式。HTML 模式更适合已经整理好的单页 HTML 或静态页面。
 
-### 管理端无法登录
+### 管理端可以直接暴露到公网吗？
 
-检查 `admin-backend` 日志，确认数据库已启动且 `ADMIN_USER`、`ADMIN_PASS` 配置正确。首次启动会自动创建管理员账号。
+不建议。生产环境应只对外暴露用户端入口，管理端建议通过 VPN、SSH 隧道、堡垒机、内网反向代理或 IP 白名单访问。
 
-### 上传大文件失败
+## 安全与合规
 
-Docker 前端 Nginx 默认 `client_max_body_size` 为 `200m`。如需上传更大 ZIP，请同步调整 `web/frontend/nginx.conf` 和外层反向代理的上传限制。
+本项目只适用于学习、研究、内部工具和合法授权的应用打包场景。使用者必须确保上传的代码、素材、图标、签名文件和第三方资源均拥有合法授权，并遵守所在地法律法规、应用商店规则和第三方平台服务协议。
 
-### Windows 数据目录没有生效
+严禁利用本项目从事以下行为：
 
-确认启动命令包含 `-f docker-compose.yml -f docker-compose.windows.yml`，并检查 `docker-compose.windows.yml` 中的 `device` 是否为当前项目真实路径。
+1. 制作、打包或分发钓鱼、诈骗、木马、病毒、后门等恶意程序。
+2. 伪装、仿冒他人应用、品牌、平台或官方客户端。
+3. 未经授权打包、修改、破解或二次分发他人应用。
+4. 收集、窃取、上传或滥用用户隐私数据。
+5. 绕过应用商店、系统安全机制或平台审核规则。
+6. 其他违反法律法规、公序良俗或平台协议的行为。
 
-## 安全提醒
+不要提交真实 `.env`、数据库密码、Token、证书、签名文件或 keystore。生产环境必须修改默认账号、JWT 密钥、客户端 Token 和数据库密码。
 
-- 不要提交真实 `.env`、数据库密码、Token、证书、签名文件和 keystore。
-- 对外部署时建议只暴露前端入口，并通过 HTTPS 反向代理访问。
-- 管理端前端和后端不要直接暴露公网，建议使用防火墙、VPN、SSH 隧道或 IP 白名单限制访问。
-- 下载、上传、构建产物目录属于运行态数据，升级前建议备份。
+## 更多文档
+
+- Ubuntu 部署：[docs/DEPLOY_UBUNTU.md](docs/DEPLOY_UBUNTU.md)
+- GitHub 增长清单：[docs/GITHUB_GROWTH_CHECKLIST.md](docs/GITHUB_GROWTH_CHECKLIST.md)
+
+## 参与贡献
+
+欢迎提交问题、改进建议和 Pull Request。贡献前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)，安全问题请参考 [SECURITY.md](SECURITY.md)。
+
+如果这个项目对你有帮助，欢迎给仓库点一个 Star，并把在线站点分享给需要 Web-to-APK/AAB 工具的开发者。

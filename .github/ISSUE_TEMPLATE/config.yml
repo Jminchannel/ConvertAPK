@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 在线体验
+    url: https://gentsergame.com/
+    about: 先体验在线版本，再反馈具体问题会更容易定位。
+  - name: 部署文档
+    url: https://github.com/Jminchannel/ConvertAPK/blob/main/docs/DEPLOY_UBUNTU.md
+    about: Ubuntu 和 Docker 部署问题可以先查看这里。
