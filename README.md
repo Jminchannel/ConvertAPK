@@ -10,6 +10,12 @@ ConvertAPK 是一套把 **Web 项目、PWA、单页 HTML** 打包成 **Android A
 
 示例视频：[Bilibili BV1XakbBGE16](https://www.bilibili.com/video/BV1XakbBGE16/)
 
+## Community
+
+如果这个项目对你有帮助，欢迎 Star、Issue 或 Pull Request。下面的图表会自动展示仓库 Star 增长趋势，适合在 README 中直观看到社区反馈。
+
+[![Star History Chart](https://api.star-history.com/svg?repos=Jminchannel/ConvertAPK&type=Date)](https://www.star-history.com/#Jminchannel/ConvertAPK&Date)
+
 ## 适合谁
 
 - 想把 Vite、Vue、React、PWA 或静态 HTML 项目快速打包成 Android 安装包的开发者。

@@ -70,9 +70,20 @@ Docker build logs, signing options, and app release workflow
 - [ ] 10 秒内能看懂项目解决什么问题。
 - [ ] 首屏包含在线体验地址。
 - [ ] 首屏包含适合人群。
+- [ ] 包含 Star History 或其他社区反馈图表。
 - [ ] 快速启动命令不超过 5 步。
 - [ ] 合规提醒清楚，但不压过核心价值。
 - [ ] 有常见问题，尤其是 Docker、HTML 模式、源码 ZIP 模式、管理端公网暴露。
+
+## README 图表组件
+
+Star History 图表：
+
+```markdown
+[![Star History Chart](https://api.star-history.com/svg?repos=Jminchannel/ConvertAPK&type=Date)](https://www.star-history.com/#Jminchannel/ConvertAPK&Date)
+```
+
+这个图表适合放在 `Community` 区块。等仓库 Star 数继续增长后，它会比静态文字更直观地展示项目热度。
 
 ## Release 发布建议
 
