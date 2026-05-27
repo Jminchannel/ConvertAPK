@@ -83,7 +83,7 @@ Star History 图表：
 [![Star History Chart](https://api.star-history.com/svg?repos=Jminchannel/ConvertAPK&type=Date)](https://www.star-history.com/#Jminchannel/ConvertAPK&Date)
 ```
 
-这个图表适合放在 `Community` 区块。等仓库 Star 数继续增长后，它会比静态文字更直观地展示项目热度。
+这个图表适合放在 README 底部的 `Community` 区块。等仓库 Star 数继续增长后，它会比静态文字更直观地展示项目热度。
 
 ## Release 发布建议
 
