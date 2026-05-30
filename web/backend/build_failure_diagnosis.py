@@ -22,7 +22,7 @@ DOCKER_INFRA_PATTERN = re.compile(
     re.IGNORECASE,
 )
 SOURCE_CODE_ERROR_PATTERN = re.compile(
-    r"(\[vite:esbuild\]|transform failed with \d+ error|error during build|syntaxerror|parse error|unexpected closing .* tag does not match opening .* tag|unexpected token|\.((tsx)|(ts)|(jsx)|(js)|(vue)|(html)|(css)|(scss)):\d+:\d+)",
+    r"(\[vite:esbuild\]|transform failed with \d+ error|error during build|syntaxerror|parse error|illegal escape|unexpected closing .* tag does not match opening .* tag|unexpected token|\.((tsx)|(ts)|(jsx)|(js)|(vue)|(html)|(css)|(scss)|(kt)|(kts)|(java)|(xml)):\d+:\d+)",
     re.IGNORECASE,
 )
 TASK_PATH_PREFIX_PATTERN = re.compile(
@@ -33,11 +33,11 @@ ABSOLUTE_PATH_PATTERN = re.compile(
 )
 LOG_PREFIX_PATTERN = re.compile(r"^\[[^\]]+\]\s*")
 SOURCE_FILE_LOCATION_PATTERN = re.compile(
-    r"(?P<path>(?:[a-zA-Z]:)?[\\/][^:\s]+?\.(?:tsx|ts|jsx|js|vue|html|css|scss)|(?:\./)?[^\s:]+?\.(?:tsx|ts|jsx|js|vue|html|css|scss)):(?P<line>\d+):(?P<column>\d+)(?::\s*(?:ERROR|error)\s*:\s*(?P<message>.+))?",
+    r"(?P<path>(?:file://)?(?:[a-zA-Z]:)?[\\/][^:\s]+?\.(?:tsx|ts|jsx|js|vue|html|css|scss|kt|kts|java|xml)|(?:\./)?[^\s:]+?\.(?:tsx|ts|jsx|js|vue|html|css|scss|kt|kts|java|xml)):(?P<line>\d+):(?P<column>\d+)(?:(?::\s*(?:ERROR|error)\s*:|\s+)(?P<message>.+))?",
     re.IGNORECASE,
 )
 SOURCE_MESSAGE_HINT_PATTERN = re.compile(
-    r"(syntaxerror|parse error|unexpected token|unexpected closing .* tag does not match opening .* tag|does not match opening|unterminated|missing)",
+    r"(syntaxerror|parse error|illegal escape|unexpected token|unexpected closing .* tag does not match opening .* tag|does not match opening|unterminated|missing)",
     re.IGNORECASE,
 )
 SOURCE_CODE_FRAME_PATTERN = re.compile(r"^\d+\|\s*")
@@ -278,6 +278,51 @@ RULE_I18N_EN: dict[str, dict[str, Any]] = {
             "Share task ID and failure time to help confirm resource bottlenecks.",
         ],
     },
+    "kotlin_jvm_target_unsupported": {
+        "title": "Unsupported Kotlin JVM target",
+        "reason": "The project sets Kotlin jvmTarget to 21, but the Kotlin Gradle plugin in the build chain does not support that target.",
+        "suggestions": [
+            "Change Kotlin `jvmTarget` from `21` to `17` in the Gradle file, or upgrade the Kotlin Gradle plugin to a version that supports JVM 21.",
+            "If the app does not require Java 21 language features, prefer JVM 17 for better Android build compatibility.",
+            "Rebuild after updating the Gradle configuration.",
+        ],
+    },
+    "androidx_not_enabled": {
+        "title": "AndroidX is not enabled",
+        "reason": "The project uses AndroidX dependencies, but Gradle properties do not enable AndroidX mode.",
+        "suggestions": [
+            "Add `android.useAndroidX=true` to the root `gradle.properties` file.",
+            "If the project mixes old support libraries with AndroidX, also consider `android.enableJetifier=true`.",
+            "Rebuild after saving `gradle.properties`.",
+        ],
+    },
+    "kotlin_illegal_escape_regex": {
+        "title": "Kotlin regular expression escape error",
+        "reason": "A Kotlin string contains an unescaped regular-expression backslash, so compilation stopped.",
+        "suggestions": [
+            "For whitespace regex, use `Regex(\"\\\\s+\")` in a normal Kotlin string, or `Regex(\"\"\"\\s+\"\"\")` as a raw string.",
+            "Open the file and line shown in the log, fix the first `Illegal escape` error, then rebuild.",
+            "Later Kotlin errors may be cascading effects; start from the first reported file and line.",
+        ],
+    },
+    "legacy_node_sass_node22": {
+        "title": "Legacy front-end dependencies are incompatible with current Node",
+        "reason": "The project uses legacy dependencies such as node-sass/Vue CLI 4, which often fail under the builder's current Node/npm runtime.",
+        "suggestions": [
+            "If a ready `dist` directory is included, upload/build it as a static HTML package.",
+            "Otherwise replace `node-sass` with `sass`, upgrade old Vue CLI dependencies, or build the front end with its historical Node version before uploading.",
+            "Keep only one lock file when possible, so the builder does not drift between npm/yarn dependency trees.",
+        ],
+    },
+    "android_manifest_missing_during_build": {
+        "title": "Android manifest disappeared during build",
+        "reason": "Gradle cannot find `app/src/main/AndroidManifest.xml`; the source package may be incomplete, or the task working directory was deleted while building.",
+        "suggestions": [
+            "If this is your source package, confirm it contains `settings.gradle`, the `app` module, and `app/src/main/AndroidManifest.xml`.",
+            "If the task was deleted/canceled while building, create a new task and wait for it to finish before deleting it.",
+            "Ask the website developer to preserve task files while a build is still running.",
+        ],
+    },
 }
 
 
@@ -408,6 +453,93 @@ def resolve_openrouter_diag_runtime_config(ai_config: dict[str, Any] | None = No
 
 KNOWLEDGE_RULES = [
     {
+        "id": "kotlin_illegal_escape_regex",
+        "title": "Kotlin 正则转义写法错误",
+        "category": "源码编译错误",
+        "severity": "high",
+        "reason": "日志显示 Kotlin 源码中存在未转义的正则反斜杠，编译器在该文件行列直接中断。",
+        "patterns": [
+            r"Illegal escape",
+            r"\.kt:\d+:\d+.*Illegal escape",
+        ],
+        "suggestions": [
+            "打开日志中的 Kotlin 文件和行号，把普通字符串写成 `Regex(\"\\\\s+\")`，或改用 Kotlin 原始字符串 `Regex(\"\"\"\\s+\"\"\")`。",
+            "优先修复第一条 `Illegal escape` 报错，后续 Kotlin 报错多数是连锁影响。",
+            "修复源码后重新上传构建。",
+        ],
+        "confidence": 0.96,
+    },
+    {
+        "id": "kotlin_jvm_target_unsupported",
+        "title": "Kotlin JVM 目标版本不受支持",
+        "category": "Android 配置",
+        "severity": "high",
+        "reason": "日志显示 `Unknown Kotlin JVM target: 21`，说明项目把 Kotlin `jvmTarget` 配成了 21，但当前 Kotlin Gradle 插件不支持该目标。",
+        "patterns": [
+            r"Unknown Kotlin JVM target:\s*21",
+        ],
+        "suggestions": [
+            "在 `build.gradle` 或 `build.gradle.kts` 中把 Kotlin `jvmTarget` 从 `21` 改为 `17`。",
+            "如果源码确实依赖 Java 21 特性，则需要同步升级 Kotlin Gradle Plugin 到支持 JVM 21 的版本。",
+            "Android 项目通常优先使用 JVM 17，兼容性更稳。",
+        ],
+        "confidence": 0.96,
+    },
+    {
+        "id": "androidx_not_enabled",
+        "title": "AndroidX 依赖未启用",
+        "category": "Android 配置",
+        "severity": "high",
+        "reason": "日志显示项目包含 AndroidX 依赖，但根目录 `gradle.properties` 没有启用 `android.useAndroidX=true`。",
+        "patterns": [
+            r"android\.useAndroidX",
+            r"contains AndroidX dependencies",
+            r"AndroidX dependencies",
+        ],
+        "suggestions": [
+            "在原生 Android 工程根目录 `gradle.properties` 中添加 `android.useAndroidX=true`。",
+            "如果项目同时混用了旧 support 包，可再添加 `android.enableJetifier=true` 后重试。",
+            "这是项目配置缺失，不需要修改业务代码。",
+        ],
+        "confidence": 0.95,
+    },
+    {
+        "id": "legacy_node_sass_node22",
+        "title": "旧版前端依赖不兼容当前 Node 环境",
+        "category": "前端依赖",
+        "severity": "medium",
+        "reason": "日志显示 npm 安装异常，且项目可能包含 node-sass、Vue CLI 4 或旧锁文件；这类旧项目在当前 Node/npm 环境下容易安装失败。",
+        "patterns": [
+            r"Exit handler never called",
+            r"node-sass",
+            r"@vue/cli-service",
+        ],
+        "suggestions": [
+            "如果压缩包里已经有 `dist/index.html`，优先把 `dist` 作为静态站点上传，避免在服务器重装旧依赖。",
+            "如果必须源码构建，请把 `node-sass` 替换为 `sass`，或使用项目历史 Node 版本在本地构建后再上传产物。",
+            "尽量只保留一种锁文件（如 package-lock 或 yarn.lock），避免构建器在 npm/yarn 之间漂移。",
+        ],
+        "confidence": 0.9,
+    },
+    {
+        "id": "android_manifest_missing_during_build",
+        "title": "AndroidManifest 在构建时缺失",
+        "category": "任务文件",
+        "severity": "high",
+        "reason": "Gradle 报告找不到 `app/src/main/AndroidManifest.xml`，可能是源码包不完整，也可能是任务构建中被删除导致工作目录消失。",
+        "patterns": [
+            r"AndroidManifest\.xml.*doesn.?t exist",
+            r"Source file .*AndroidManifest\.xml.*does not exist",
+            r"main manifest.*doesn.?t exist",
+        ],
+        "suggestions": [
+            "若是源码问题，请确认 ZIP 内包含完整 `app` 模块和 `app/src/main/AndroidManifest.xml`。",
+            "若用户在构建中删除了任务，请重新创建任务并等待构建结束后再删除。",
+            "平台侧应禁止删除排队中或构建中的任务，避免工作目录被清理。",
+        ],
+        "confidence": 0.92,
+    },
+    {
         "id": "source_syntax_error",
         "title": "您的源码语法或结构错误",
         "category": "源码编译错误",
@@ -417,10 +549,11 @@ KNOWLEDGE_RULES = [
             r"\[vite:esbuild\]",
             r"Transform failed with \d+ error",
             r"error during build",
+            r"Illegal escape",
             r"Unexpected closing .* tag does not match opening .* tag",
             r"SyntaxError",
             r"Parse error",
-            r"\.(tsx|ts|jsx|js|vue|html|css|scss):\d+:\d+",
+            r"\.(tsx|ts|jsx|js|vue|html|css|scss|kt|kts|java|xml):\d+:\d+",
         ],
         "suggestions": [
             "优先修复日志里第一条您的源码报错（文件 + 行列），再重新构建。",
@@ -904,6 +1037,15 @@ def _build_source_syntax_details(source_detail: dict[str, Any], language: str) -
         suggestions.append(_diag_text(normalized_language, "source_suggestion_locate", path=path, line=source_line))
     elif path:
         suggestions.append(_diag_text(normalized_language, "source_suggestion_locate_no_line", path=path))
+    if re.search(r"Illegal escape:\s*['\"]?\\s", message, re.IGNORECASE):
+        if normalized_language == "en":
+            suggestions.append(
+                "For Kotlin whitespace regex, use `Regex(\"\\\\s+\")` in a normal string, or `Regex(\"\"\"\\s+\"\"\")` as a raw string."
+            )
+        else:
+            suggestions.append(
+                "这类 Kotlin 报错通常是正则反斜杠没有转义：普通字符串请写成 `Regex(\"\\\\s+\")`，或改用原始字符串 `Regex(\"\"\"\\s+\"\"\")`。"
+            )
     suggestions.append(_diag_text(normalized_language, "source_suggestion_check_pair"))
     tag_match = TAG_MISMATCH_PATTERN.search(message)
     if tag_match:
@@ -1007,7 +1149,15 @@ def _build_rule_result(
                 max_items=8,
             )
             if structured_errors:
-                first_error = dict(structured_errors[0])
+                source_error_index = next(
+                    (
+                        index
+                        for index, item in enumerate(structured_errors)
+                        if str(item.get("rule_id") or "") == "source_syntax_error"
+                    ),
+                    0,
+                )
+                first_error = dict(structured_errors[source_error_index])
                 first_error["title"] = str(source_guidance.get("title") or first_error.get("title") or "").strip()
                 first_error["category"] = str(source_guidance.get("category") or first_error.get("category") or "").strip()
                 first_error["reason"] = str(source_guidance.get("reason") or first_error.get("reason") or "").strip()
@@ -1028,7 +1178,7 @@ def _build_rule_result(
                     first_error["source_line"] = source_line
                 if source_column > 0:
                     first_error["source_column"] = source_column
-                structured_errors[0] = first_error
+                structured_errors[source_error_index] = first_error
 
     if normalized_message and not has_source_syntax_hit:
         probable_causes = _merge_unique_text([normalized_message] + probable_causes, max_items=5)
@@ -1082,7 +1232,9 @@ def _sanitize_path_reference_token(raw_path: str, task_id: str = "") -> str:
         return token
     stripped = token.strip("`'\"")
     normalized = stripped.replace("\\", "/")
-    if "://" in normalized or normalized.startswith("//"):
+    if normalized.startswith("file://"):
+        normalized = re.sub(r"^file:/+", "/", normalized)
+    elif "://" in normalized or normalized.startswith("//"):
         return token
 
     if task_id:
@@ -1111,7 +1263,15 @@ def _sanitize_path_references(text: str, task_id: str = "") -> str:
     source = str(text or "").strip()
     if not source:
         return ""
-    normalized = source.replace("\\", "/")
+    protected_snippets: dict[str, str] = {}
+
+    def _protect_code_snippet(match: re.Match[str]) -> str:
+        placeholder = f"__CODE_SNIPPET_{len(protected_snippets)}__"
+        protected_snippets[placeholder] = match.group(0)
+        return placeholder
+
+    protected_source = re.sub(r"`[^`]*\\[^`]*`", _protect_code_snippet, source)
+    normalized = protected_source.replace("\\", "/")
     if task_id:
         normalized = normalized.replace(f"/data/tasks/{task_id}/", "")
     normalized = TASK_PATH_PREFIX_PATTERN.sub("", normalized)
@@ -1121,10 +1281,15 @@ def _sanitize_path_references(text: str, task_id: str = "") -> str:
         prefix = normalized[max(0, match.start() - 10):match.start()].lower()
         if "http://" in prefix or "https://" in prefix:
             return raw
+        if match.start() > 0 and re.match(r"[A-Za-z0-9_.-]", normalized[match.start() - 1]):
+            return raw
         sanitized = _sanitize_path_reference_token(raw, task_id=task_id)
         return sanitized or raw
 
-    return ABSOLUTE_PATH_PATTERN.sub(_replace_abs, normalized)
+    sanitized_text = ABSOLUTE_PATH_PATTERN.sub(_replace_abs, normalized)
+    for placeholder, snippet in protected_snippets.items():
+        sanitized_text = sanitized_text.replace(placeholder, snippet)
+    return sanitized_text
 
 
 def _sanitize_text_list(values: list[str], task_id: str = "", max_items: int = 8) -> list[str]:

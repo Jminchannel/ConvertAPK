@@ -1695,6 +1695,78 @@ detectWebOutputDir() {
     return 1
 }
 
+detectPrebuiltWebFallbackReason() {
+    local webOutputDir="$1"
+    if [ -z "$webOutputDir" ] || [ ! -f "$webOutputDir/index.html" ] || [ ! -f "package.json" ]; then
+        return 1
+    fi
+    if ! command -v node >/dev/null 2>&1; then
+        return 1
+    fi
+
+    local yarnAvailable="false"
+    if command -v yarn >/dev/null 2>&1; then
+        yarnAvailable="true"
+    fi
+
+    YARN_AVAILABLE="$yarnAvailable" node <<'NODE'
+const fs = require("fs");
+const path = require("path");
+
+function readJson(filePath) {
+  try {
+    return JSON.parse(fs.readFileSync(filePath, "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+function majorOf(version) {
+  const match = String(version || "").match(/\d+/);
+  return match ? Number(match[0]) : 0;
+}
+
+const pkg = readJson(path.join(process.cwd(), "package.json"));
+const deps = Object.assign({}, pkg.dependencies || {}, pkg.devDependencies || {});
+const reasons = [];
+
+if (Object.prototype.hasOwnProperty.call(deps, "node-sass")) {
+  reasons.push("依赖包含 node-sass，旧版 node-sass 在当前 Node 环境下经常安装失败");
+}
+
+const vueCliVersion = deps["@vue/cli-service"];
+if (vueCliVersion && majorOf(vueCliVersion) > 0 && majorOf(vueCliVersion) <= 4) {
+  reasons.push("依赖包含 Vue CLI 4，适合优先复用已生成的 dist 静态产物");
+}
+
+if (fs.existsSync(path.join(process.cwd(), "yarn.lock")) && process.env.YARN_AVAILABLE !== "true") {
+  reasons.push("项目带 yarn.lock 但构建镜像未安装 yarn，回退 npm 可能导致依赖树漂移");
+}
+
+if (!reasons.length) {
+  process.exit(1);
+}
+
+console.log(reasons.join("；"));
+NODE
+}
+
+printNodeFailureHelp() {
+    local failureOutput="$1"
+
+    if echo "$failureOutput" | grep -qi "Exit handler never called"; then
+        log_warning "修复建议：npm 自身异常退出，常见于旧版前端依赖与当前 Node/npm 不兼容。若压缩包内已有 dist/index.html，建议直接上传 dist 静态产物。"
+    fi
+
+    if echo "$failureOutput" | grep -qi "node-sass"; then
+        log_warning "修复建议：node-sass 已不适合新 Node 环境，建议将依赖替换为 sass，或使用项目历史 Node 版本在本地构建后上传 dist。"
+    fi
+
+    if [ -f "yarn.lock" ] && ! command -v yarn >/dev/null 2>&1; then
+        log_warning "修复建议：项目包含 yarn.lock，但构建镜像没有 yarn；请改用静态 dist 上传，或提交与 npm 对应的 package-lock.json 后重试。"
+    fi
+}
+
 detectWebBuildFallback() {
     if [ ! -f "package.json" ] || ! command -v node >/dev/null 2>&1; then
         return 1
@@ -1765,12 +1837,30 @@ runWebOutputFallback() {
 }
 
 # 首次安装依赖
+PREBUILT_WEB_DIR="$(detectWebOutputDir || true)"
+PREBUILT_WEB_REASON=""
+if [ -n "$PREBUILT_WEB_DIR" ]; then
+    PREBUILT_WEB_REASON="$(detectPrebuiltWebFallbackReason "$PREBUILT_WEB_DIR" || true)"
+fi
+
+if [ -n "$PREBUILT_WEB_REASON" ]; then
+    WEB_DIR="$PREBUILT_WEB_DIR"
+    log_warning "检测到可用预构建静态目录 $WEB_DIR，且源码依赖存在兼容风险：$PREBUILT_WEB_REASON"
+    log_warning "已跳过 npm install / npm run build，直接使用现有静态产物，避免旧依赖在服务器环境安装失败"
+else
 log_info "安装项目依赖..."
 if command -v node >/dev/null 2>&1; then
     forceNextConfigExport || log_warning "Next.js config auto rewrite failed, continue build"
 fi
-installDependencies
-check_error "依赖安装失败"
+INSTALL_OUTPUT=$(installDependencies 2>&1) && INSTALL_SUCCESS=true || INSTALL_SUCCESS=false
+if [ -n "$INSTALL_OUTPUT" ]; then
+    echo "$INSTALL_OUTPUT"
+fi
+if [ "$INSTALL_SUCCESS" != "true" ]; then
+    printNodeFailureHelp "$INSTALL_OUTPUT"
+    log_error "依赖安装失败"
+    exit 1
+fi
 
 # 尝试构建
 log_info "构建项目..."
@@ -1888,6 +1978,7 @@ else
         check_error "npm run build 失败"
     fi
     fi
+fi
 fi
 
 # 确定输出目录
@@ -4795,6 +4886,94 @@ if (filePath && fs.existsSync(filePath)) {
 NODE
 fi
 
+applyNativeGradleCompatibilityFallbacks() {
+    if [ "$TASK_MODE" != "native" ]; then
+        return 0
+    fi
+    if ! command -v node >/dev/null 2>&1; then
+        return 0
+    fi
+
+    NATIVE_ANDROID_DIR="$ANDROID_DIR" node <<'NODE'
+const fs = require('fs');
+const path = require('path');
+
+const rootDir = path.resolve(process.cwd(), process.env.NATIVE_ANDROID_DIR || '.');
+const ignoredDirs = new Set(['.git', '.gradle', 'build', 'node_modules']);
+
+function walk(dir, result) {
+  let entries = [];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (!ignoredDirs.has(entry.name)) walk(fullPath, result);
+      continue;
+    }
+    if (entry.isFile()) result.push(fullPath);
+  }
+}
+
+function readText(filePath) {
+  try {
+    return fs.readFileSync(filePath, 'utf8');
+  } catch {
+    return '';
+  }
+}
+
+function writeText(filePath, text) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, text, 'utf8');
+}
+
+const files = [];
+walk(rootDir, files);
+const textFiles = files.filter((filePath) => /\.(gradle|gradle\.kts|kt|java|xml|toml|properties)$/i.test(filePath));
+const hasAndroidX = textFiles.some((filePath) => /\bandroidx[.:]/.test(readText(filePath)));
+
+if (hasAndroidX) {
+  const propsPath = path.join(rootDir, 'gradle.properties');
+  let props = readText(propsPath);
+  const original = props;
+  if (/^android\.useAndroidX\s*=/m.test(props)) {
+    props = props.replace(/^android\.useAndroidX\s*=.*$/m, 'android.useAndroidX=true');
+  } else {
+    const prefix = props.trim() ? `${props.replace(/\s*$/, '')}\n` : '';
+    props = `${prefix}android.useAndroidX=true\n`;
+  }
+  if (props !== original) {
+    writeText(propsPath, props);
+    console.log('[NativeCompatPatch] 已启用 AndroidX: gradle.properties -> android.useAndroidX=true');
+  }
+}
+
+let patchedJvmTarget = 0;
+for (const filePath of files.filter((item) => /\.(gradle|gradle\.kts)$/i.test(item))) {
+  let source = readText(filePath);
+  const original = source;
+  source = source.replace(/(jvmTarget\s*=\s*["'])21(["'])/g, (match, prefix, suffix) => `${prefix}17${suffix}`);
+  source = source.replace(/(jvmTarget\s+["'])21(["'])/g, (match, prefix, suffix) => `${prefix}17${suffix}`);
+  source = source.replace(/(jvmTarget\s*=\s*)JavaVersion\.VERSION_21(?:\.toString\(\))?/g, '$1"17"');
+  if (source !== original) {
+    writeText(filePath, source);
+    patchedJvmTarget += 1;
+    console.log(`[NativeCompatPatch] 已将 Kotlin jvmTarget 21 降级为 17: ${path.relative(rootDir, filePath)}`);
+  }
+}
+
+if (patchedJvmTarget > 0) {
+  console.log('[NativeCompatPatch] 当前构建器优先使用 JVM 17 兼容 Android/Kotlin 构建链');
+}
+NODE
+}
+
+applyNativeGradleCompatibilityFallbacks
+
 log_success "Android 项目配置完成"
 
 # ============================================
@@ -4906,17 +5085,60 @@ log_info "开始 Gradle 构建（可能需要几分钟下载依赖）..."
 # 设置 Gradle 参数
 export GRADLE_OPTS="-Xmx2g -XX:MaxMetaspaceSize=512m -XX:+HeapDumpOnOutOfMemoryError"
 
-if [ "$OUTPUT_FORMAT" = "aab" ]; then
-    # 执行构建，添加 --info 查看详细日志，--stacktrace 查看错误栈
-    ./gradlew bundleRelease "${GRADLE_INIT_ARGS[@]}" \
+printGradleFailureHelp() {
+    local gradleLogFile="$1"
+    if [ ! -f "$gradleLogFile" ]; then
+        return 0
+    fi
+
+    if grep -qi "Unknown Kotlin JVM target: 21" "$gradleLogFile"; then
+        log_warning "修复建议：项目 Kotlin jvmTarget=21，但当前 Kotlin Gradle 插件不支持。请把 build.gradle/build.gradle.kts 中的 jvmTarget 改为 17，或升级 Kotlin Gradle Plugin。"
+    fi
+
+    if grep -qi "Illegal escape" "$gradleLogFile"; then
+        local illegalEscapeLine
+        illegalEscapeLine="$(grep -i -m 1 "Illegal escape" "$gradleLogFile" || true)"
+        if [ -n "$illegalEscapeLine" ]; then
+            log_warning "源码定位：$illegalEscapeLine"
+        fi
+        log_warning "修复建议：Kotlin 正则里的反斜杠需要转义；例如空白分割请写成 Regex(\"\\\\s+\")，或使用原始字符串 Regex(\"\"\"\\s+\"\"\")。"
+    fi
+
+    if grep -Eqi "contains AndroidX dependencies|AndroidX dependencies|android\.useAndroidX" "$gradleLogFile"; then
+        log_warning "修复建议：项目使用 AndroidX 依赖时，根目录 gradle.properties 需要包含 android.useAndroidX=true；如混用旧 support 包，可同时添加 android.enableJetifier=true。"
+    fi
+
+    if grep -Eqi "AndroidManifest\.xml.*doesn.?t exist|Source file .*AndroidManifest\.xml.*does not exist|main manifest.*doesn.?t exist" "$gradleLogFile"; then
+        log_warning "修复建议：Gradle 找不到 app/src/main/AndroidManifest.xml。请确认源码 ZIP 包含完整 app 模块；如果任务在构建中被删除，请重新创建任务并等待构建结束后再删除。"
+    fi
+}
+
+runGradleReleaseBuild() {
+    local gradleTask="$1"
+    local outputLabel="$2"
+    local gradleLogFile="/tmp/convertapk-gradle-${gradleTask}-$$.log"
+
+    set +e
+    ./gradlew "$gradleTask" "${GRADLE_INIT_ARGS[@]}" \
         --no-daemon \
         --stacktrace \
         --warning-mode all \
         -Dorg.gradle.jvmargs="-Xmx2048m -XX:MaxMetaspaceSize=512m" \
         -Dorg.gradle.parallel=false \
-        -Dorg.gradle.caching=false
-        
-    check_error "AAB 构建失败"
+        -Dorg.gradle.caching=false 2>&1 | tee "$gradleLogFile"
+    local gradleStatus=${PIPESTATUS[0]}
+    set -e
+
+    if [ "$gradleStatus" -ne 0 ]; then
+        printGradleFailureHelp "$gradleLogFile"
+        log_error "$outputLabel 构建失败"
+        exit 1
+    fi
+}
+
+if [ "$OUTPUT_FORMAT" = "aab" ]; then
+    # 执行构建，添加 --info 查看详细日志，--stacktrace 查看错误栈
+    runGradleReleaseBuild "bundleRelease" "AAB"
 
     # 找到生成的 AAB
     AAB_OUT_DIR="$(pwd)/app/build/outputs/bundle/release"
@@ -4934,15 +5156,7 @@ if [ "$OUTPUT_FORMAT" = "aab" ]; then
     log_success "AAB 构建完成: $AAB_PATH"
 else
     # 执行构建，添加 --info 查看详细日志，--stacktrace 查看错误栈
-    ./gradlew assembleRelease "${GRADLE_INIT_ARGS[@]}" \
-        --no-daemon \
-        --stacktrace \
-        --warning-mode all \
-        -Dorg.gradle.jvmargs="-Xmx2048m -XX:MaxMetaspaceSize=512m" \
-        -Dorg.gradle.parallel=false \
-        -Dorg.gradle.caching=false
-        
-    check_error "APK 构建失败"
+    runGradleReleaseBuild "assembleRelease" "APK"
 
     # 找到生成的 APK
     APK_OUT_DIR="$(pwd)/app/build/outputs/apk/release"

@@ -6453,6 +6453,10 @@ async def delete_task(task_id: str, client_id: str = None):
     task = tasks_db[task_id]
     client_id = _require_client_id(client_id)
     _assert_task_owner(task, client_id)
+    task_status = getattr(task, "status", "")
+    task_status_value = task_status.value if hasattr(task_status, "value") else str(task_status)
+    if task_status_value in {BuildStatus.PENDING.value, BuildStatus.PROCESSING.value}:
+        raise HTTPException(status_code=409, detail="任务正在排队或构建中，请先取消任务并等待停止后再删除")
     
     del tasks_db[task_id]
     try:
