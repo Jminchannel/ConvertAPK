@@ -323,6 +323,15 @@ RULE_I18N_EN: dict[str, dict[str, Any]] = {
             "The platform only diagnoses this high-risk version-matrix issue and does not auto-change dependency versions.",
         ],
     },
+    "android_signing_env_missing": {
+        "title": "Android signing environment variables are missing",
+        "reason": "The project signing script resolved the keystore path to null before Gradle could configure the release build.",
+        "suggestions": [
+            "If the project uses `RELEASE_STORE_FILE`, `RELEASE_STORE_PASSWORD`, `RELEASE_KEY_ALIAS`, or `RELEASE_KEY_PASSWORD`, make sure they are provided by the build environment.",
+            "If you maintain the source, add a null check before `rootProject.file(...)` and fail with a clear signing message.",
+            "Rebuild after signing variables are provided or the signing script is made null-safe.",
+        ],
+    },
     "kotlin_illegal_escape_regex": {
         "title": "Kotlin regular expression escape error",
         "reason": "A Kotlin string contains an unescaped regular-expression backslash, so compilation stopped.",
@@ -587,6 +596,24 @@ KNOWLEDGE_RULES = [
             "这类问题属于高风险版本矩阵冲突，平台只给出诊断，不自动修改依赖版本。",
         ],
         "confidence": 0.93,
+    },
+    {
+        "id": "android_signing_env_missing",
+        "title": "Android 签名环境变量缺失",
+        "category": "签名问题",
+        "severity": "high",
+        "reason": "日志显示项目签名脚本拿到的 keystore 路径为空，Gradle 在配置 release 签名时中断。",
+        "patterns": [
+            r"path may not be null or empty string",
+            r"path='null'",
+            r"rootProject\.file\(.*null",
+        ],
+        "suggestions": [
+            "如果项目使用 `RELEASE_STORE_FILE`、`RELEASE_STORE_PASSWORD`、`RELEASE_KEY_ALIAS`、`RELEASE_KEY_PASSWORD`，请确认构建环境已传入这些变量。",
+            "如果你维护源码，建议在 `rootProject.file(...)` 前先判断变量是否为空，避免 Gradle 只报 `path='null'`。",
+            "确认签名变量或签名脚本后重新构建。",
+        ],
+        "confidence": 0.94,
     },
     {
         "id": "legacy_node_sass_node22",

@@ -5139,6 +5139,10 @@ if [ "$TASK_MODE" = "native" ]; then
     export STORE_PASSWORD="$KEYSTORE_PASSWORD"
     export KEY_PASSWORD="$KEY_PASSWORD"
     export KEY_ALIAS="$KEY_ALIAS"
+    export RELEASE_STORE_FILE="$KEYSTORE_FILE"
+    export RELEASE_STORE_PASSWORD="$KEYSTORE_PASSWORD"
+    export RELEASE_KEY_ALIAS="$KEY_ALIAS"
+    export RELEASE_KEY_PASSWORD="$KEY_PASSWORD"
 fi
 
 ANDROID_BUILD_DIR="$PROJECT_ROOT/$ANDROID_DIR"
@@ -5242,6 +5246,10 @@ printGradleFailureHelp() {
     if grep -Eqi "Kotlin Gradle plugin.*incompatible|Android Gradle plugin supports only Kotlin|No matching variant.*org.jetbrains.kotlin|The binary version of its metadata is" "$gradleLogFile"; then
         log_warning "修复建议：Kotlin Gradle Plugin 与 AGP/依赖版本存在大版本冲突。请统一 Kotlin、AGP、KSP/Compose 等插件版本；这类依赖矩阵问题平台只提供诊断，不自动改版本。"
     fi
+
+    if grep -Eqi "path may not be null or empty string|path='null'|rootProject\.file\(.*null" "$gradleLogFile"; then
+        log_warning "修复建议：项目签名脚本读取的 keystore 路径为空。若使用 RELEASE_STORE_FILE/RELEASE_STORE_PASSWORD 等环境变量，请确认构建环境已传入；平台已为原生构建注入这些兼容变量。"
+    fi
 }
 
 runGradleReleaseBuild() {
@@ -5253,6 +5261,7 @@ runGradleReleaseBuild() {
     ./gradlew "$gradleTask" "${GRADLE_INIT_ARGS[@]}" \
         --no-daemon \
         --stacktrace \
+        --console=plain \
         --warning-mode all \
         -Dorg.gradle.jvmargs="-Xmx2048m -XX:MaxMetaspaceSize=512m" \
         -Dorg.gradle.parallel=false \
