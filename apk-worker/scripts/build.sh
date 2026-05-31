@@ -5029,10 +5029,45 @@ function patchGroovySpaceAssignments(source) {
   });
 }
 
+function collectIncludedModules() {
+  const modules = new Set();
+  for (const settingsName of ['settings.gradle', 'settings.gradle.kts']) {
+    const settingsPath = path.join(rootDir, settingsName);
+    const source = readText(settingsPath);
+    if (!source) continue;
+    const includePattern = /include\s*(?:\(?\s*)?([^\r\n)]*)/g;
+    let match;
+    while ((match = includePattern.exec(source)) !== null) {
+      const body = match[1] || '';
+      for (const moduleMatch of body.matchAll(/['"](:[^'"]+)['"]/g)) {
+        modules.add(moduleMatch[1]);
+      }
+    }
+  }
+  return Array.from(modules);
+}
+
+function warnMissingIncludedModules() {
+  for (const moduleName of collectIncludedModules()) {
+    if (moduleName === ':app') continue;
+    const modulePath = path.join(rootDir, ...moduleName.replace(/^:/, '').split(':'));
+    if (!fs.existsSync(modulePath)) {
+      console.log(`[NativeCompatPatch] 警告：settings.gradle 引用了 ${moduleName}，但源码包中缺少目录 ${path.relative(rootDir, modulePath)}`);
+      continue;
+    }
+    const hasBuildFile = fs.existsSync(path.join(modulePath, 'build.gradle')) || fs.existsSync(path.join(modulePath, 'build.gradle.kts'));
+    if (!hasBuildFile) {
+      console.log(`[NativeCompatPatch] 警告：settings.gradle 引用了 ${moduleName}，但该模块缺少 build.gradle/build.gradle.kts；如果这是 Git submodule，请重新打包含子模块的完整源码`);
+    }
+  }
+}
+
 const files = [];
 walk(rootDir, files);
 const textFiles = files.filter((filePath) => /\.(gradle|gradle\.kts|kt|java|xml|toml|properties)$/i.test(filePath));
 const hasAndroidX = textFiles.some((filePath) => /\bandroidx[.:]/.test(readText(filePath)));
+
+warnMissingIncludedModules();
 
 let patchedGroovyDsl = 0;
 for (const filePath of files.filter((item) => /\.gradle$/i.test(item))) {
@@ -5243,12 +5278,16 @@ printGradleFailureHelp() {
         log_warning "修复建议：Android Gradle Plugin 与 Gradle wrapper 版本不匹配。请按日志要求调整 gradle-wrapper.properties，或同步升级/降级 AGP 与 Gradle；这类大版本冲突平台不会自动强改。"
     fi
 
-    if grep -Eqi "Kotlin Gradle plugin.*incompatible|Android Gradle plugin supports only Kotlin|No matching variant.*org.jetbrains.kotlin|The binary version of its metadata is" "$gradleLogFile"; then
+    if grep -Eqi "Kotlin Gradle plugin.*incompatible|Android Gradle plugin supports only Kotlin|No matching variant.*(kotlin-gradle-plugin|org\.jetbrains\.kotlin:kotlin)|The binary version of its metadata is" "$gradleLogFile"; then
         log_warning "修复建议：Kotlin Gradle Plugin 与 AGP/依赖版本存在大版本冲突。请统一 Kotlin、AGP、KSP/Compose 等插件版本；这类依赖矩阵问题平台只提供诊断，不自动改版本。"
     fi
 
     if grep -Eqi "path may not be null or empty string|path='null'|rootProject\.file\(.*null" "$gradleLogFile"; then
         log_warning "修复建议：项目签名脚本读取的 keystore 路径为空。若使用 RELEASE_STORE_FILE/RELEASE_STORE_PASSWORD 等环境变量，请确认构建环境已传入；平台已为原生构建注入这些兼容变量。"
+    fi
+
+    if grep -Eqi "Could not resolve project :|No matching variant of project :|No variants exist" "$gradleLogFile"; then
+        log_warning "修复建议：Gradle 子模块缺失或未配置。请检查 settings.gradle 中 include 的模块是否都带有 build.gradle/build.gradle.kts；如果模块来自 Git submodule，请使用 git clone --recursive 后重新压缩完整源码，或把缺失模块目录补进 ZIP。"
     fi
 }
 

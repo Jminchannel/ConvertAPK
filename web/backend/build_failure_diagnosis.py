@@ -323,6 +323,15 @@ RULE_I18N_EN: dict[str, dict[str, Any]] = {
             "The platform only diagnoses this high-risk version-matrix issue and does not auto-change dependency versions.",
         ],
     },
+    "gradle_included_module_missing": {
+        "title": "Included Gradle module is missing or empty",
+        "reason": "The project references a Gradle submodule, but that module has no consumable Android/Java variants. This usually means the uploaded ZIP is incomplete.",
+        "suggestions": [
+            "Check `settings.gradle` and make sure every included module directory is present and contains `build.gradle` or `build.gradle.kts`.",
+            "If the missing module is a Git submodule, clone with `git clone --recursive` or run `git submodule update --init --recursive`, then upload a complete ZIP.",
+            "Alternatively remove the `implementation project(':moduleName')` dependency if that module is not needed.",
+        ],
+    },
     "android_signing_env_missing": {
         "title": "Android signing environment variables are missing",
         "reason": "The project signing script resolved the keystore path to null before Gradle could configure the release build.",
@@ -586,7 +595,7 @@ KNOWLEDGE_RULES = [
         "patterns": [
             r"Kotlin Gradle plugin.*incompatible",
             r"Android Gradle plugin supports only Kotlin",
-            r"No matching variant.*org\.jetbrains\.kotlin",
+            r"No matching variant.*(kotlin-gradle-plugin|org\.jetbrains\.kotlin:kotlin)",
             r"The binary version of its metadata is",
             r"Module was compiled with an incompatible version of Kotlin",
         ],
@@ -596,6 +605,24 @@ KNOWLEDGE_RULES = [
             "这类问题属于高风险版本矩阵冲突，平台只给出诊断，不自动修改依赖版本。",
         ],
         "confidence": 0.93,
+    },
+    {
+        "id": "gradle_included_module_missing",
+        "title": "Gradle 子模块缺失或为空",
+        "category": "源码包不完整",
+        "severity": "high",
+        "reason": "日志显示项目引用了 Gradle 子模块，但该模块没有可用 variant，通常是上传 ZIP 缺少子模块源码或模块 build.gradle。",
+        "patterns": [
+            r"Could not resolve project :",
+            r"No matching variant of project :",
+            r"No variants exist",
+        ],
+        "suggestions": [
+            "检查 `settings.gradle` 中 include 的模块，确认每个模块目录都存在并包含 `build.gradle` 或 `build.gradle.kts`。",
+            "如果缺失模块来自 Git submodule，请用 `git clone --recursive` 或 `git submodule update --init --recursive` 拉完整源码后再压缩上传。",
+            "如果该模块不需要，请从 `settings.gradle` 和 `implementation project(':模块名')` 中移除对应引用。",
+        ],
+        "confidence": 0.96,
     },
     {
         "id": "android_signing_env_missing",
