@@ -848,12 +848,19 @@ detect_android_gradle_plugin_version() {
     printf '%s' "$version"
 }
 
-resolve_gradle_distribution_url() {
-    if [ -n "${CONVERTAPK_GRADLE_DISTRIBUTION_URL:-}" ]; then
-        printf '%s' "$CONVERTAPK_GRADLE_DISTRIBUTION_URL"
+extract_gradle_distribution_version() {
+    printf '%s' "$1" | sed -n -E 's#.*gradle-([0-9]+(\.[0-9]+){1,3})-.*#\1#p' | head -n 1
+}
+
+get_gradle_wrapper_distribution_url() {
+    local wrapper_props="$1"
+    if [ ! -f "$wrapper_props" ]; then
         return 0
     fi
+    grep -E '^distributionUrl=' "$wrapper_props" | head -n 1 | cut -d'=' -f2-
+}
 
+select_default_gradle_distribution_url() {
     local agp_version
     agp_version="$(detect_android_gradle_plugin_version)"
     if version_gte "$agp_version" "9.0.0"; then
@@ -862,35 +869,77 @@ resolve_gradle_distribution_url() {
         return 0
     fi
 
-    # 默认使用兼容 JDK 21 的 Gradle 8 版本，覆盖旧模板中的过低版本。
+    # 兜底使用兼容 JDK 21 的 Gradle 8 版本，只有项目 wrapper 过低或缺失时才使用。
     printf '%s' "https://services.gradle.org/distributions/gradle-8.14.3-all.zip"
 }
 
+resolve_gradle_distribution_url() {
+    local wrapper_props="${1:-}"
+    if [ -n "${CONVERTAPK_GRADLE_DISTRIBUTION_URL:-}" ]; then
+        printf '%s' "$CONVERTAPK_GRADLE_DISTRIBUTION_URL"
+        return 0
+    fi
+
+    local agp_version
+    agp_version="$(detect_android_gradle_plugin_version)"
+    local current_url=""
+    local current_version=""
+    if [ -n "$wrapper_props" ]; then
+        current_url="$(get_gradle_wrapper_distribution_url "$wrapper_props")"
+        current_version="$(extract_gradle_distribution_version "$current_url")"
+    fi
+
+    if [ -n "$current_url" ] && [ -n "$current_version" ] && [ "${CONVERTAPK_GRADLE_FORCE_UPGRADE:-0}" != "1" ]; then
+        if version_gte "$agp_version" "9.0.0"; then
+            if version_gte "$current_version" "9.0.0"; then
+                printf '%s' "$current_url"
+                return 0
+            fi
+        else
+            local min_gradle_version="${CONVERTAPK_GRADLE_MIN_VERSION:-8.5}"
+            if version_gte "$current_version" "$min_gradle_version"; then
+                printf '%s' "$current_url"
+                return 0
+            fi
+        fi
+    fi
+
+    select_default_gradle_distribution_url
+}
+
 patch_gradle_wrapper_version() {
-    local target_url
-    target_url="$(resolve_gradle_distribution_url)"
-    local safe_url="$target_url"
-    local patched="false"
-
-    safe_url="${safe_url//\\/\\\\}"
-    safe_url="${safe_url//:/\\:}"
-    safe_url="${safe_url//\//\\/}"
-
+    local seen="false"
     for wrapper_props in "android/gradle/wrapper/gradle-wrapper.properties" "gradle/wrapper/gradle-wrapper.properties"; do
         if [ ! -f "$wrapper_props" ]; then
             continue
         fi
+        seen="true"
+        local current_url
+        local target_url
+        local safe_url
+        current_url="$(get_gradle_wrapper_distribution_url "$wrapper_props")"
+        target_url="$(resolve_gradle_distribution_url "$wrapper_props")"
+
+        if [ -n "$current_url" ] && [ "$current_url" = "$target_url" ]; then
+            log_info "保留项目自带 Gradle wrapper：$wrapper_props -> $target_url"
+            continue
+        fi
+
+        safe_url="$target_url"
+        safe_url="${safe_url//\\/\\\\}"
+        safe_url="${safe_url//:/\\:}"
+        safe_url="${safe_url//\//\\/}"
+
         if grep -q '^distributionUrl=' "$wrapper_props"; then
             sed -i -E "s#^distributionUrl=.*#distributionUrl=$safe_url#g" "$wrapper_props"
         else
             printf '\ndistributionUrl=%s\n' "$safe_url" >> "$wrapper_props"
         fi
         sed -i '/^distributionSha256Sum=/d' "$wrapper_props"
-        patched="true"
-        log_info "已锁定 Gradle wrapper：$wrapper_props -> $target_url"
+        log_info "已调整 Gradle wrapper：$wrapper_props -> $target_url"
     done
 
-    if [ "$patched" != "true" ]; then
+    if [ "$seen" != "true" ]; then
         log_warning "未找到 gradle-wrapper.properties，跳过 Gradle 版本锁定"
     fi
 }
@@ -4691,10 +4740,12 @@ if [ -f "$GRADLE_FILE" ]; then
         sed -i "s/versionName[[:space:]]*=[[:space:]]*\".*\"/versionName = \"$VERSION_NAME\"/" "$GRADLE_FILE"
         sed -i "s/versionCode[[:space:]]*=[[:space:]]*[0-9]\+/versionCode = $VERSION_CODE/" "$GRADLE_FILE"
     else
-        sed -i -E "s/applicationId[[:space:]]*=[[:space:]]*\"[^\"]*\"/applicationId \"$PACKAGE_NAME\"/" "$GRADLE_FILE"
-        sed -i -E "s/applicationId[[:space:]]+\"[^\"]*\"/applicationId \"$PACKAGE_NAME\"/" "$GRADLE_FILE"
-        sed -i "s/versionName \".*\"/versionName \"$VERSION_NAME\"/" "$GRADLE_FILE"
-        sed -i "s/versionCode .*/versionCode $VERSION_CODE/" "$GRADLE_FILE"
+        sed -i -E "s/applicationId[[:space:]]*=[[:space:]]*\"[^\"]*\"/applicationId = \"$PACKAGE_NAME\"/" "$GRADLE_FILE"
+        sed -i -E "s/applicationId[[:space:]]+\"[^\"]*\"/applicationId = \"$PACKAGE_NAME\"/" "$GRADLE_FILE"
+        sed -i -E "s/versionName[[:space:]]*=[[:space:]]*\".*\"/versionName = \"$VERSION_NAME\"/" "$GRADLE_FILE"
+        sed -i -E "s/versionName[[:space:]]+\".*\"/versionName = \"$VERSION_NAME\"/" "$GRADLE_FILE"
+        sed -i -E "s/versionCode[[:space:]]*=[[:space:]]*.*/versionCode = $VERSION_CODE/" "$GRADLE_FILE"
+        sed -i -E "s/versionCode[[:space:]]+.*/versionCode = $VERSION_CODE/" "$GRADLE_FILE"
     fi
     log_info "已更新版本号信息"
 fi
@@ -4783,7 +4834,7 @@ if (gradleFile && fs.existsSync(gradleFile)) {
       isKts
         ? [/applicationId\s*=\s*"[^"]*"/, /applicationId\s*\(\s*"[^"]*"\s*\)/]
         : [/applicationId\s*=\s*"[^"]*"/, /applicationId\s+"[^"]*"/],
-      isKts ? `applicationId = "${packageName}"` : `applicationId "${packageName}"`
+      `applicationId = "${packageName}"`
     );
   }
   source = patchOrInsert(
@@ -4791,14 +4842,14 @@ if (gradleFile && fs.existsSync(gradleFile)) {
     isKts
       ? [/versionName\s*=\s*"[^"]*"/, /versionName\s*\(\s*"[^"]*"\s*\)/]
       : [/versionName\s*=\s*"[^"]*"/, /versionName\s+"[^"]*"/],
-    isKts ? `versionName = "${versionName}"` : `versionName "${versionName}"`
+    `versionName = "${versionName}"`
   );
   source = patchOrInsert(
     source,
     isKts
       ? [/versionCode\s*=\s*\d+/, /versionCode\s*\(\s*\d+\s*\)/]
       : [/versionCode\s*=\s*\d+/, /versionCode\s+\d+/],
-    isKts ? `versionCode = ${versionCode}` : `versionCode ${versionCode}`
+    `versionCode = ${versionCode}`
   );
   if (source !== original) {
     fs.writeFileSync(gradleFile, source, 'utf8');
@@ -4868,13 +4919,13 @@ if (filePath && fs.existsSync(filePath)) {
     source = source.replace(/keyAlias\s*=\s*"[^"]*"/g, `keyAlias = System.getenv("KEY_ALIAS") ?: "${quote(keyAlias)}"`);
     source = source.replace(/keyPassword\s*=\s*("[^"]*"|System\.getenv\("[^"]+"\))/g, 'keyPassword = System.getenv("KEY_PASSWORD")');
   } else {
-    source = source.replace(/storeFile\s+(file\([^\n]*\))/g, 'storeFile file(System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks")');
+    source = source.replace(/storeFile\s+(file\([^\n]*\))/g, 'storeFile = file(System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks")');
     source = source.replace(/storeFile\s*=\s*(file\([^\n]*\))/g, 'storeFile = file(System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks")');
-    source = source.replace(/storePassword\s+("[^"]*"|System\.getenv\("[^"]+"\))/g, 'storePassword System.getenv("STORE_PASSWORD")');
+    source = source.replace(/storePassword\s+("[^"]*"|System\.getenv\("[^"]+"\))/g, 'storePassword = System.getenv("STORE_PASSWORD")');
     source = source.replace(/storePassword\s*=\s*("[^"]*"|System\.getenv\("[^"]+"\))/g, 'storePassword = System.getenv("STORE_PASSWORD")');
-    source = source.replace(/keyAlias\s+"[^"]*"/g, `keyAlias System.getenv("KEY_ALIAS") ?: "${quote(keyAlias)}"`);
+    source = source.replace(/keyAlias\s+"[^"]*"/g, `keyAlias = System.getenv("KEY_ALIAS") ?: "${quote(keyAlias)}"`);
     source = source.replace(/keyAlias\s*=\s*"[^"]*"/g, `keyAlias = System.getenv("KEY_ALIAS") ?: "${quote(keyAlias)}"`);
-    source = source.replace(/keyPassword\s+("[^"]*"|System\.getenv\("[^"]+"\))/g, 'keyPassword System.getenv("KEY_PASSWORD")');
+    source = source.replace(/keyPassword\s+("[^"]*"|System\.getenv\("[^"]+"\))/g, 'keyPassword = System.getenv("KEY_PASSWORD")');
     source = source.replace(/keyPassword\s*=\s*("[^"]*"|System\.getenv\("[^"]+"\))/g, 'keyPassword = System.getenv("KEY_PASSWORD")');
   }
 
@@ -4931,10 +4982,73 @@ function writeText(filePath, text) {
   fs.writeFileSync(filePath, text, 'utf8');
 }
 
+function patchGroovySpaceAssignments(source) {
+  const propertyNames = [
+    'compileSdk',
+    'compileSdkVersion',
+    'namespace',
+    'applicationId',
+    'minSdk',
+    'minSdkVersion',
+    'targetSdk',
+    'targetSdkVersion',
+    'versionCode',
+    'versionName',
+    'testInstrumentationRunner',
+    'abortOnError',
+    'useLegacyPackaging',
+    'minifyEnabled',
+    'shrinkResources',
+    'zipAlignEnabled',
+    'debuggable',
+    'jniDebuggable',
+    'renderscriptTargetApi',
+    'renderscriptSupportModeEnabled',
+    'multiDexEnabled',
+    'dimension',
+    'applicationIdSuffix',
+    'versionNameSuffix',
+    'signingConfig',
+    'storeFile',
+    'storePassword',
+    'keyAlias',
+    'keyPassword',
+    'v1SigningEnabled',
+    'v2SigningEnabled',
+    'v3SigningEnabled',
+    'v4SigningEnabled',
+  ];
+  const propertyPattern = propertyNames.map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+  const linePattern = new RegExp(`^([ \\t]*)(${propertyPattern})([ \\t]+)(?![=({])([^\\r\\n]+)$`, 'gm');
+  return source.replace(linePattern, (match, indent, propertyName, spacing, value) => {
+    const trimmedValue = value.trim();
+    if (!trimmedValue || trimmedValue.startsWith('//') || trimmedValue.startsWith('{')) {
+      return match;
+    }
+    return `${indent}${propertyName} = ${trimmedValue}`;
+  });
+}
+
 const files = [];
 walk(rootDir, files);
 const textFiles = files.filter((filePath) => /\.(gradle|gradle\.kts|kt|java|xml|toml|properties)$/i.test(filePath));
 const hasAndroidX = textFiles.some((filePath) => /\bandroidx[.:]/.test(readText(filePath)));
+
+let patchedGroovyDsl = 0;
+for (const filePath of files.filter((item) => /\.gradle$/i.test(item))) {
+  let source = readText(filePath);
+  const original = source;
+  source = patchGroovySpaceAssignments(source);
+  if (source !== original) {
+    writeText(filePath, source);
+    patchedGroovyDsl += 1;
+    console.log(`[NativeCompatPatch] 已迁移 Gradle Groovy 属性赋值语法: ${path.relative(rootDir, filePath)}`);
+  }
+}
+
+if (patchedGroovyDsl > 0) {
+  console.log('[NativeCompatPatch] 已将低风险旧 DSL 写法迁移为 propName = value，避免新 Gradle 版本拦截');
+}
 
 if (hasAndroidX) {
   const propsPath = path.join(rootDir, 'gradle.properties');
@@ -5110,6 +5224,23 @@ printGradleFailureHelp() {
 
     if grep -Eqi "AndroidManifest\.xml.*doesn.?t exist|Source file .*AndroidManifest\.xml.*does not exist|main manifest.*doesn.?t exist" "$gradleLogFile"; then
         log_warning "修复建议：Gradle 找不到 app/src/main/AndroidManifest.xml。请确认源码 ZIP 包含完整 app 模块；如果任务在构建中被删除，请重新创建任务并等待构建结束后再删除。"
+    fi
+
+    if grep -Eqi "Properties should be assigned using the 'propName = value' syntax|Gradle-generated 'propName value'|groovy_space_assignment_syntax" "$gradleLogFile"; then
+        local gradleDslLine
+        gradleDslLine="$(grep -Ei -m 1 "Properties should be assigned using the 'propName = value' syntax|Use assignment" "$gradleLogFile" || true)"
+        if [ -n "$gradleDslLine" ]; then
+            log_warning "Gradle DSL 定位：$gradleDslLine"
+        fi
+        log_warning "修复建议：build.gradle 使用了旧 Groovy 空格赋值语法，请改为 propName = value；例如 compileSdk = 36、namespace = 'com.example.app'、useLegacyPackaging = true。"
+    fi
+
+    if grep -Eqi "Minimum supported Gradle version is|The current Gradle version is|This version of the Android Gradle plugin requires Gradle" "$gradleLogFile"; then
+        log_warning "修复建议：Android Gradle Plugin 与 Gradle wrapper 版本不匹配。请按日志要求调整 gradle-wrapper.properties，或同步升级/降级 AGP 与 Gradle；这类大版本冲突平台不会自动强改。"
+    fi
+
+    if grep -Eqi "Kotlin Gradle plugin.*incompatible|Android Gradle plugin supports only Kotlin|No matching variant.*org.jetbrains.kotlin|The binary version of its metadata is" "$gradleLogFile"; then
+        log_warning "修复建议：Kotlin Gradle Plugin 与 AGP/依赖版本存在大版本冲突。请统一 Kotlin、AGP、KSP/Compose 等插件版本；这类依赖矩阵问题平台只提供诊断，不自动改版本。"
     fi
 }
 

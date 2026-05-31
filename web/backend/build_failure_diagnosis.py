@@ -296,6 +296,33 @@ RULE_I18N_EN: dict[str, dict[str, Any]] = {
             "Rebuild after saving `gradle.properties`.",
         ],
     },
+    "gradle_groovy_space_assignment_incompatible": {
+        "title": "Gradle Groovy DSL syntax is incompatible",
+        "reason": "The build log shows old Groovy space-assignment syntax in `build.gradle`; newer Gradle expects `propName = value`.",
+        "suggestions": [
+            "Open the reported `build.gradle` line and change examples like `compileSdk 36` to `compileSdk = 36`.",
+            "Apply the same style to `namespace`, `minSdk`, `targetSdk`, `abortOnError`, and `useLegacyPackaging`.",
+            "This is a Gradle DSL compatibility issue, not business source-code logic.",
+        ],
+    },
+    "gradle_agp_wrapper_version_mismatch": {
+        "title": "Gradle and Android Gradle Plugin versions do not match",
+        "reason": "The build log shows a Gradle wrapper and Android Gradle Plugin version-matrix mismatch.",
+        "suggestions": [
+            "Adjust `gradle/wrapper/gradle-wrapper.properties` or `com.android.tools.build:gradle` according to the log.",
+            "Keep Gradle, AGP, JDK, and Kotlin plugin versions aligned instead of upgrading only one of them.",
+            "The platform reports this high-risk version conflict but does not automatically rewrite plugin versions.",
+        ],
+    },
+    "kotlin_gradle_plugin_version_conflict": {
+        "title": "Kotlin/AGP plugin version conflict",
+        "reason": "The log indicates Kotlin Gradle Plugin is incompatible with AGP, KSP, Compose, or dependency metadata versions.",
+        "suggestions": [
+            "Align Kotlin Gradle Plugin, KSP, Compose Compiler, and AGP versions using the project's original documentation or official version matrix.",
+            "For older projects, prefer their original wrapper/plugin versions; for newer projects, upgrade the Android build chain together.",
+            "The platform only diagnoses this high-risk version-matrix issue and does not auto-change dependency versions.",
+        ],
+    },
     "kotlin_illegal_escape_regex": {
         "title": "Kotlin regular expression escape error",
         "reason": "A Kotlin string contains an unescaped regular-expression backslash, so compilation stopped.",
@@ -502,6 +529,64 @@ KNOWLEDGE_RULES = [
             "这是项目配置缺失，不需要修改业务代码。",
         ],
         "confidence": 0.95,
+    },
+    {
+        "id": "gradle_groovy_space_assignment_incompatible",
+        "title": "Gradle Groovy DSL 写法不兼容",
+        "category": "Android 配置",
+        "severity": "high",
+        "reason": "日志显示 `build.gradle` 使用了旧的 Groovy 空格赋值写法，新版 Gradle 要求改成 `propName = value`。",
+        "patterns": [
+            r"Properties should be assigned using the 'propName = value' syntax",
+            r"Gradle-generated 'propName value'",
+            r"groovy_space_assignment_syntax",
+            r"Use assignment \('[^']+ = <value>'\)",
+        ],
+        "suggestions": [
+            "打开日志指向的 `build.gradle` 行号，把 `compileSdk 36` 改为 `compileSdk = 36`，`namespace '包名'` 改为 `namespace = '包名'`。",
+            "同类写法也需要改成等号赋值，例如 `minSdk = 23`、`targetSdk = 36`、`abortOnError = false`、`useLegacyPackaging = true`。",
+            "这是 Gradle DSL 兼容问题，不是业务代码逻辑错误；修完第一批 DSL 行后再重新构建。",
+        ],
+        "confidence": 0.96,
+    },
+    {
+        "id": "gradle_agp_wrapper_version_mismatch",
+        "title": "Gradle 与 Android Gradle Plugin 版本不匹配",
+        "category": "Android 配置",
+        "severity": "high",
+        "reason": "日志显示 Android Gradle Plugin 与当前 Gradle wrapper 大版本不匹配，这类版本矩阵冲突需要按项目实际依赖调整。",
+        "patterns": [
+            r"Minimum supported Gradle version is",
+            r"The current Gradle version is",
+            r"This version of the Android Gradle plugin requires Gradle",
+            r"Android Gradle plugin requires Java",
+        ],
+        "suggestions": [
+            "按日志提示修改 `gradle/wrapper/gradle-wrapper.properties` 中的 Gradle 版本，或同步调整 `com.android.tools.build:gradle` 版本。",
+            "不要只单独升级 Gradle 或 AGP；Gradle、AGP、JDK、Kotlin 插件需要一起匹配。",
+            "平台不会自动强改这类大版本依赖矩阵，避免把项目改到另一个不可控状态。",
+        ],
+        "confidence": 0.94,
+    },
+    {
+        "id": "kotlin_gradle_plugin_version_conflict",
+        "title": "Kotlin/AGP 插件版本冲突",
+        "category": "Android 配置",
+        "severity": "high",
+        "reason": "日志显示 Kotlin Gradle Plugin 与 AGP、KSP、Compose 或依赖元数据版本不兼容。",
+        "patterns": [
+            r"Kotlin Gradle plugin.*incompatible",
+            r"Android Gradle plugin supports only Kotlin",
+            r"No matching variant.*org\.jetbrains\.kotlin",
+            r"The binary version of its metadata is",
+            r"Module was compiled with an incompatible version of Kotlin",
+        ],
+        "suggestions": [
+            "统一 Kotlin Gradle Plugin、KSP、Compose Compiler 和 AGP 的版本，优先参考项目原始 README 或官方版本矩阵。",
+            "如果项目依赖较老，请优先使用项目原本的 wrapper 和插件版本；如果项目很新，则同步升级整套 Android 构建链。",
+            "这类问题属于高风险版本矩阵冲突，平台只给出诊断，不自动修改依赖版本。",
+        ],
+        "confidence": 0.93,
     },
     {
         "id": "legacy_node_sass_node22",
