@@ -22,7 +22,7 @@ ConvertAPK 的核心路径是：上传授权 Web 项目，填写 Android 应用�
 ### 从上传到产物
 
 <p align="center">
-  <img src="docs/assets/readme-workflow.svg" alt="ConvertAPK 三步构建流程" width="920">
+  <img src="docs/assets/readme-workflow.png" alt="ConvertAPK 三步构建流程" width="920">
 </p>
 
 ### 能力地图
