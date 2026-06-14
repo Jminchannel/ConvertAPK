@@ -235,6 +235,8 @@ class BuildTask(BaseModel):
     message: str = ""
     download_url: Optional[str] = None
     output_filename: Optional[str] = None
+    output_expires_at: Optional[datetime] = None
+    output_expired: bool = False
     desktop_output_expires_at: Optional[datetime] = None
     logs: List[str] = []
     failure_diagnosis: Dict[str, Any] = Field(default_factory=dict)
@@ -294,6 +296,8 @@ class BuildTaskResponse(BaseModel):
     message: str
     download_url: Optional[str] = None
     output_filename: Optional[str] = None
+    output_expires_at: Optional[datetime] = None
+    output_expired: bool = False
     desktop_output_expires_at: Optional[datetime] = None
     logs: List[str] = []
     failure_diagnosis: Dict[str, Any] = Field(default_factory=dict)
@@ -334,6 +338,8 @@ class BuildTaskListItemResponse(BaseModel):
     message: str
     download_url: Optional[str] = None
     output_filename: Optional[str] = None
+    output_expires_at: Optional[datetime] = None
+    output_expired: bool = False
     desktop_output_expires_at: Optional[datetime] = None
     failure_diagnosis: Dict[str, Any] = Field(default_factory=dict)
     reuse_keystore_from: Optional[str] = None

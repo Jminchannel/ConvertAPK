@@ -1821,3 +1821,60 @@ messages['zh-TW'].upload.title = '專案或原生 Android ZIP'
 messages['zh-TW'].upload.subtitle = '上傳 Web 專案 ZIP、靜態 HTML 包或原生 Android Gradle 專案'
 messages['zh-TW'].upload.dragDrop = '拖放專案 ZIP 到此處，或點擊選擇'
 messages['zh-TW'].upload.hint = '自動識別 package.json、index.html 與原生 Android Gradle 專案'
+
+// 构建产物三天下载期提示
+const outputRetentionMessages = {
+  en: {
+    tasks: {
+      outputRetention: 'Download available for {days} days, expires at {date}.',
+      outputRetentionExpired: 'The {days}-day download period has expired and the file was cleaned automatically.'
+    },
+    toast: {
+      outputExpired: 'The {days}-day download period has expired. The file has been cleaned automatically.'
+    }
+  },
+  'zh-CN': {
+    tasks: {
+      outputRetention: '生成成功后可下载 {days} 天，到期时间：{date}',
+      outputRetentionExpired: '{days} 天下载期已结束，系统已自动清理该产物。'
+    },
+    toast: {
+      outputExpired: '{days} 天下载期已结束，系统已自动清理该产物。'
+    }
+  },
+  'zh-TW': {
+    tasks: {
+      outputRetention: '生成成功後可下載 {days} 天，到期時間：{date}',
+      outputRetentionExpired: '{days} 天下載期已結束，系統已自動清理該產物。'
+    },
+    toast: {
+      outputExpired: '{days} 天下載期已結束，系統已自動清理該產物。'
+    }
+  },
+  ja: {
+    tasks: {
+      outputRetention: '生成後 {days} 日間ダウンロードできます。有効期限: {date}',
+      outputRetentionExpired: '{days} 日間のダウンロード期間が終了し、ファイルは自動削除されました。'
+    },
+    toast: {
+      outputExpired: '{days} 日間のダウンロード期間が終了し、ファイルは自動削除されました。'
+    }
+  },
+  ko: {
+    tasks: {
+      outputRetention: '생성 후 {days}일 동안 다운로드할 수 있습니다. 만료 시간: {date}',
+      outputRetentionExpired: '{days}일 다운로드 기간이 끝나 파일이 자동 정리되었습니다.'
+    },
+    toast: {
+      outputExpired: '{days}일 다운로드 기간이 끝나 파일이 자동 정리되었습니다.'
+    }
+  }
+}
+
+Object.entries(outputRetentionMessages).forEach(([locale, sections]) => {
+  messages[locale] = messages[locale] || {}
+  Object.entries(sections).forEach(([section, values]) => {
+    messages[locale][section] = messages[locale][section] || {}
+    Object.assign(messages[locale][section], values)
+  })
+})

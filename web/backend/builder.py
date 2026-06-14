@@ -71,6 +71,11 @@ try:
 except ValueError:
     DESKTOP_OUTPUT_RETENTION_MINUTES = 30
 DESKTOP_OUTPUT_RETENTION_DELTA = timedelta(minutes=DESKTOP_OUTPUT_RETENTION_MINUTES)
+try:
+    OUTPUT_RETENTION_DAYS = max(int(os.getenv("APK_OUTPUT_RETENTION_DAYS", "3") or "3"), 1)
+except ValueError:
+    OUTPUT_RETENTION_DAYS = 3
+OUTPUT_RETENTION_DELTA = timedelta(days=OUTPUT_RETENTION_DAYS)
 
 _templates_dir_raw = os.getenv("APK_BUILDER_TEMPLATES_DIR", "").strip()
 if _templates_dir_raw:
@@ -1839,13 +1844,23 @@ class BuildTaskRunner:
                 else:
                     task.message = message
                     task.desktop_output_expires_at = None
-                task.output_filename = None if auto_clean_output else output_file
-                task.download_url = None if auto_clean_output else f"/api/download/{task_id}"
+                if auto_clean_output:
+                    task.output_filename = None
+                    task.output_expires_at = None
+                    task.output_expired = True
+                    task.download_url = None
+                else:
+                    task.output_filename = output_file
+                    task.output_expires_at = None if defer_desktop_output_cleanup else datetime.now() + OUTPUT_RETENTION_DELTA
+                    task.output_expired = False
+                    task.download_url = f"/api/download/{task_id}"
                 task.failure_diagnosis = create_idle_diagnosis()
             else:
                 task.status = "failed"
                 task.message = message
                 task.desktop_output_expires_at = None
+                task.output_expires_at = None
+                task.output_expired = False
                 task.failure_diagnosis = create_idle_diagnosis()
             task.updated_at = datetime.now()
             self._notify_state_change(force=True)

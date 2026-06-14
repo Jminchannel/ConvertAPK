@@ -103,6 +103,16 @@ _github_repo_stats_cache = {
 UPLOAD_MAX_SIZE_MB_DEFAULT = 200
 UPLOAD_MAX_SIZE_MB_MIN = 1
 UPLOAD_MAX_SIZE_MB_MAX = 10240
+try:
+    OUTPUT_RETENTION_DAYS = max(int(os.getenv("APK_OUTPUT_RETENTION_DAYS", "3") or "3"), 1)
+except ValueError:
+    OUTPUT_RETENTION_DAYS = 3
+OUTPUT_RETENTION_DELTA = timedelta(days=OUTPUT_RETENTION_DAYS)
+try:
+    OUTPUT_CLEANUP_INTERVAL_SECONDS = max(int(os.getenv("APK_OUTPUT_CLEANUP_INTERVAL_SECONDS", "3600") or "3600"), 300)
+except ValueError:
+    OUTPUT_CLEANUP_INTERVAL_SECONDS = 3600
+_OUTPUT_CLEANUP_THREAD_STARTED = False
 RISK_SCAN_HIGH_RISK_HIT_THRESHOLD_DEFAULT = 3
 RISK_SCAN_HIGH_RISK_HIT_THRESHOLD_MIN = 1
 RISK_SCAN_HIGH_RISK_HIT_THRESHOLD_MAX = 200
@@ -4938,6 +4948,87 @@ TASKS_STATE_LOCK = threading.Lock()
 TASK_DIAGNOSIS_LOCK = threading.Lock()
 TASK_DIAGNOSIS_RUNNING_IDS: set[str] = set()
 
+
+def _get_output_expires_at(task: BuildTask):
+    """返回普通构建产物的过期时间。"""
+    if getattr(task, "output_expired", False):
+        return getattr(task, "output_expires_at", None)
+    output_name = getattr(task, "output_filename", None)
+    if task.status != BuildStatus.SUCCESS or not output_name:
+        return None
+    if _should_cleanup_desktop_output_on_download(task):
+        return None
+    existing_expires_at = getattr(task, "output_expires_at", None)
+    if existing_expires_at:
+        return existing_expires_at
+    base_time = getattr(task, "updated_at", None) or getattr(task, "created_at", None) or datetime.now()
+    expires_at = base_time + OUTPUT_RETENTION_DELTA
+    task.output_expires_at = expires_at
+    task.output_expired = False
+    return expires_at
+
+
+def _delete_output_file_safely(output_name: str) -> None:
+    """只删除 outputs 目录下的构建产物，避免误删运行态数据。"""
+    safe_name = Path(output_name).name
+    if not safe_name:
+        return
+    output_path = BACKEND_OUTPUT_DIR / safe_name
+    try:
+        if output_path.exists() and output_path.is_file():
+            output_path.unlink()
+    except Exception as exc:
+        logger.warning("删除过期构建产物失败: %s", exc)
+
+
+def _mark_task_output_expired(task: BuildTask) -> bool:
+    """标记普通构建产物已过期，并清理对应下载文件。"""
+    output_name = getattr(task, "output_filename", None)
+    expires_at = _get_output_expires_at(task)
+    if not output_name or not expires_at:
+        return False
+    now = datetime.now()
+    if expires_at > now:
+        return False
+    _delete_output_file_safely(output_name)
+    task.output_filename = None
+    task.download_url = None
+    task.output_expired = True
+    task.output_expires_at = expires_at
+    task.updated_at = now
+    task.message = f"构建产物已超过 {OUTPUT_RETENTION_DAYS} 天下载期，系统已自动清理。"
+    return True
+
+
+def cleanup_expired_task_outputs(force_persist: bool = True) -> int:
+    """清理超过下载期的普通构建产物。"""
+    cleaned_count = 0
+    for task in list(tasks_db.values()):
+        if _mark_task_output_expired(task):
+            cleaned_count += 1
+    if cleaned_count and force_persist:
+        persist_tasks_db(force=True)
+    return cleaned_count
+
+
+def start_output_cleanup_worker() -> None:
+    """启动后台线程，定期清理超过三天下载期的构建产物。"""
+    global _OUTPUT_CLEANUP_THREAD_STARTED
+    if _OUTPUT_CLEANUP_THREAD_STARTED:
+        return
+    _OUTPUT_CLEANUP_THREAD_STARTED = True
+
+    def cleanup_loop() -> None:
+        while True:
+            try:
+                cleanup_expired_task_outputs(force_persist=True)
+            except Exception as exc:
+                logger.warning("后台清理过期构建产物失败: %s", exc)
+            time.sleep(OUTPUT_CLEANUP_INTERVAL_SECONDS)
+
+    thread = threading.Thread(target=cleanup_loop, name="output-cleanup-worker", daemon=True)
+    thread.start()
+
 # One-click (Quick) generate defaults (client-side shortcut).
 QUICK_GENERATE_STATE_PATH = TASKS_DIR / "quick-generate.json"
 QUICK_GENERATE_STATE_LOCK = threading.Lock()
@@ -5214,6 +5305,8 @@ def _task_to_dict(task: BuildTask) -> dict:
     data["status"] = status.value if hasattr(status, "value") else str(status)
     data["created_at"] = task.created_at.isoformat()
     data["updated_at"] = task.updated_at.isoformat()
+    data["output_expires_at"] = task.output_expires_at.isoformat() if task.output_expires_at else None
+    data["desktop_output_expires_at"] = task.desktop_output_expires_at.isoformat() if task.desktop_output_expires_at else None
     return data
 
 
@@ -6754,6 +6847,7 @@ async def get_icon(task_id: str, client_id: str = None):
 @app.get("/api/download/{task_id}")
 async def download_file(task_id: str, client_id: str = None):
     """下载构建结果"""
+    cleanup_expired_task_outputs(force_persist=True)
     if task_id not in tasks_db:
         raise HTTPException(status_code=404, detail="任务不存在")
     
@@ -6763,7 +6857,12 @@ async def download_file(task_id: str, client_id: str = None):
     
     if task.status != BuildStatus.SUCCESS:
         raise HTTPException(status_code=400, detail="任务未完成或构建失败")
-    
+    if _mark_task_output_expired(task):
+        persist_tasks_db(force=True)
+        raise HTTPException(
+            status_code=410,
+            detail=f"构建产物已超过 {OUTPUT_RETENTION_DAYS} 天下载期，系统已自动清理。"
+        )    
     if not task.output_filename:
         if _should_cleanup_desktop_output_on_download(task):
             raise HTTPException(status_code=410, detail=_get_desktop_output_unavailable_detail(task))

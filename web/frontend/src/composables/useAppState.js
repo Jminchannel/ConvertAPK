@@ -2151,6 +2151,39 @@ export const useAppState = () => {
     const map = { pending: t('status.pending'), processing: t('status.processing'), success: t('status.success'), failed: t('status.failed') }
     return map[status] || status
   }
+  const outputRetentionDays = 3
+
+  const getTaskOutputExpiresAt = (task) => {
+    if (!task || task.status !== 'success') return null
+    const explicitExpiresAt = task.output_expires_at ? new Date(task.output_expires_at) : null
+    if (explicitExpiresAt && !Number.isNaN(explicitExpiresAt.getTime())) return explicitExpiresAt
+    if (!task.output_filename && !task.download_url) return null
+    const baseTime = task.updated_at || task.created_at
+    if (!baseTime) return null
+    const baseDate = new Date(baseTime)
+    if (Number.isNaN(baseDate.getTime())) return null
+    return new Date(baseDate.getTime() + outputRetentionDays * 24 * 60 * 60 * 1000)
+  }
+
+  const isTaskOutputExpired = (task) => {
+    if (!task || task.status !== 'success') return false
+    if (task.output_expired) return true
+    const expiresAt = getTaskOutputExpiresAt(task)
+    return Boolean(expiresAt && expiresAt.getTime() <= Date.now())
+  }
+
+  const getTaskOutputRetentionText = (task) => {
+    if (!task || task.status !== 'success' || String(task.mode || '') === 'desktop') return ''
+    const expiresAt = getTaskOutputExpiresAt(task)
+    if (!expiresAt) return ''
+    if (isTaskOutputExpired(task)) {
+      return t('tasks.outputRetentionExpired', { days: outputRetentionDays })
+    }
+    return t('tasks.outputRetention', {
+      days: outputRetentionDays,
+      date: expiresAt.toLocaleString()
+    })
+  }
   const getTaskIcon = (status) => {
     const map = { pending: '⏳', processing: '⚙️', success: '✅', failed: '❌' }
     return map[status] || '📦'
@@ -2374,6 +2407,11 @@ export const useAppState = () => {
     const url = artifactType === 'signed' ? getKeystoreUrl(taskId) : getDownloadUrl(taskId)
     closeDownloadMenu()
     if (!url) return
+    if (artifactType !== 'signed' && isTaskOutputExpired(task)) {
+      showToast(t('toast.outputExpired', { days: outputRetentionDays }), 'error')
+      await refreshTasks()
+      return
+    }
     if (isDesktopArtifact && task?.desktop_output_expires_at) {
       const expiresAt = new Date(task.desktop_output_expires_at).getTime()
       if (Number.isFinite(expiresAt) && expiresAt <= Date.now()) {
@@ -4607,6 +4645,8 @@ export const useAppState = () => {
     getTaskIcon,
     assignRandomDesktopPort,
     getDownloadUrl,
+    getTaskOutputRetentionText,
+    isTaskOutputExpired,
     getKeystoreUrl,
     downloadTaskArtifact,
     isQueuedTask,
