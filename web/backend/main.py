@@ -6844,6 +6844,42 @@ async def get_icon(task_id: str, client_id: str = None):
     raise HTTPException(status_code=404, detail="图标文件不存在")
 
 
+@app.head("/api/download/{task_id}")
+async def check_download_file(task_id: str, client_id: str = None):
+    """检查构建产物是否仍可下载。"""
+    cleanup_expired_task_outputs(force_persist=True)
+    if task_id not in tasks_db:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    task = tasks_db[task_id]
+    client_id = _require_client_id(client_id)
+    _assert_task_owner(task, client_id)
+
+    if task.status != BuildStatus.SUCCESS:
+        raise HTTPException(status_code=400, detail="任务尚未完成或构建失败")
+    if _mark_task_output_expired(task):
+        persist_tasks_db(force=True)
+        raise HTTPException(
+            status_code=410,
+            detail=f"构建产物已超过 {OUTPUT_RETENTION_DAYS} 天下载期，系统已自动清理。"
+        )
+
+    if not task.output_filename:
+        if _should_cleanup_desktop_output_on_download(task):
+            raise HTTPException(status_code=410, detail=_get_desktop_output_unavailable_detail(task))
+        if should_auto_clean_build_outputs():
+            raise HTTPException(status_code=410, detail="构建产物已按服务器策略自动清理")
+        raise HTTPException(status_code=404, detail="未找到构建输出文件")
+
+    file_path = BACKEND_OUTPUT_DIR / str(task.output_filename)
+    if not file_path.exists():
+        if _should_cleanup_desktop_output_on_download(task):
+            raise HTTPException(status_code=410, detail=_get_desktop_output_unavailable_detail(task))
+        if should_auto_clean_build_outputs():
+            raise HTTPException(status_code=410, detail="构建产物已按服务器策略自动清理")
+        raise HTTPException(status_code=404, detail="构建文件不存在")
+
+    return None
 @app.get("/api/download/{task_id}")
 async def download_file(task_id: str, client_id: str = None):
     """下载构建结果"""

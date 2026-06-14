@@ -1074,13 +1074,6 @@
                     {{ task.config.package_name }}  -  v{{ task.config.version_name || '1.0.0' }}  -  {{ formatDate(getTaskTime(task)) }}
                   </div>
                   <div
-                    v-if="getTaskOutputRetentionText(task)"
-                    class="task-output-retention"
-                    :class="{ expired: isTaskOutputExpired(task) }"
-                  >
-                    {{ getTaskOutputRetentionText(task) }}
-                  </div>
-                  <div
                     v-if="task.status === 'processing' && !isQueuedTask(task)"
                     class="progress-bar"
                     style="margin-top: 8px;"
@@ -2021,16 +2014,6 @@ export default defineComponent({
   }
 }
 
-.task-output-retention {
-  margin-top: 6px;
-  color: #8a6d21;
-  font-size: 12px;
-  line-height: 1.45;
-}
-
-.task-output-retention.expired {
-  color: #b42318;
-}
 </style>
 
 <!--
