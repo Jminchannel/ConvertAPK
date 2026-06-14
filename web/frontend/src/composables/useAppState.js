@@ -167,6 +167,20 @@ export const useAppState = () => {
   const isClientRegisterEnabled = computed(() => featureFlags.value.client_register_enabled !== false)
   const isAuthEntryEnabled = computed(() => isClientLoginEnabled.value || isClientRegisterEnabled.value)
   const isBuildQuotaUnlimited = computed(() => Boolean(buildQuotaContext.value.is_unlimited))
+  const buildPaymentPlans = ref([])
+  const buildPaymentPlansLoading = ref(false)
+  const buildPaymentPlansError = ref('')
+  const buildPaymentAlipayConfigured = ref(false)
+  const showBuildPaymentModal = ref(false)
+  const buildPaymentCreating = ref(false)
+  const buildPaymentPolling = ref(false)
+  const buildPaymentOrder = ref(null)
+  let buildPaymentPollTimer = null
+  const isBuildPaymentModeEnabled = computed(() => {
+    if (isBuildQuotaUnlimited.value) return false
+    const mode = String(buildQuotaContext.value.effective_build_quota_mode || buildQuotaContext.value.build_quota_mode || '').trim().toLowerCase()
+    return ['free_quota', 'code_only', 'free_plus_code'].includes(mode)
+  })
   const normalizeUploadMaxSizeMb = (value) => {
     const num = Number(value)
     if (!Number.isFinite(num)) return 200
@@ -1381,7 +1395,7 @@ export const useAppState = () => {
     if (!detail) return ''
     if (detail.includes('task is pending admin risk review')) return t('toast.riskReviewPending')
     if (detail.includes('task was rejected by admin risk review')) return t('toast.riskReviewRejected')
-    if (detail.includes('insufficient_quota') || detail.includes('insufficient quota')) return '构建次数不足，请先兑换构建码'
+    if (detail.includes('insufficient_quota') || detail.includes('insufficient quota')) return '构建次数不足，请先购买或兑换构建额度'
     if (
       detail.includes('quota_login_required')
       || detail.includes('quota requires login')
@@ -3345,6 +3359,10 @@ export const useAppState = () => {
       const mappedMessage = resolveStartTaskErrorMessage(error)
       if (mappedMessage) {
         showToast(mappedMessage, 'error')
+        const detail = getErrorDetailText(error)
+        if (detail.includes('insufficient_quota') || detail.includes('insufficient quota')) {
+          openBuildPaymentModal()
+        }
       } else {
         showErrorToast('toast.startFailed', error)
       }
@@ -4027,6 +4045,109 @@ export const useAppState = () => {
       buildCodeRedeeming.value = false
     }
   }
+
+  const stopBuildPaymentPolling = () => {
+    if (buildPaymentPollTimer) {
+      window.clearTimeout(buildPaymentPollTimer)
+      buildPaymentPollTimer = null
+    }
+    buildPaymentPolling.value = false
+  }
+
+  const fetchBuildPaymentPlans = async () => {
+    buildPaymentPlansLoading.value = true
+    buildPaymentPlansError.value = ''
+    try {
+      const result = await api.getBuildPaymentPlans()
+      buildPaymentPlans.value = Array.isArray(result?.plans) ? result.plans : []
+      buildPaymentAlipayConfigured.value = Boolean(result?.alipay_configured)
+    } catch (error) {
+      buildPaymentPlans.value = []
+      buildPaymentAlipayConfigured.value = false
+      buildPaymentPlansError.value = '加载构建额度套餐失败，请稍后重试'
+    } finally {
+      buildPaymentPlansLoading.value = false
+    }
+  }
+
+  const openBuildPaymentModal = async () => {
+    showBuildPaymentModal.value = true
+    if (!buildPaymentPlans.value.length && !buildPaymentPlansLoading.value) {
+      await fetchBuildPaymentPlans()
+    }
+  }
+
+  const closeBuildPaymentModal = () => {
+    showBuildPaymentModal.value = false
+  }
+
+  const pollBuildPaymentOrder = async (orderNo, round = 0) => {
+    const normalizedOrderNo = String(orderNo || '').trim()
+    if (!normalizedOrderNo) return
+    if (round > 90) {
+      buildPaymentPolling.value = false
+      showToast('支付结果确认超时，请稍后刷新额度', 'warning')
+      return
+    }
+    buildPaymentPolling.value = true
+    try {
+      const order = await api.getBuildPaymentOrder(normalizedOrderNo)
+      buildPaymentOrder.value = order
+      if (String(order?.status || '').toLowerCase() === 'paid') {
+        stopBuildPaymentPolling()
+        await fetchBuildQuotaContext()
+        showToast('支付成功，构建次数已到账', 'success')
+        return
+      }
+    } catch {
+      // 轮询失败不立即打断，避免支付宝回调和本地查询存在短暂时间差
+    }
+    buildPaymentPollTimer = window.setTimeout(() => {
+      pollBuildPaymentOrder(normalizedOrderNo, round + 1)
+    }, 3000)
+  }
+
+  const startAlipayBuildPayment = async (planId) => {
+    const normalizedPlanId = String(planId || '').trim()
+    if (!normalizedPlanId || buildPaymentCreating.value) return
+    if (!isBuildPaymentModeEnabled.value) {
+      showToast('当前为免费构建模式，无需购买额度', 'info')
+      return
+    }
+    buildPaymentCreating.value = true
+    try {
+      const returnUrl = typeof window !== 'undefined' ? window.location.href : ''
+      const result = await api.createAlipayBuildPayment(normalizedPlanId, returnUrl)
+      buildPaymentOrder.value = result?.order || null
+      const paymentUrl = String(result?.payment_url || '').trim()
+      if (!paymentUrl) {
+        showToast('支付宝支付暂未配置，请联系管理员', 'warning')
+        return
+      }
+      const opened = window.open(paymentUrl, '_blank', 'noopener,noreferrer')
+      if (!opened) {
+        window.location.href = paymentUrl
+      }
+      const orderNo = String(result?.order?.order_no || '').trim()
+      if (orderNo) {
+        stopBuildPaymentPolling()
+        pollBuildPaymentOrder(orderNo)
+      }
+      showToast('已打开支付宝支付页，支付完成后会自动更新额度', 'info')
+    } catch (error) {
+      const detail = getErrorDetailText(error)
+      if (detail.includes('alipay_not_configured') || detail.includes('payment service unavailable')) {
+        showToast('支付宝支付暂未配置，请联系管理员', 'warning')
+      } else if (detail.includes('free_unlimited')) {
+        showToast('当前为免费构建模式，无需购买额度', 'info')
+      } else {
+        showToast('创建支付订单失败，请稍后重试', 'error')
+      }
+    } finally {
+      buildPaymentCreating.value = false
+    }
+  }
+
   const fetchAdminFeatures = async () => {
     try {
       const result = await api.getAdminFeatures()
@@ -4344,6 +4465,7 @@ export const useAppState = () => {
   onUnmounted(() => {
     stopPolling()
     stopDiagnosisPolling()
+    stopBuildPaymentPolling()
     document.removeEventListener('click', handleClickOutside)
     document.removeEventListener('visibilitychange', handleDocumentVisibilityChange)
     document.removeEventListener('keydown', handleGlobalEscape)
@@ -4443,6 +4565,15 @@ export const useAppState = () => {
     buildCodeInput,
     buildCodeRedeeming,
     isBuildQuotaUnlimited,
+    isBuildPaymentModeEnabled,
+    buildPaymentPlans,
+    buildPaymentPlansLoading,
+    buildPaymentPlansError,
+    buildPaymentAlipayConfigured,
+    showBuildPaymentModal,
+    buildPaymentCreating,
+    buildPaymentPolling,
+    buildPaymentOrder,
     mainRef,
     mobilePageHeadRef,
     convertUploadSection,
@@ -4539,6 +4670,10 @@ export const useAppState = () => {
     showSettings,
     fetchBuildQuotaContext,
     redeemCurrentBuildCode,
+    fetchBuildPaymentPlans,
+    openBuildPaymentModal,
+    closeBuildPaymentModal,
+    startAlipayBuildPayment,
     announcements,
     deviceInfo,
     feedbackContent,

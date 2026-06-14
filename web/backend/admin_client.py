@@ -542,6 +542,59 @@ def redeem_build_code(
     return dict(data)
 
 
+def fetch_build_payment_plans() -> Dict[str, Any]:
+    data = _request_json("GET", "/api/client/payments/plans")
+    if not isinstance(data, dict):
+        return {
+            "plans": [],
+            "alipay_configured": False,
+        }
+    return dict(data)
+
+
+def create_alipay_build_payment(
+    client_id: str,
+    plan_id: str,
+    user_id: str = "",
+    return_url: str = "",
+) -> Dict[str, Any]:
+    payload = {
+        "client_id": str(client_id or "").strip(),
+        "user_id": str(user_id or "").strip() or None,
+        "plan_id": str(plan_id or "").strip(),
+        "return_url": str(return_url or "").strip() or None,
+    }
+    data = _request_json("POST", "/api/client/payments/alipay/create", payload=payload)
+    if not isinstance(data, dict):
+        return {
+            "ok": False,
+            "reason": "admin_unavailable",
+        }
+    return dict(data)
+
+
+def fetch_build_payment_order(
+    order_no: str,
+    client_id: str,
+    user_id: str = "",
+) -> Dict[str, Any]:
+    params = {
+        "client_id": str(client_id or "").strip(),
+        "user_id": str(user_id or "").strip(),
+    }
+    data = _request_json(
+        "GET",
+        f"/api/client/payments/orders/{urllib.parse.quote(str(order_no or '').strip(), safe='')}",
+        params=params,
+    )
+    if not isinstance(data, dict):
+        return {
+            "ok": False,
+            "reason": "admin_unavailable",
+        }
+    return dict(data)
+
+
 def _encode_multipart(fields: Dict[str, str], files: List[Dict[str, Any]]) -> tuple[bytes, str]:
     boundary = f"----ConvertAPKBoundary{os.urandom(8).hex()}"
     lines: List[bytes] = []

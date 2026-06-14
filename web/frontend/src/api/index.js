@@ -499,6 +499,32 @@ export const redeemBuildQuotaCode = async (code, idempotencyKey = '') => {
   return response.data
 }
 
+// 获取支付宝构建额度套餐
+export const getBuildPaymentPlans = async () => {
+  const response = await api.get('/payments/plans', {
+    params: { client_id: getClientId() }
+  })
+  return response.data
+}
+
+// 创建支付宝构建额度支付订单
+export const createAlipayBuildPayment = async (planId, returnUrl = '') => {
+  const response = await api.post('/payments/alipay/create', {
+    client_id: getClientId(),
+    plan_id: String(planId || ''),
+    return_url: returnUrl
+  })
+  return response.data
+}
+
+// 查询构建额度支付订单
+export const getBuildPaymentOrder = async (orderNo) => {
+  const response = await api.get(`/payments/orders/${encodeURIComponent(orderNo)}`, {
+    params: { client_id: getClientId() }
+  })
+  return response.data
+}
+
 // 查询当前客户端是否处于 AI 风险冻结状态
 export const getClientFreezeStatus = async (clientId) => {
   const response = await api.get('/client-freeze/status', {

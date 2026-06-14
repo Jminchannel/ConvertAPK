@@ -59,8 +59,11 @@ from admin_client import (
     report_task_start,
     fetch_announcements,
     fetch_build_quota_context,
+    fetch_build_payment_order,
+    fetch_build_payment_plans,
     check_update,
     fetch_feature_flags,
+    create_alipay_build_payment,
     redeem_build_code,
     submit_feedback,
     upload_task_assets,
@@ -7633,6 +7636,47 @@ async def redeem_build_quota(payload: dict = Body(...)):
         raise HTTPException(status_code=503, detail=result)
     if not bool(result.get("allowed", False)):
         raise HTTPException(status_code=400, detail=result)
+    return result
+
+
+@app.get("/api/payments/plans")
+async def get_build_payment_plans(client_id: str | None = None):
+    _require_client_id(client_id)
+    result = fetch_build_payment_plans()
+    if not isinstance(result, dict):
+        raise HTTPException(status_code=503, detail="payment service unavailable")
+    return result
+
+
+@app.post("/api/payments/alipay/create")
+async def create_build_payment_order(payload: dict = Body(...)):
+    client_id = _require_client_id(payload.get("client_id"))
+    plan_id = str(payload.get("plan_id") or "").strip()
+    if not plan_id:
+        raise HTTPException(status_code=400, detail="plan_id is required")
+    bound_user_id = _get_user_id_by_client_id(client_id) or ""
+    result = create_alipay_build_payment(
+        client_id=client_id,
+        plan_id=plan_id,
+        user_id=bound_user_id,
+        return_url=str(payload.get("return_url") or "").strip(),
+    )
+    if not isinstance(result, dict) or result.get("ok") is False:
+        raise HTTPException(status_code=503, detail=result or "payment service unavailable")
+    return result
+
+
+@app.get("/api/payments/orders/{order_no}")
+async def get_build_payment_order(order_no: str, client_id: str | None = None):
+    normalized_client_id = _require_client_id(client_id)
+    bound_user_id = _get_user_id_by_client_id(normalized_client_id) or ""
+    result = fetch_build_payment_order(
+        order_no=order_no,
+        client_id=normalized_client_id,
+        user_id=bound_user_id,
+    )
+    if not isinstance(result, dict) or result.get("ok") is False:
+        raise HTTPException(status_code=503, detail=result or "payment service unavailable")
     return result
 
 

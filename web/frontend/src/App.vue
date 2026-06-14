@@ -133,6 +133,14 @@
             <span class="action-icon">&#x1F496;</span>
             <span class="action-label">{{ t('donation.button') }}</span>
           </button>
+          <button
+            v-if="!isMobileShell && isBuildPaymentModeEnabled"
+            class="btn btn-secondary btn-sm no-drag"
+            @click="openBuildPaymentModal"
+          >
+            <span class="action-icon">￥</span>
+            <span class="action-label">购买额度</span>
+          </button>
           <button v-if="!isMobileShell" class="btn btn-ghost btn-sm no-drag" @click="openSettings">
             <span class="action-icon">&#9881;</span>
             <span class="action-label">{{ t('settings.title') }}</span>
@@ -1245,6 +1253,12 @@
                 <span class="mobile-action-arrow">&#x203A;</span>
               </button>
 
+              <button v-if="isBuildPaymentModeEnabled" class="mobile-action-item" @click="openBuildPaymentModal">
+                <span class="mobile-action-icon">￥</span>
+                <span class="mobile-action-text">购买构建额度</span>
+                <span class="mobile-action-arrow">&#x203A;</span>
+              </button>
+
               <button class="mobile-action-item" @click="toggleTheme">
                 <span v-if="currentTheme === 'dark'" class="mobile-action-icon">&#x2600;</span>
                 <span v-else class="mobile-action-icon">&#x1F319;</span>
@@ -1889,6 +1903,36 @@
           </div>
 
           <div class="settings-dialog-body">
+            <div v-if="isBuildPaymentModeEnabled" class="settings-section build-payment-section">
+              <div class="settings-section-title">
+                <span class="section-title-icon">￥</span>
+                构建额度
+              </div>
+              <div class="settings-hint">
+                当前剩余：{{ buildQuotaContext.remaining_balance ?? '-' }} 次；累计消耗：{{ buildQuotaContext.consumed_total ?? 0 }} 次
+              </div>
+              <div class="build-payment-actions">
+                <input
+                  v-if="buildQuotaContext.build_code_enabled"
+                  v-model="buildCodeInput"
+                  class="form-input"
+                  placeholder="输入构建码"
+                  @keyup.enter="redeemCurrentBuildCode"
+                />
+                <button
+                  v-if="buildQuotaContext.build_code_enabled"
+                  class="btn btn-secondary btn-sm"
+                  @click="redeemCurrentBuildCode"
+                  :disabled="buildCodeRedeeming"
+                >
+                  {{ buildCodeRedeeming ? '兑换中...' : '兑换' }}
+                </button>
+                <button class="btn btn-primary btn-sm" @click="openBuildPaymentModal">
+                  购买额度
+                </button>
+              </div>
+            </div>
+
             <div class="settings-section">
               <div class="settings-section-title">
                 <span class="section-title-icon">💬</span>
@@ -1935,6 +1979,60 @@
 
           <div class="settings-dialog-footer">
             <button class="btn btn-secondary btn-sm" @click="closeSettings">{{ t('settings.cancel') }}</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <Teleport to="body">
+      <div
+        v-if="showBuildPaymentModal"
+        class="build-payment-overlay"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="build-payment-title"
+        @click.self="closeBuildPaymentModal"
+        @keydown.esc.stop="closeBuildPaymentModal"
+        tabindex="-1"
+      >
+        <div class="build-payment-dialog">
+          <div class="build-payment-dialog-header">
+            <div>
+              <h3 id="build-payment-title">购买构建额度</h3>
+              <p>当前剩余 {{ buildQuotaContext.remaining_balance ?? '-' }} 次，支付成功后自动到账。</p>
+            </div>
+            <button class="build-payment-close-btn" @click="closeBuildPaymentModal" aria-label="Close">✕</button>
+          </div>
+          <div class="build-payment-dialog-body">
+            <div v-if="buildPaymentPlansLoading" class="settings-hint">正在加载套餐...</div>
+            <div v-else-if="buildPaymentPlansError" class="settings-hint build-payment-error">
+              {{ buildPaymentPlansError }}
+            </div>
+            <div v-else>
+              <div v-if="!buildPaymentAlipayConfigured" class="build-payment-warning">
+                支付宝支付暂未配置完成，请联系管理员。
+              </div>
+              <div class="build-payment-grid">
+                <div v-for="plan in buildPaymentPlans" :key="plan.plan_id" class="build-payment-plan">
+                  <div class="build-payment-plan-name">{{ plan.name }}</div>
+                  <div class="build-payment-plan-price">￥{{ (Number(plan.amount_cents || 0) / 100).toFixed(2) }}</div>
+                  <div class="build-payment-plan-meta">{{ plan.grant_count }} 次构建额度</div>
+                  <button
+                    class="btn btn-primary btn-sm"
+                    @click="startAlipayBuildPayment(plan.plan_id)"
+                    :disabled="buildPaymentCreating || !buildPaymentAlipayConfigured"
+                  >
+                    {{ buildPaymentCreating ? '创建订单中...' : '支付宝支付' }}
+                  </button>
+                </div>
+              </div>
+              <div v-if="!buildPaymentPlans.length" class="settings-hint">暂无可购买套餐</div>
+            </div>
+            <div v-if="buildPaymentOrder" class="build-payment-status">
+              <div>订单：{{ buildPaymentOrder.order_no }}</div>
+              <div>状态：{{ buildPaymentOrder.status }}</div>
+              <div v-if="buildPaymentPolling">正在等待支付宝支付结果...</div>
+            </div>
           </div>
         </div>
       </div>
@@ -4183,5 +4281,143 @@ html:not(.light-theme) .auth-user-chip {
     flex: 1;
     max-height: none;
   }
+}
+
+.build-payment-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.build-payment-actions .form-input {
+  min-width: min(260px, 100%);
+  flex: 1;
+}
+
+.build-payment-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(8, 11, 18, 0.72);
+  backdrop-filter: blur(14px);
+}
+
+.build-payment-dialog {
+  width: min(680px, 100%);
+  max-height: min(86vh, 720px);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-color);
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at 12% 0%, rgba(255, 206, 94, 0.2), transparent 32%),
+    radial-gradient(circle at 92% 10%, rgba(92, 196, 255, 0.16), transparent 34%),
+    var(--card-bg);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+}
+
+.build-payment-dialog-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 22px 24px 14px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.build-payment-dialog-header h3 {
+  margin: 0 0 6px;
+  font-size: 22px;
+}
+
+.build-payment-dialog-header p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.build-payment-close-btn {
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.06);
+  cursor: pointer;
+}
+
+.build-payment-dialog-body {
+  padding: 22px 24px 24px;
+  overflow: auto;
+}
+
+.build-payment-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 14px;
+}
+
+.build-payment-plan {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--border-color);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.build-payment-plan-name {
+  font-weight: 700;
+}
+
+.build-payment-plan-price {
+  font-size: 28px;
+  line-height: 1;
+  font-weight: 800;
+  color: var(--primary-color);
+}
+
+.build-payment-plan-meta,
+.build-payment-status,
+.build-payment-warning,
+.build-payment-error {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.build-payment-warning {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 196, 87, 0.34);
+  border-radius: 12px;
+  color: #f4b744;
+  background: rgba(255, 196, 87, 0.1);
+}
+
+.build-payment-status {
+  margin-top: 16px;
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.mobile-shell-active .build-payment-overlay {
+  align-items: flex-end;
+  padding: 0;
+}
+
+.mobile-shell-active .build-payment-dialog {
+  width: 100vw;
+  max-height: 88vh;
+  border-radius: 24px 24px 0 0;
 }
 </style>
