@@ -1064,6 +1064,76 @@ export const useAppState = () => {
     config.value.status_bar_color = normalizeStatusBarColor(config.value.status_bar_color)
   }
 
+  const prohibitedGenerationKeywords = [
+    '下载站',
+    '下载器',
+    '下载工具',
+    '下载平台',
+    '资源下载',
+    '资源解析',
+    '资源聚合',
+    '聚合下载',
+    '采集下载',
+    '抓取下载',
+    '内容抓取',
+    '内容下载',
+    '漫画下载',
+    '漫画抓取',
+    '本子下载',
+    '禁漫',
+    '禁漫天堂',
+    '18comic',
+    'jmcomic',
+    'jmscraper',
+    'jm scraper',
+    'download site',
+    'download website',
+    'download portal',
+    'download station',
+    'downloader',
+    'download app',
+    'download tool',
+    'content downloader',
+    'media downloader',
+    'video downloader',
+    'comic downloader',
+    'manga downloader',
+    'scraper downloader',
+    'crawler downloader',
+    'resource downloader',
+    'piracy downloader',
+    'adult downloader'
+  ]
+
+  const normalizeProhibitedGenerationText = (value) => String(value || '').trim().toLowerCase()
+  const compactProhibitedGenerationText = (value) => normalizeProhibitedGenerationText(value).replace(/[\s._-]+/g, '')
+  const findProhibitedGenerationKeyword = (...values) => {
+    const normalizedValues = values
+      .map((value) => normalizeProhibitedGenerationText(value))
+      .filter((value) => value)
+    if (!normalizedValues.length) return ''
+    const compactValues = normalizedValues.map((value) => compactProhibitedGenerationText(value))
+    for (const keyword of prohibitedGenerationKeywords) {
+      const normalizedKeyword = normalizeProhibitedGenerationText(keyword)
+      const compactKeyword = compactProhibitedGenerationText(keyword)
+      if (!normalizedKeyword) continue
+      const matched = normalizedValues.some((value) => value.includes(normalizedKeyword)) ||
+        (compactKeyword && compactValues.some((value) => value.includes(compactKeyword)))
+      if (matched) return keyword
+    }
+    return ''
+  }
+
+  const prohibitedGenerationError = computed(() => {
+    const keyword = findProhibitedGenerationKeyword(
+      config.value.app_name,
+      config.value.package_name,
+      mode.value === 'web' ? webUrl.value : ''
+    )
+    if (!keyword) return ''
+    return t('config.prohibitedGenerationRule', { keyword })
+  })
+
   const applyQuickGenerateDefaults = () => {
     // 一键生成使用后端默认图标与签名文件，进入时清理用户已上传的内容。
     if (appIcon.value && !appIcon.value.startsWith('/api/') && appIconFile.value) URL.revokeObjectURL(appIcon.value)
@@ -1337,6 +1407,14 @@ export const useAppState = () => {
     const detail = getErrorDetailText(error)
     if (!detail) return ''
     if (detail.includes('compliance confirmation is required')) return t('config.taskComplianceAckRequired')
+    if (
+      detail.includes('prohibited download/distribution app') ||
+      detail.includes('prohibited_downloader') ||
+      detail.includes('download site') ||
+      detail.includes('downloader')
+    ) {
+      return t('config.prohibitedGenerationBackendBlocked')
+    }
     if (detail.includes('task blocked by policy')) return t('config.marketplaceBlocked')
     if (detail.includes('task is pending admin risk review')) return t('toast.riskReviewPending')
     if (detail.includes('task was rejected by admin risk review')) return t('toast.riskReviewRejected')
@@ -2009,6 +2087,7 @@ export const useAppState = () => {
     const common =
       config.value.app_name &&
       config.value.package_name &&
+      !prohibitedGenerationError.value &&
       !packageNameError.value &&
       !desktopPortError.value &&
       !keystoreUpgradeVersionError.value &&
@@ -3603,6 +3682,10 @@ export const useAppState = () => {
       showToast(keystoreUpgradeVersionError.value, 'error')
       return
     }
+    if (prohibitedGenerationError.value) {
+      showToast(prohibitedGenerationError.value, 'error')
+      return
+    }
     if (!updatingTaskId.value) {
       if (!taskComplianceAck.value) {
         showToast(t('config.taskComplianceAckRequired'), 'error')
@@ -4734,6 +4817,7 @@ export const useAppState = () => {
     isValidPort,
     isValidWebUrl,
     webUrlError,
+    prohibitedGenerationError,
     packageNameError,
     desktopPortError,
     keystorePasswordError,

@@ -674,6 +674,56 @@ MARKETPLACE_POLICY_ALLOWLIST_CLIENT_IDS = {
     if str(item or "").strip()
 }
 MARKETPLACE_DECLARED_USE_CASE_MAX_LENGTH = 200
+PROHIBITED_DOWNLOADER_KEYWORDS = (
+    "download site",
+    "download website",
+    "download portal",
+    "download station",
+    "downloader",
+    "download app",
+    "download tool",
+    "content downloader",
+    "media downloader",
+    "video downloader",
+    "comic downloader",
+    "manga downloader",
+    "scraper downloader",
+    "crawler downloader",
+    "resource downloader",
+    "piracy downloader",
+    "adult downloader",
+    "18comic",
+    "jmcomic",
+    "jm scraper",
+    "jmscraper",
+    "下载站",
+    "下载器",
+    "下载工具",
+    "下载平台",
+    "资源下载",
+    "资源解析",
+    "资源聚合",
+    "聚合下载",
+    "采集下载",
+    "抓取下载",
+    "内容抓取",
+    "内容下载",
+    "漫画下载",
+    "漫画抓取",
+    "本子下载",
+    "禁漫",
+    "禁漫天堂",
+)
+PROHIBITED_DOWNLOADER_DOMAIN_KEYWORDS = (
+    "18comic",
+    "jmcomic",
+    "jmscraper",
+    "downloader",
+    "downloadsite",
+    "download-site",
+    "downloadportal",
+    "download-portal",
+)
 MARKETPLACE_BLOCK_KEYWORDS = (
     "app store",
     "application store",
@@ -688,6 +738,7 @@ MARKETPLACE_BLOCK_KEYWORDS = (
     "软件市场",
     "应用分发平台",
     "分发平台",
+    *PROHIBITED_DOWNLOADER_KEYWORDS,
 )
 RISK_MARKETPLACE_ONLY_MODE = _env_bool("RISK_MARKETPLACE_ONLY_MODE", default=True)
 RISK_REVIEW_ENABLED = _env_bool("TASK_RISK_REVIEW_ENABLED", default=True)
@@ -731,6 +782,7 @@ RISK_SCAN_DOMAIN_KEYWORDS = (
     "getapps",
     "9apps",
     "apk-dl",
+    *PROHIBITED_DOWNLOADER_DOMAIN_KEYWORDS,
 )
 
 RISK_COMBO_TEXT_CATEGORIES: dict[str, tuple[str, ...]] = {
@@ -751,6 +803,7 @@ RISK_COMBO_TEXT_CATEGORIES: dict[str, tuple[str, ...]] = {
         "\u5206\u53d1\u5e73\u53f0",
         "\u4e0b\u8f7d\u4e2d\u5fc3",
     ),
+    "prohibited_downloader": PROHIBITED_DOWNLOADER_KEYWORDS,
 }
 
 RISK_COMBO_PERMISSION_SETS: dict[str, tuple[str, ...]] = {}
@@ -773,6 +826,7 @@ MARKETPLACE_TEXT_HINT_KEYWORDS = (
     "应用分发",
     "分发平台",
     "下载中心",
+    *PROHIBITED_DOWNLOADER_KEYWORDS,
 )
 MARKETPLACE_DOMAIN_HINT_KEYWORDS = (
     "apk",
@@ -793,6 +847,7 @@ MARKETPLACE_DOMAIN_HINT_KEYWORDS = (
     "appgallery",
     "getapps",
     "9apps",
+    *PROHIBITED_DOWNLOADER_DOMAIN_KEYWORDS,
 )
 MARKETPLACE_AI_ALLOWED_CATEGORIES = {
     "illegal_distribution",
@@ -802,6 +857,18 @@ MARKETPLACE_AI_ALLOWED_CATEGORIES = {
     "app_store",
     "application_market",
     "distribution_platform",
+    "download_site",
+    "download_portal",
+    "prohibited_downloader",
+    "content_downloader",
+    "media_downloader",
+    "comic_downloader",
+    "manga_downloader",
+    "scraper_downloader",
+    "content_scraper_downloader",
+    "adult_content_downloader",
+    "piracy_downloader",
+    "unauthorized_content_distribution",
 }
 
 
@@ -1104,7 +1171,21 @@ AI_RISK_GUARD_KEY_FILENAMES = {
     "router.js",
     "routes.ts",
     "routes.js",
+    "downloader.kt",
+    "downloaderviewmodel.kt",
+    "scraper.kt",
+    "jmscraper.kt",
+    "comicrepository.kt",
 }
+AI_RISK_GUARD_KEY_FILENAME_HINTS = (
+    "download",
+    "downloader",
+    "scraper",
+    "crawler",
+    "comic",
+    "manga",
+    "resource",
+)
 AI_RISK_GUARD_KEY_PATH_HINTS = (
     "src/",
     "pages/",
@@ -1112,6 +1193,11 @@ AI_RISK_GUARD_KEY_PATH_HINTS = (
     "router/",
     "routes/",
     "store/",
+    "data/",
+    "repository/",
+    "downloader/",
+    "scraper/",
+    "crawler/",
     "config/",
 )
 
@@ -1556,6 +1642,8 @@ def _score_ai_risk_key_file(parts: list[str]) -> int:
         score += 120
     if any(filename.startswith(prefix) for prefix in ("app.", "main.", "router.", "routes.", "store.", "manifest.")):
         score += 50
+    if any(hint in filename for hint in AI_RISK_GUARD_KEY_FILENAME_HINTS):
+        score += 60
     for hint in AI_RISK_GUARD_KEY_PATH_HINTS:
         if hint in "/".join(lowered_parts):
             score += 25
@@ -1701,7 +1789,10 @@ def _is_marketplace_ai_category(value: str | None) -> bool:
         return False
     if category in MARKETPLACE_AI_ALLOWED_CATEGORIES:
         return True
-    if "market" in category or "store" in category or "distribution" in category:
+    if any(
+        token in category
+        for token in ("market", "store", "distribution", "download", "downloader", "scraper", "crawler", "piracy", "adult")
+    ):
         return True
     return False
 
@@ -1744,15 +1835,15 @@ def _normalize_ai_risk_guard_result(payload: dict) -> dict:
             risk_categories.append(name[:64])
             if len(risk_categories) >= 16:
                 break
-    has_marketplace_reason = _is_marketplace_text_keyword(reason) or _is_marketplace_domain_keyword(reason)
-    has_marketplace_evidence = any(
+    has_policy_reason = _is_marketplace_text_keyword(reason) or _is_marketplace_domain_keyword(reason)
+    has_policy_evidence = any(
         _is_marketplace_text_keyword(item) or _is_marketplace_domain_keyword(item)
         for item in evidence_items
     )
-    suspected = bool(raw_suspected and (risk_categories or has_marketplace_reason or has_marketplace_evidence))
+    suspected = bool(raw_suspected and (risk_categories or has_policy_reason or has_policy_evidence))
     if risk_categories and not suspected:
         suspected = True
-    if not suspected and (has_marketplace_reason or has_marketplace_evidence) and action in {"review", "block"}:
+    if not suspected and (has_policy_reason or has_policy_evidence) and action in {"review", "block"}:
         suspected = True
     if suspected and action == "allow":
         action = "review"
@@ -1939,14 +2030,15 @@ def _call_ai_marketplace_guard(
     }
 
     system_prompt = (
-        "You are an app compliance reviewer focused only on marketplace-style distribution risk. "
-        "Decide whether the submitted app appears to be an unauthorized app store, app marketplace, or deceptive download/distribution center. "
-        "Ignore unrelated risks such as finance, gambling, phishing, spyware, or cracking abuse in this task. "
+        "You are an app compliance reviewer focused on prohibited distribution and downloader risk. "
+        "Decide whether the submitted app appears to be an unauthorized app store, app marketplace, download site, downloader tool, content scraper/downloader, or deceptive distribution center. "
+        "Treat adult/copyright-content downloaders, comic/manga scrapers, resource parsers, and known signals such as 18comic, jmcomic, 禁漫, 下载站, or 下载器 as prohibited when the app is built around downloading or scraping that content. "
+        "Ignore unrelated risks such as finance, gambling, phishing, or spyware unless they directly support prohibited download/distribution behavior. "
         "Output JSON only."
     )
     user_prompt = (
         "Analyze metadata, risk summary, and source snippets.\n"
-        "Only judge app-marketplace/distribution suspicion. Do not flag unrelated categories.\n"
+        "Only judge prohibited app-marketplace, download-site, downloader, content-scraper, or unauthorized distribution suspicion. Do not flag unrelated categories.\n"
         "Required JSON fields:\n"
         "1. is_high_risk_suspected: boolean\n"
         "2. confidence: low | medium | high\n"
@@ -1955,15 +2047,20 @@ def _call_ai_marketplace_guard(
         "5. evidence: string[]\n"
         "6. risk_categories: string[]\n\n"
         "Risk categories:\n"
-        "- illegal_distribution\n\n"
+        "- illegal_distribution\n"
+        "- download_site\n"
+        "- prohibited_downloader\n"
+        "- content_scraper_downloader\n"
+        "- adult_content_downloader\n"
+        "- piracy_downloader\n\n"
         "Platform context:\n"
         "- Package name com.convertapk.demo can be a platform demo/default value.\n"
         "- REQUEST_INSTALL_PACKAGES can be manually selected from a generic Android permission panel.\n"
-        "- Do not use those two signals alone as marketplace evidence; require source text, links, UI copy, or behavior indicating APK/app distribution.\n\n"
+        "- Do not use those two signals alone as policy evidence; require source text, links, UI copy, or behavior indicating APK/app distribution, download-site, downloader, or content scraping/downloading intent.\n\n"
         "Blocking guidance:\n"
-        "- If strong evidence indicates app-store/app-marketplace/distribution-center intent, use block.\n"
-        "- If evidence is ambiguous but still related to marketplace intent, use review.\n"
-        "- If not related to marketplace intent, use allow.\n\n"
+        "- If strong evidence indicates app-store/app-marketplace/distribution-center, download-site, downloader, resource parser, or content scraper/downloader intent, use block.\n"
+        "- If evidence is ambiguous but still related to prohibited distribution or downloader intent, use review.\n"
+        "- If not related to prohibited distribution or downloader intent, use allow.\n\n"
         f"Input JSON:\n{json.dumps(prompt_payload, ensure_ascii=False)}"
     )
 
@@ -2118,11 +2215,11 @@ def _apply_ai_guard_result_to_risk_scan(base_risk_scan: dict, ai_guard_result: d
     risk_scan["ai_guard_hit_bonus"] = ai_hit_bonus
 
     field_hits = list(risk_scan.get("field_hits") or [])
-    reason = str(ai_guard_result.get("reason") or "AI判定存在应用市场/分发平台风险").strip()
+    reason = str(ai_guard_result.get("reason") or "AI判定存在下载分发/内容抓取风险").strip()
     field_hits.append(
         {
             "field": "ai_guard",
-            "keyword": "marketplace_suspected",
+            "keyword": "prohibited_distribution_suspected",
             "sample": reason[:120],
         }
     )
@@ -2456,7 +2553,7 @@ def _enforce_marketplace_policy_or_raise(
         if matched_keyword:
             raise HTTPException(
                 status_code=403,
-                detail=f"task blocked by policy: suspected marketplace app ({field_name}:{matched_keyword})",
+                detail=f"task blocked by policy: prohibited download/distribution app ({field_name}:{matched_keyword})",
             )
 
 
@@ -5942,14 +6039,13 @@ async def create_task(task_data: BuildTaskCreate):
         if not html_filename:
             raise HTTPException(status_code=400, detail="html_filename is required for html mode")
 
-    if not RISK_REVIEW_ENABLED:
-        _enforce_marketplace_policy_or_raise(
-            client_id=client_id,
-            app_name=task_data.config.app_name,
-            package_name=task_data.config.package_name,
-            declared_use_case=declared_use_case,
-            web_url=web_url,
-        )
+    _enforce_marketplace_policy_or_raise(
+        client_id=client_id,
+        app_name=task_data.config.app_name,
+        package_name=task_data.config.package_name,
+        declared_use_case=declared_use_case,
+        web_url=web_url,
+    )
 
     quick_generate = bool(task_data.quick_generate)
     if mode == "desktop" and quick_generate:
@@ -6618,6 +6714,13 @@ async def start_task(task_id: str, client_id: str = None):
     client_id = _require_client_id(client_id)
     _assert_task_owner(task, client_id)
     _raise_if_client_frozen_for_build(client_id, task=task)
+    _enforce_marketplace_policy_or_raise(
+        client_id=client_id,
+        app_name=getattr(task.config, "app_name", ""),
+        package_name=getattr(task.config, "package_name", ""),
+        declared_use_case=getattr(task, "declared_use_case", ""),
+        web_url=getattr(task, "web_url", None),
+    )
 
     if task.status != BuildStatus.PENDING:
         raise HTTPException(status_code=400, detail="任务状态不允许启动")
@@ -7073,6 +7176,13 @@ async def update_task(task_id: str, update_data: UpdateTaskRequest):
     client_id = _require_client_id(update_data.client_id)
     _assert_task_owner(task, client_id)
     _raise_if_client_frozen_for_build(client_id)
+    _enforce_marketplace_policy_or_raise(
+        client_id=client_id,
+        app_name=getattr(task.config, "app_name", ""),
+        package_name=getattr(task.config, "package_name", ""),
+        declared_use_case=getattr(task, "declared_use_case", ""),
+        web_url=getattr(task, "web_url", None),
+    )
     
     if task.status != BuildStatus.SUCCESS:
         raise HTTPException(status_code=400, detail="只能更新已成功的任务")

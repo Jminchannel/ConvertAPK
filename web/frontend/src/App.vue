@@ -708,8 +708,10 @@
                     v-model="config.app_name"
                     :placeholder="t('config.appNamePlaceholder')"
                     :disabled="!!updatingTaskId"
-                    :class="{ 'input-locked': updatingTaskId }"
+                    :class="{ 'input-locked': updatingTaskId, 'input-error': prohibitedGenerationError }"
                   />
+                  <div v-if="prohibitedGenerationError" class="form-error">{{ prohibitedGenerationError }}</div>
+                  <div v-else class="form-hint warning">{{ t('config.prohibitedGenerationHint') }}</div>
                 </div>
                 <div class="form-group">
                   <label class="form-label">
