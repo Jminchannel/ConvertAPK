@@ -710,8 +710,6 @@
                     :disabled="!!updatingTaskId"
                     :class="{ 'input-locked': updatingTaskId, 'input-error': prohibitedGenerationError }"
                   />
-                  <div v-if="prohibitedGenerationError" class="form-error">{{ prohibitedGenerationError }}</div>
-                  <div v-else class="form-hint warning">{{ t('config.prohibitedGenerationHint') }}</div>
                 </div>
                 <div class="form-group">
                   <label class="form-label">
@@ -1016,10 +1014,12 @@
 
               <div v-if="!updatingTaskId" class="task-compliance-panel">
                 <div class="task-compliance-title">{{ t('config.taskComplianceTitle') }}</div>
+                <div class="form-hint warning">{{ t('config.prohibitedGenerationHint') }}</div>
                 <label class="settings-checkbox task-compliance-ack">
                   <input type="checkbox" v-model="taskComplianceAck" />
                   {{ t('config.taskComplianceAckLabel') }}
                 </label>
+                <div v-if="prohibitedGenerationError" class="form-error">{{ prohibitedGenerationError }}</div>
                 <div v-if="taskComplianceError" class="form-error">{{ taskComplianceError }}</div>
               </div>
 
