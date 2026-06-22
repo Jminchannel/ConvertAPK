@@ -1322,7 +1322,36 @@ export const useAppState = () => {
     }
     return String(error?.message || '').trim().toLowerCase()
   }
-  const normalizeFreezeState = (payload = {}) => {
+  const isDailyBuildLimitReachedError = (error) => {
+    const detail = getErrorDetailPayload(error)
+    const data = error?.response?.data
+    const sources = [getErrorDetailText(error)]
+    if (detail && typeof detail === 'object') {
+      sources.push(detail?.reason, detail?.code, detail?.message)
+    }
+    if (data && typeof data === 'object') {
+      sources.push(data?.reason, data?.code, data?.message)
+    }
+    const sourceText = sources
+      .filter((item) => item !== undefined && item !== null)
+      .map((item) => String(item).trim().toLowerCase())
+      .filter(Boolean)
+      .join(' ')
+    return (
+      sourceText.includes('daily_limit_reached') ||
+      sourceText.includes('daily limit reached') ||
+      sourceText.includes('daily build limit')
+    )
+  }
+  const showDailyBuildLimitDialog = () => {
+    void openConfirmDialog({
+      title: '构建次数已达上限',
+      message: '当天的构建次数已达上限，如需额外构建请联系作者。',
+      confirmText: '我知道了',
+      cancelText: '关闭',
+      confirmType: 'primary'
+    })
+  }  const normalizeFreezeState = (payload = {}) => {
     const freeze = payload?.freeze && typeof payload.freeze === 'object' ? payload.freeze : payload
     const frozen = Boolean(payload?.frozen ?? freeze?.frozen)
     const reason = String(freeze?.reason || '').trim()
@@ -3436,6 +3465,11 @@ export const useAppState = () => {
         return
       }
       const mappedMessage = resolveStartTaskErrorMessage(error)
+      if (isDailyBuildLimitReachedError(error)) {
+        showDailyBuildLimitDialog()
+        await fetchBuildQuotaContext()
+        return
+      }
       if (mappedMessage) {
         showToast(mappedMessage, 'error')
         const detail = getErrorDetailText(error)
@@ -3849,6 +3883,11 @@ export const useAppState = () => {
       resetForm({ preserveQuickGenerate: isQuickGenerate })
       await refreshTasks()
     } catch (error) {
+      if (isDailyBuildLimitReachedError(error)) {
+        showDailyBuildLimitDialog()
+        await fetchBuildQuotaContext()
+        return
+      }
       const mappedMessage = resolveCreateTaskErrorMessage(error)
       if (mappedMessage) {
         showToast(mappedMessage, 'error')
