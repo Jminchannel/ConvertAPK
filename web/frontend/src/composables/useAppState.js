@@ -1351,7 +1351,8 @@ export const useAppState = () => {
       cancelText: '关闭',
       confirmType: 'primary'
     })
-  }  const normalizeFreezeState = (payload = {}) => {
+  }
+  const normalizeFreezeState = (payload = {}) => {
     const freeze = payload?.freeze && typeof payload.freeze === 'object' ? payload.freeze : payload
     const frozen = Boolean(payload?.frozen ?? freeze?.frozen)
     const reason = String(freeze?.reason || '').trim()
