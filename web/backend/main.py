@@ -26,6 +26,7 @@ import urllib.error
 import urllib.parse
 import zipfile
 import html
+import re
 import hashlib
 import secrets
 from redis import Redis
@@ -3932,6 +3933,161 @@ def _iter_zip_entries(zip_file: zipfile.ZipFile):
         yield info, parts
 
 
+
+HTML_PRECHECK_TEXT_EXTENSIONS = {".html", ".htm", ".js", ".mjs", ".css", ".json", ".svg", ".xml", ".txt"}
+HTML_PRECHECK_ASSET_EXTENSIONS = {
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".webp",
+    ".gif",
+    ".svg",
+    ".avif",
+    ".ico",
+    ".bmp",
+    ".mp3",
+    ".wav",
+    ".ogg",
+    ".mp4",
+    ".webm",
+    ".json",
+    ".wasm",
+    ".ttf",
+    ".otf",
+    ".woff",
+    ".woff2",
+}
+HTML_PRECHECK_MAX_TEXT_BYTES = 2 * 1024 * 1024
+HTML_PRECHECK_REFERENCE_PATTERN = re.compile(
+    r"(?:src|href|poster)\s*=\s*[\"']([^\"']+)[\"']|url\(\s*[\"']?([^)'\"\s]+)[\"']?\s*\)",
+    re.IGNORECASE,
+)
+
+
+def _contains_unsafe_asset_name(parts: list[str]) -> bool:
+    """检查资源文件名是否包含 Android 构建链路容易乱码的字符。"""
+    for part in parts:
+        if "\ufffd" in part or "�" in part:
+            return True
+        if any(ord(ch) > 127 for ch in part):
+            return True
+    return False
+
+
+def _normalize_html_asset_reference(value: str) -> str:
+    """规范化 HTML/CSS 中的本地资源引用路径。"""
+    ref = html.unescape(str(value or "")).strip().strip("'\"")
+    if not ref:
+        return ""
+    lower_ref = ref.lower()
+    if lower_ref.startswith(("#", "data:", "blob:", "javascript:", "mailto:", "tel:")):
+        return ""
+    if "://" in lower_ref or lower_ref.startswith("//"):
+        return ""
+    ref = ref.split("#", 1)[0].split("?", 1)[0].replace("\\", "/").strip()
+    while ref.startswith("./"):
+        ref = ref[2:]
+    ref = ref.lstrip("/")
+    if not ref or ref.startswith("../"):
+        return ""
+    return str(PurePosixPath(ref))
+
+
+def _format_precheck_samples(values: list[str], limit: int = 5) -> str:
+    """格式化预检失败样例，避免错误信息过长。"""
+    samples = values[:limit]
+    suffix = "" if len(values) <= limit else f" 等 {len(values)} 项"
+    return "、".join(samples) + suffix
+
+
+def _collect_html_zip_preflight(zip_path: Path, index_entry: str) -> dict:
+    """收集 HTML 包的资源命名与引用问题。"""
+    unsafe_asset_names: list[str] = []
+    missing_references: list[str] = []
+    seen_unsafe: set[str] = set()
+    seen_missing: set[str] = set()
+    asset_paths: set[str] = set()
+
+    index_parts = tuple(PurePosixPath(index_entry).parts)
+    root_parts = tuple(index_parts[:-1])
+
+    with zipfile.ZipFile(zip_path, "r") as archive:
+        entries: list[tuple[zipfile.ZipInfo, list[str], str]] = []
+        for info, parts in _iter_zip_entries(archive):
+            if root_parts and tuple(parts[: len(root_parts)]) != root_parts:
+                continue
+            relative_parts = parts[len(root_parts):] if root_parts else parts
+            if not relative_parts:
+                continue
+            lower_parts = [part.lower() for part in relative_parts]
+            if any(part in {"node_modules", ".git", "android", "__macosx"} for part in lower_parts):
+                continue
+            relative_path = str(PurePosixPath(*relative_parts))
+            asset_paths.add(relative_path)
+            entries.append((info, relative_parts, relative_path))
+            if PurePosixPath(relative_path).suffix.lower() in HTML_PRECHECK_ASSET_EXTENSIONS:
+                if _contains_unsafe_asset_name(relative_parts) and relative_path not in seen_unsafe:
+                    seen_unsafe.add(relative_path)
+                    unsafe_asset_names.append(relative_path)
+
+        for info, _, relative_path in entries:
+            suffix = PurePosixPath(relative_path).suffix.lower()
+            if suffix not in HTML_PRECHECK_TEXT_EXTENSIONS:
+                continue
+            if info.file_size > HTML_PRECHECK_MAX_TEXT_BYTES:
+                continue
+            try:
+                content = archive.read(info).decode("utf-8", errors="ignore")
+            except Exception:
+                continue
+            for match in HTML_PRECHECK_REFERENCE_PATTERN.finditer(content):
+                ref = _normalize_html_asset_reference(match.group(1) or match.group(2) or "")
+                if not ref:
+                    continue
+                ref_suffix = PurePosixPath(ref).suffix.lower()
+                if ref_suffix not in HTML_PRECHECK_ASSET_EXTENSIONS:
+                    continue
+                if ref not in asset_paths and ref not in seen_missing:
+                    seen_missing.add(ref)
+                    missing_references.append(ref)
+
+    return {
+        "unsafe_asset_names": unsafe_asset_names,
+        "missing_references": missing_references,
+    }
+
+
+def _validate_html_zip_assets_or_raise(zip_path: Path, index_entry: str) -> None:
+    """在构建前拦截容易导致 Gradle/Capacitor 失败的 HTML 资源包。"""
+    result = _collect_html_zip_preflight(zip_path, index_entry)
+    unsafe_asset_names = result.get("unsafe_asset_names") or []
+    if unsafe_asset_names:
+        samples = _format_precheck_samples(unsafe_asset_names)
+        raise HTTPException(
+            status_code=400,
+            detail=f"HTML ZIP 资源文件名包含中文或特殊字符，Android 构建时可能乱码或找不到文件：{samples}。请改为英文/数字文件名并同步更新引用。",
+        )
+    missing_references = result.get("missing_references") or []
+    if missing_references:
+        samples = _format_precheck_samples(missing_references)
+        raise HTTPException(
+            status_code=400,
+            detail=f"HTML ZIP 引用了不存在的资源文件：{samples}。请检查 HTML、JS 或 CSS 中的资源路径后重新上传。",
+        )
+
+
+def _validate_native_zip_paths_or_raise(zip_path: Path) -> None:
+    """在构建前拦截使用 Windows 反斜杠路径的原生 Android ZIP。"""
+    with zipfile.ZipFile(zip_path, "r") as archive:
+        for info in archive.infolist():
+            raw_name = str(info.filename or "")
+            if not info.is_dir() and "\\" in raw_name:
+                raise HTTPException(
+                    status_code=400,
+                    detail="原生 Android ZIP 路径格式不兼容：压缩包内部路径使用了反斜杠 \\。请重新压缩为标准 ZIP，内部路径需使用 / 分隔。",
+                )
+
+
 def _has_native_android_project_entries(entries: list[tuple[str, ...]]) -> bool:
     return _find_native_android_project_root(entries) is not None
 
@@ -4123,6 +4279,7 @@ def _detect_zip_build_mode(zip_path: Path) -> tuple[str, str | None]:
             if index_candidates and index_candidates[0][0] <= 3:
                 return "html", index_candidates[0][2]
             if _has_native_android_project_entries(native_entries):
+                _validate_native_zip_paths_or_raise(zip_path)
                 return "native", None
             if package_candidates:
                 return "convert", None
@@ -4145,6 +4302,7 @@ def _extract_html_assets_from_zip(zip_path: Path, zip_entry_name: str, dst_asset
             if not index_parts or index_parts[-1].lower() != "index.html":
                 raise HTTPException(status_code=400, detail="index.html was not found in ZIP")
 
+            _validate_html_zip_assets_or_raise(zip_path, str(normalized_index))
             root_parts = index_parts[:-1]
             total_size = 0
             extracted_count = 0

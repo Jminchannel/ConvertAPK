@@ -1670,6 +1670,60 @@ class BuildTaskRunner:
         self._notify_state_change(force=True)
         return True
 
+    def _is_failure_key_log_line(self, line: str) -> bool:
+        """判断日志行是否包含关键失败原因。"""
+        text = str(line or "").strip()
+        if not text:
+            return False
+        lower_text = text.lower()
+        source_markers = (".kt:", ".java:", ".xml:", ".gradle:", ".kts:", ".js:", ".html:", ".css:", ".vue:", ".ts:", ".tsx:")
+        failure_tokens = (
+            "what went wrong",
+            "execution failed for task",
+            "build failed",
+            "failed to create md5 hash",
+            "filenotfoundexception",
+            "appears to use backslashes as path separators",
+            "unresolved reference",
+            "type mismatch",
+            "none of the following functions",
+            "cannot access input property",
+            "cannot find symbol",
+            "error:",
+            "exception",
+        )
+        if any(token in lower_text for token in failure_tokens):
+            return True
+        if (lower_text.startswith("e: file://") or " e: file://" in lower_text) and any(marker in lower_text for marker in source_markers):
+            return True
+        return False
+
+    def _select_failure_log_lines(self, lines: list[str], max_lines: int = 240, tail_lines: int = 80) -> list[str]:
+        """优先保留关键错误行，再补充尾部日志。"""
+        normalized = [str(line).strip() for line in lines if str(line).strip()]
+        if not normalized:
+            return []
+        key_lines: list[str] = []
+        seen: set[str] = set()
+        for line in normalized:
+            if not self._is_failure_key_log_line(line):
+                continue
+            if line in seen:
+                continue
+            seen.add(line)
+            key_lines.append(line)
+        tail_count = min(max(tail_lines, 0), max_lines)
+        tail = normalized[-tail_count:] if tail_count else []
+        key_count = max(max_lines - len(tail), 0)
+        key_slice = key_lines[-key_count:] if key_count else []
+        combined: list[str] = []
+        for line in key_slice + tail:
+            if line not in combined:
+                combined.append(line)
+        if len(combined) > max_lines:
+            return combined[-max_lines:]
+        return combined
+
     def _collect_failure_log_lines(self, task_id: str, task, max_lines: int = 240) -> list[str]:
         """收集任务失败日志，优先使用内存日志，其次回退到日志文件。"""
         lines: list[str] = []
@@ -1683,9 +1737,7 @@ class BuildTaskRunner:
                         lines = [line.strip() for line in handle.readlines() if line.strip()]
                 except Exception:
                     lines = []
-        if len(lines) > max_lines:
-            return lines[-max_lines:]
-        return lines
+        return self._select_failure_log_lines(lines, max_lines=max_lines, tail_lines=80)
 
     def _start_failure_diagnosis(self, task_id: str, task, failure_message: str) -> None:
         """异步启动失败日志诊断，避免阻塞任务状态回写。"""
@@ -1910,18 +1962,18 @@ class BuildTaskRunner:
                 pass
 
             if not success:
-                last_lines = []
+                all_failure_lines = []
                 if hasattr(task, "logs") and task.logs:
-                    last_lines = task.logs[-50:]
+                    all_failure_lines = [str(line) for line in task.logs]
                 else:
                     log_file = LOGS_DIR / f"{task_id}.log"
                     if log_file.exists():
                         try:
                             with open(log_file, "r", encoding="utf-8") as f:
-                                all_logs = f.readlines()
-                                last_lines = [line.strip() for line in all_logs[-50:]]
+                                all_failure_lines = [line.strip() for line in f.readlines()]
                         except Exception:
-                            last_lines = []
+                            all_failure_lines = []
+                last_lines = self._select_failure_log_lines(all_failure_lines, max_lines=50, tail_lines=20)
                 report_task_logs(task_id, task.client_id or "", "BUILD_FAILED", last_lines or [])
                 self._start_failure_diagnosis(task_id, task, message)
         
