@@ -725,6 +725,85 @@ PROHIBITED_DOWNLOADER_DOMAIN_KEYWORDS = (
     "downloadportal",
     "download-portal",
 )
+PROHIBITED_GAMBLING_KEYWORDS = (
+    "gambling",
+    "gamble",
+    "betting",
+    "betting app",
+    "sports betting",
+    "lottery",
+    "lottery app",
+    "lottery platform",
+    "lottery prediction",
+    "lottery numbers",
+    "casino",
+    "online casino",
+    "baccarat",
+    "roulette",
+    "slot machine",
+    "slots",
+    "poker",
+    "odds",
+    "wager",
+    "jackpot",
+    "draw prediction",
+    "??",
+    "??",
+    "????",
+    "??",
+    "??",
+    "??",
+    "??",
+    "??",
+    "??",
+    "????",
+    "????",
+    "???",
+    "????",
+    "????",
+    "???",
+    "???",
+    "?????",
+    "??",
+    "?????",
+    "???",
+    "???",
+    "???",
+    "???",
+    "????",
+    "????",
+    "?3",
+    "??",
+    "11?5",
+    "??",
+    "??",
+    "??",
+    "??",
+    "??",
+    "????",
+    "????",
+    "????",
+    "????",
+    "??",
+    "????",
+    "??",
+    "??",
+)
+PROHIBITED_GAMBLING_DOMAIN_KEYWORDS = (
+    "lottery",
+    "casino",
+    "gambling",
+    "betting",
+    "wager",
+    "odds",
+    "caipiao",
+    "kaijiang",
+    "liuhe",
+    "marksix",
+    "mark-six",
+    "shuangseqiu",
+    "hongkonglottery",
+)
 MARKETPLACE_BLOCK_KEYWORDS = (
     "app store",
     "application store",
@@ -740,6 +819,7 @@ MARKETPLACE_BLOCK_KEYWORDS = (
     "应用分发平台",
     "分发平台",
     *PROHIBITED_DOWNLOADER_KEYWORDS,
+    *PROHIBITED_GAMBLING_KEYWORDS,
 )
 RISK_MARKETPLACE_ONLY_MODE = _env_bool("RISK_MARKETPLACE_ONLY_MODE", default=True)
 RISK_REVIEW_ENABLED = _env_bool("TASK_RISK_REVIEW_ENABLED", default=True)
@@ -784,6 +864,14 @@ RISK_SCAN_DOMAIN_KEYWORDS = (
     "9apps",
     "apk-dl",
     *PROHIBITED_DOWNLOADER_DOMAIN_KEYWORDS,
+    *PROHIBITED_GAMBLING_DOMAIN_KEYWORDS,
+)
+
+MANDATORY_RISK_SCAN_BLOCK_KEYWORDS = tuple(
+    dict.fromkeys((*PROHIBITED_DOWNLOADER_KEYWORDS, *PROHIBITED_GAMBLING_KEYWORDS))
+)
+MANDATORY_RISK_SCAN_DOMAIN_KEYWORDS = tuple(
+    dict.fromkeys((*PROHIBITED_DOWNLOADER_DOMAIN_KEYWORDS, *PROHIBITED_GAMBLING_DOMAIN_KEYWORDS))
 )
 
 RISK_COMBO_TEXT_CATEGORIES: dict[str, tuple[str, ...]] = {
@@ -805,6 +893,7 @@ RISK_COMBO_TEXT_CATEGORIES: dict[str, tuple[str, ...]] = {
         "\u4e0b\u8f7d\u4e2d\u5fc3",
     ),
     "prohibited_downloader": PROHIBITED_DOWNLOADER_KEYWORDS,
+    "prohibited_gambling": PROHIBITED_GAMBLING_KEYWORDS,
 }
 
 RISK_COMBO_PERMISSION_SETS: dict[str, tuple[str, ...]] = {}
@@ -828,6 +917,7 @@ MARKETPLACE_TEXT_HINT_KEYWORDS = (
     "分发平台",
     "下载中心",
     *PROHIBITED_DOWNLOADER_KEYWORDS,
+    *PROHIBITED_GAMBLING_KEYWORDS,
 )
 MARKETPLACE_DOMAIN_HINT_KEYWORDS = (
     "apk",
@@ -849,6 +939,7 @@ MARKETPLACE_DOMAIN_HINT_KEYWORDS = (
     "getapps",
     "9apps",
     *PROHIBITED_DOWNLOADER_DOMAIN_KEYWORDS,
+    *PROHIBITED_GAMBLING_DOMAIN_KEYWORDS,
 )
 MARKETPLACE_AI_ALLOWED_CATEGORIES = {
     "illegal_distribution",
@@ -870,6 +961,17 @@ MARKETPLACE_AI_ALLOWED_CATEGORIES = {
     "adult_content_downloader",
     "piracy_downloader",
     "unauthorized_content_distribution",
+    "prohibited_gambling",
+    "gambling",
+    "lottery",
+    "lottery_betting",
+    "illegal_lottery",
+    "lottery_prediction",
+    "casino",
+    "betting",
+    "sports_betting",
+    "online_gambling",
+    "wagering",
 }
 
 
@@ -977,6 +1079,8 @@ def _resolve_risk_scan_keyword_sets(client_id: str | None) -> tuple[tuple[str, .
             RISK_SCAN_DOMAIN_KEYWORDS,
             domain_mode=True,
         )
+    block_keywords = tuple(dict.fromkeys((*block_keywords, *MANDATORY_RISK_SCAN_BLOCK_KEYWORDS)))
+    domain_keywords = tuple(dict.fromkeys((*domain_keywords, *MANDATORY_RISK_SCAN_DOMAIN_KEYWORDS)))
     return block_keywords, domain_keywords
 
 
@@ -1792,7 +1896,7 @@ def _is_marketplace_ai_category(value: str | None) -> bool:
         return True
     if any(
         token in category
-        for token in ("market", "store", "distribution", "download", "downloader", "scraper", "crawler", "piracy", "adult")
+        for token in ("market", "store", "distribution", "download", "downloader", "scraper", "crawler", "piracy", "adult", "gambling", "gamble", "betting", "bet", "lottery", "casino", "wager", "odds", "baccarat", "roulette", "poker", "slot")
     ):
         return True
     return False
@@ -2031,15 +2135,15 @@ def _call_ai_marketplace_guard(
     }
 
     system_prompt = (
-        "You are an app compliance reviewer focused on prohibited distribution and downloader risk. "
-        "Decide whether the submitted app appears to be an unauthorized app store, app marketplace, download site, downloader tool, content scraper/downloader, or deceptive distribution center. "
-        "Treat adult/copyright-content downloaders, comic/manga scrapers, resource parsers, and known signals such as 18comic, jmcomic, 禁漫, 下载站, or 下载器 as prohibited when the app is built around downloading or scraping that content. "
-        "Ignore unrelated risks such as finance, gambling, phishing, or spyware unless they directly support prohibited download/distribution behavior. "
+        "You are an app compliance reviewer focused on prohibited distribution/downloader and gambling/lottery risk. "
+        "Decide whether the submitted app appears to be an unauthorized app store, app marketplace, download site, downloader tool, content scraper/downloader, deceptive distribution center, gambling app, lottery/betting app, lottery prediction/statistics app, casino, betting, or wagering tool. "
+        "Treat adult/copyright-content downloaders, comic/manga scrapers, resource parsers, and known download signals as prohibited when the app is built around downloading or scraping that content. "
+        "Treat Chinese lottery and gambling signals such as ???, ???, ???, ??, ??, ??, ??, ??, ??, ??, ??, ???, or ??? as prohibited when the app is built around betting, lottery numbers, draw results, prediction, odds, wagering, or gambling operation. "
         "Output JSON only."
     )
     user_prompt = (
         "Analyze metadata, risk summary, and source snippets.\n"
-        "Only judge prohibited app-marketplace, download-site, downloader, content-scraper, or unauthorized distribution suspicion. Do not flag unrelated categories.\n"
+        "Only judge prohibited app-marketplace, download-site, downloader, content-scraper, unauthorized distribution, gambling, lottery, betting, casino, wagering, or lottery prediction/statistics suspicion. Do not flag unrelated categories.\n"
         "Required JSON fields:\n"
         "1. is_high_risk_suspected: boolean\n"
         "2. confidence: low | medium | high\n"
@@ -2053,15 +2157,21 @@ def _call_ai_marketplace_guard(
         "- prohibited_downloader\n"
         "- content_scraper_downloader\n"
         "- adult_content_downloader\n"
-        "- piracy_downloader\n\n"
+        "- piracy_downloader\n"
+        "- prohibited_gambling\n"
+        "- gambling\n"
+        "- lottery\n"
+        "- lottery_betting\n"
+        "- lottery_prediction\n\n"
         "Platform context:\n"
         "- Package name com.convertapk.demo can be a platform demo/default value.\n"
         "- REQUEST_INSTALL_PACKAGES can be manually selected from a generic Android permission panel.\n"
-        "- Do not use those two signals alone as policy evidence; require source text, links, UI copy, or behavior indicating APK/app distribution, download-site, downloader, or content scraping/downloading intent.\n\n"
+        "- Do not use those two signals alone as policy evidence; require source text, links, UI copy, or behavior indicating APK/app distribution, download-site, downloader, content scraping/downloading, gambling, lottery, betting, or wagering intent.\n"
+        "- Lottery result, lottery prediction, zodiac-number statistics, odds, betting records, or draw-number workflows are policy evidence even if the app does not directly process payment.\n\n"
         "Blocking guidance:\n"
-        "- If strong evidence indicates app-store/app-marketplace/distribution-center, download-site, downloader, resource parser, or content scraper/downloader intent, use block.\n"
-        "- If evidence is ambiguous but still related to prohibited distribution or downloader intent, use review.\n"
-        "- If not related to prohibited distribution or downloader intent, use allow.\n\n"
+        "- If strong evidence indicates app-store/app-marketplace/distribution-center, download-site, downloader, resource parser, content scraper/downloader, gambling, lottery, betting, casino, wagering, lottery prediction, or lottery statistics intent, use block.\n"
+        "- If evidence is ambiguous but still related to prohibited distribution, downloader, gambling, lottery, or betting intent, use review.\n"
+        "- If not related to prohibited distribution, downloader, gambling, lottery, or betting intent, use allow.\n\n"
         f"Input JSON:\n{json.dumps(prompt_payload, ensure_ascii=False)}"
     )
 
@@ -2216,11 +2326,11 @@ def _apply_ai_guard_result_to_risk_scan(base_risk_scan: dict, ai_guard_result: d
     risk_scan["ai_guard_hit_bonus"] = ai_hit_bonus
 
     field_hits = list(risk_scan.get("field_hits") or [])
-    reason = str(ai_guard_result.get("reason") or "AI判定存在下载分发/内容抓取风险").strip()
+    reason = str(ai_guard_result.get("reason") or "AI????????/????/??????").strip()
     field_hits.append(
         {
             "field": "ai_guard",
-            "keyword": "prohibited_distribution_suspected",
+            "keyword": "prohibited_distribution_or_gambling_suspected",
             "sample": reason[:120],
         }
     )
