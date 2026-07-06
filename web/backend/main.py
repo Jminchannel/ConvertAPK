@@ -12,6 +12,7 @@ from pathlib import Path, PurePosixPath
 import uuid
 import sys
 import os
+import asyncio
 import json
 import shutil
 import re
@@ -91,6 +92,19 @@ BUILDER_MODE = os.getenv("APK_BUILDER_MODE", "").strip().lower()
 if not BUILDER_MODE:
     BUILDER_MODE = "local" if os.name == "nt" else "docker"
 LOCAL_MODE = BUILDER_MODE == "local"
+
+
+def _run_background_admin_sync(action_name: str, callback, *args, **kwargs) -> None:
+    def _worker() -> None:
+        try:
+            callback(*args, **kwargs)
+        except Exception as exc:
+            print(f"[AdminSync] {action_name} 后台同步失败: {exc}")
+
+    thread_name = f"AdminSync-{action_name}"[:64]
+    threading.Thread(target=_worker, name=thread_name, daemon=True).start()
+
+
 GITHUB_REPO_OWNER = (os.getenv("GITHUB_REPO_OWNER", "Jminchannel") or "Jminchannel").strip() or "Jminchannel"
 GITHUB_REPO_NAME = (os.getenv("GITHUB_REPO_NAME", "ConvertAPK-Desktop") or "ConvertAPK-Desktop").strip() or "ConvertAPK-Desktop"
 GITHUB_REPO_URL = f"https://github.com/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}"
@@ -2589,7 +2603,7 @@ def _require_payload_client_id(payload: dict, field_name: str) -> str:
     return client_id
 
 
-def _sync_task_risk_review_to_admin(task_id: str, task: BuildTask) -> None:
+def _sync_task_risk_review_to_admin_now(task_id: str, task: BuildTask) -> None:
     try:
         config_data = task.config.model_dump() if hasattr(task.config, "model_dump") else task.config.dict()
     except Exception:
@@ -2636,6 +2650,63 @@ def _sync_task_risk_review_to_admin(task_id: str, task: BuildTask) -> None:
         keystore_info={},
     )
     flush_task_assets_queue()
+
+
+def _sync_task_risk_review_to_admin(task_id: str, task: BuildTask) -> None:
+    _run_background_admin_sync("risk-review", _sync_task_risk_review_to_admin_now, task_id, task)
+
+
+def _sync_task_assets_to_admin_and_flush(
+    task_id: str,
+    task: BuildTask,
+    zip_info: dict,
+    config_data: dict,
+    *,
+    zip_path: Path,
+    html_path: Path,
+    icon_path: Path,
+) -> None:
+    upload_task_assets(
+        task_id,
+        task.client_id or "",
+        task.updated_at.isoformat(),
+        zip_info,
+        config_data,
+        zip_path=str(zip_path) if zip_path.exists() else None,
+        html_path=str(html_path) if html_path.exists() else None,
+        icon_path=str(icon_path) if icon_path.exists() else None,
+        keystore_path=None,
+        keystore_info={},
+    )
+    flush_task_assets_queue()
+
+
+def _sync_task_start_to_admin(
+    task_id: str,
+    task: BuildTask,
+    zip_info: dict,
+    config_data: dict,
+    *,
+    zip_path: Path,
+    html_path: Path,
+    icon_path: Path,
+) -> None:
+    _sync_task_assets_to_admin_and_flush(
+        task_id,
+        task,
+        zip_info,
+        config_data,
+        zip_path=zip_path,
+        html_path=html_path,
+        icon_path=icon_path,
+    )
+    report_task_start(
+        task_id=task.id,
+        client_id=task.client_id,
+        start_time=task.updated_at.isoformat(),
+        zip_info=zip_info,
+        app_config=config_data
+    )
 
 
 def _enforce_marketplace_policy_or_raise(
@@ -5667,6 +5738,25 @@ def _ensureQuickGenerateSharedKeystore() -> Path | None:
             return None
 
 
+def _json_safe_value(value):
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(key): _json_safe_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe_value(item) for item in value]
+    if hasattr(value, "value"):
+        return _json_safe_value(value.value)
+    return value
+
+
+def _json_default(value):
+    safe_value = _json_safe_value(value)
+    if safe_value is not value:
+        return safe_value
+    return str(value)
+
+
 def _task_to_dict(task: BuildTask) -> dict:
     data = task.model_dump()
     status = task.status
@@ -5675,7 +5765,9 @@ def _task_to_dict(task: BuildTask) -> dict:
     data["updated_at"] = task.updated_at.isoformat()
     data["output_expires_at"] = task.output_expires_at.isoformat() if task.output_expires_at else None
     data["desktop_output_expires_at"] = task.desktop_output_expires_at.isoformat() if task.desktop_output_expires_at else None
-    return data
+    data["review_requested_at"] = task.review_requested_at.isoformat() if task.review_requested_at else None
+    data["review_decision_at"] = task.review_decision_at.isoformat() if task.review_decision_at else None
+    return _json_safe_value(data)
 
 
 def _task_from_dict(data: dict) -> BuildTask | None:
@@ -5705,7 +5797,7 @@ def persist_tasks_db(force: bool = False) -> None:
     with TASKS_STATE_LOCK:
         payload = [_task_to_dict(task) for task in tasks_db.values()]
         tmp_path = TASKS_STATE_PATH.with_suffix(".json.tmp")
-        tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=_json_default), encoding="utf-8")
         tmp_path.replace(TASKS_STATE_PATH)
 
 
@@ -6411,7 +6503,8 @@ async def create_task(task_data: BuildTaskCreate):
             _detach_working_task_asset(task_id, task_input_dir, "project.zip")
         elif mode == "html":
             _detach_working_task_asset(task_id, task_input_dir, "index.html")
-        preprocess_result = _preprocess_task_cdn_localization(
+        preprocess_result = await asyncio.to_thread(
+            _preprocess_task_cdn_localization,
             task_mode=mode,
             task_input_dir=task_input_dir,
             enabled=cdn_localize_enabled,
@@ -6516,18 +6609,22 @@ async def create_task(task_data: BuildTaskCreate):
         ai_runtime_config,
         scope="risk_guard_task_create",
     )
-    ai_guard_result = _run_ai_marketplace_guard_for_task(
-        task_id=task_id,
-        app_name=effective_config.app_name,
-        package_name=effective_config.package_name,
-        declared_use_case=declared_use_case,
-        web_url=web_url,
-        permissions=list(getattr(effective_config, "permissions", []) or []),
-        zip_path=risk_scan_zip_path if risk_scan_zip_path.exists() else None,
-        html_path=risk_scan_html_path if risk_scan_html_path.exists() else None,
-        risk_scan=base_risk_scan,
-        ai_config=ai_runtime_config,
-    )
+    ai_guard_kwargs = {
+        "task_id": task_id,
+        "app_name": effective_config.app_name,
+        "package_name": effective_config.package_name,
+        "declared_use_case": declared_use_case,
+        "web_url": web_url,
+        "permissions": list(getattr(effective_config, "permissions", []) or []),
+        "zip_path": risk_scan_zip_path if risk_scan_zip_path.exists() else None,
+        "html_path": risk_scan_html_path if risk_scan_html_path.exists() else None,
+        "risk_scan": base_risk_scan,
+        "ai_config": ai_runtime_config,
+    }
+    if bool(ai_runtime_config.get("enabled")):
+        ai_guard_result = await asyncio.to_thread(_run_ai_marketplace_guard_for_task, **ai_guard_kwargs)
+    else:
+        ai_guard_result = _run_ai_marketplace_guard_for_task(**ai_guard_kwargs)
     if ai_cooldown_remaining > 0:
         ai_guard_result = dict(ai_guard_result or {})
         ai_guard_result["cooldown_rule_only"] = True
@@ -6672,19 +6769,17 @@ async def create_task(task_data: BuildTaskCreate):
     }
     if zip_path.exists():
         zip_info.update({"name": zip_path.name, "size": zip_path.stat().st_size})
-    upload_task_assets(
+    _run_background_admin_sync(
+        "create-task-assets",
+        _sync_task_assets_to_admin_and_flush,
         task_id,
-        task.client_id or "",
-        task.updated_at.isoformat(),
+        task,
         zip_info,
         config_data,
-        zip_path=str(zip_path) if zip_path.exists() else None,
-        html_path=str(html_path) if html_path.exists() else None,
-        icon_path=str(icon_path) if icon_path.exists() else None,
-        keystore_path=None,
-        keystore_info={},
+        zip_path=zip_path,
+        html_path=html_path,
+        icon_path=icon_path,
     )
-    flush_task_assets_queue()
     return task
 
 
@@ -6998,7 +7093,7 @@ async def start_task(task_id: str, client_id: str = None):
             raise HTTPException(status_code=403, detail="task was rejected by admin risk review")
         raise HTTPException(status_code=403, detail="task is pending admin risk review")
 
-    risk_guard_context = _refresh_task_risk_guard_before_start(task_id, task, client_id)
+    risk_guard_context = await asyncio.to_thread(_refresh_task_risk_guard_before_start, task_id, task, client_id)
     if not _is_task_review_approved(task):
         try:
             persist_tasks_db(force=True)
@@ -7122,29 +7217,17 @@ async def start_task(task_id: str, client_id: str = None):
     }
     if zip_path.exists():
         zip_info.update({"name": zip_path.name, "size": zip_path.stat().st_size})
-    upload_task_assets(
+    _run_background_admin_sync(
+        "start-task-admin",
+        _sync_task_start_to_admin,
         task_id,
-        task.client_id or "",
-        task.updated_at.isoformat(),
+        task,
         zip_info,
         config_data,
-        zip_path=str(zip_path) if zip_path.exists() else None,
-        html_path=str(html_path) if html_path.exists() else None,
-        icon_path=str(icon_path) if icon_path.exists() else None,
-        keystore_path=None,
-        keystore_info={},
+        zip_path=zip_path,
+        html_path=html_path,
+        icon_path=icon_path,
     )
-
-    try:
-        report_task_start(
-            task_id=task.id,
-            client_id=task.client_id,
-            start_time=task.updated_at.isoformat(),
-            zip_info=zip_info,
-            app_config=config_data
-        )
-    except Exception:
-        pass
 
     runner = get_task_runner()
     task_output_dir = TASKS_DIR / task_id / "output"
