@@ -587,6 +587,204 @@ def _env_bool(name: str, default: bool = False) -> bool:
         return default
     return raw in {"1", "true", "yes", "on"}
 
+
+def _parse_positive_int_env(name: str, default: int) -> int:
+    raw_value = str(os.getenv(name) or "").strip()
+    if not raw_value:
+        return default
+    try:
+        value = int(raw_value)
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+BUILD_IP_QUOTA_ENABLED = _env_bool("BUILD_IP_QUOTA_ENABLED", default=True)
+BUILD_IP_DAILY_BUILD_LIMIT = _parse_positive_int_env("BUILD_IP_DAILY_BUILD_LIMIT", 3)
+BUILD_IP_DAILY_NATIVE_BUILD_LIMIT = _parse_positive_int_env("BUILD_IP_DAILY_NATIVE_BUILD_LIMIT", 2)
+BUILD_IP_DAILY_NEW_CLIENT_LIMIT = _parse_positive_int_env("BUILD_IP_DAILY_NEW_CLIENT_LIMIT", 2)
+BUILD_IP_DAILY_NATIVE_NEW_CLIENT_LIMIT = _parse_positive_int_env("BUILD_IP_DAILY_NATIVE_NEW_CLIENT_LIMIT", 1)
+BUILD_IP_QUOTA_ALLOWLIST_IPS = {
+    str(item or "").strip()
+    for item in str(os.getenv("BUILD_IP_QUOTA_ALLOWLIST_IPS") or "").split(",")
+    if str(item or "").strip()
+}
+BUILD_IP_QUOTA_ALLOWLIST_CLIENT_IDS = {
+    str(item or "").strip().lower()
+    for item in str(os.getenv("BUILD_IP_QUOTA_ALLOWLIST_CLIENT_IDS") or "").split(",")
+    if str(item or "").strip()
+}
+BUILD_IP_QUOTA_LOCK = threading.Lock()
+
+
+def _resolve_build_ip_quota_state_path() -> Path:
+    configured_path = str(os.getenv("BUILD_IP_QUOTA_STATE_FILE") or "").strip()
+    if configured_path:
+        return Path(configured_path)
+    runtime_dir = globals().get("DATA_DIR") or globals().get("BASE_DATA_DIR")
+    if runtime_dir:
+        return Path(runtime_dir) / "build-ip-quota-state.json"
+    return Path(__file__).resolve().parents[2] / "data" / "build-ip-quota-state.json"
+
+
+def _normalize_request_ip(value: str | None) -> str:
+    ip_text = str(value or "").strip()
+    if not ip_text:
+        return ""
+    ip_text = ip_text.split(",")[0].strip()
+    if ip_text.startswith("[") and "]" in ip_text:
+        return ip_text[1:ip_text.index("]")].strip()
+    if ip_text.count(":") == 1 and "." in ip_text:
+        ip_text = ip_text.split(":", 1)[0].strip()
+    return ip_text
+
+
+def _is_trusted_proxy_source(host: str | None) -> bool:
+    ip_text = _normalize_request_ip(host).lower()
+    if not ip_text:
+        return False
+    if ip_text in {"localhost", "::1"} or ip_text.startswith("127."):
+        return True
+    if ip_text.startswith("10.") or ip_text.startswith("192.168."):
+        return True
+    if ip_text.startswith("172."):
+        parts = ip_text.split(".")
+        if len(parts) >= 2:
+            try:
+                second = int(parts[1])
+            except ValueError:
+                return False
+            return 16 <= second <= 31
+    if ip_text.startswith("fc") or ip_text.startswith("fd"):
+        return True
+    return False
+
+
+def _get_request_public_ip(request: Request | None) -> str:
+    if request is None:
+        return ""
+    direct_host = _normalize_request_ip(getattr(getattr(request, "client", None), "host", None))
+    candidates: list[str] = []
+    if _is_trusted_proxy_source(direct_host):
+        for header_name in ("cf-connecting-ip", "x-real-ip", "x-forwarded-for"):
+            header_value = _normalize_request_ip(request.headers.get(header_name))
+            if header_value:
+                candidates.append(header_value)
+    if direct_host:
+        candidates.append(direct_host)
+    for candidate in candidates:
+        if candidate and not _is_trusted_proxy_source(candidate):
+            return candidate
+    return candidates[0] if candidates else ""
+
+
+def _load_build_ip_quota_state() -> dict:
+    state_path = _resolve_build_ip_quota_state_path()
+    try:
+        payload = json.loads(state_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _save_build_ip_quota_state(state: dict) -> None:
+    state_path = _resolve_build_ip_quota_state_path()
+    try:
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _build_ip_quota_message(reason: str, is_native: bool) -> str:
+    if reason == "new_client":
+        return "????????????????????????????????"
+    if reason == "native_new_client":
+        return "???????? Android ??????????????????????????"
+    if is_native:
+        return "???????? Android ????????????????????"
+    return "??????????????????????????"
+
+
+def _check_build_ip_quota(*, request: Request | None, client_id: str, task: BuildTask) -> dict | None:
+    if not BUILD_IP_QUOTA_ENABLED:
+        return None
+    normalized_client_id = _normalize_client_id(client_id)
+    if normalized_client_id.lower() in BUILD_IP_QUOTA_ALLOWLIST_CLIENT_IDS:
+        return None
+    client_ip = _get_request_public_ip(request)
+    if not client_ip or client_ip in BUILD_IP_QUOTA_ALLOWLIST_IPS:
+        return None
+    task_mode = str(getattr(task, "mode", "") or "").strip().lower()
+    is_native = task_mode == "native"
+    today_key = datetime.now().strftime("%Y-%m-%d")
+    with BUILD_IP_QUOTA_LOCK:
+        state = _load_build_ip_quota_state()
+        day_state = state.get(today_key)
+        if not isinstance(day_state, dict):
+            day_state = {"ips": {}}
+        ips = day_state.get("ips")
+        if not isinstance(ips, dict):
+            ips = {}
+        ip_state = ips.get(client_ip)
+        if not isinstance(ip_state, dict):
+            ip_state = {}
+        build_count = int(ip_state.get("build_count") or 0)
+        native_build_count = int(ip_state.get("native_build_count") or 0)
+        client_ids = ip_state.get("client_ids") if isinstance(ip_state.get("client_ids"), dict) else {}
+        native_client_ids = ip_state.get("native_client_ids") if isinstance(ip_state.get("native_client_ids"), dict) else {}
+        if build_count >= BUILD_IP_DAILY_BUILD_LIMIT:
+            raise HTTPException(status_code=429, detail=_build_ip_quota_message("build", is_native))
+        if is_native and native_build_count >= BUILD_IP_DAILY_NATIVE_BUILD_LIMIT:
+            raise HTTPException(status_code=429, detail=_build_ip_quota_message("native_build", True))
+        if normalized_client_id not in client_ids and len(client_ids) >= BUILD_IP_DAILY_NEW_CLIENT_LIMIT:
+            raise HTTPException(status_code=429, detail=_build_ip_quota_message("new_client", is_native))
+        if is_native and normalized_client_id not in native_client_ids and len(native_client_ids) >= BUILD_IP_DAILY_NATIVE_NEW_CLIENT_LIMIT:
+            raise HTTPException(status_code=429, detail=_build_ip_quota_message("native_new_client", True))
+    return {
+        "date_key": today_key,
+        "client_ip": client_ip,
+        "client_id": normalized_client_id,
+        "is_native": is_native,
+        "task_id": str(getattr(task, "id", "") or ""),
+    }
+
+
+def _commit_build_ip_quota_usage(quota_context: dict | None) -> None:
+    if not quota_context:
+        return
+    today_key = str(quota_context.get("date_key") or "").strip()
+    client_ip = str(quota_context.get("client_ip") or "").strip()
+    client_id = str(quota_context.get("client_id") or "").strip()
+    if not today_key or not client_ip or not client_id:
+        return
+    is_native = bool(quota_context.get("is_native"))
+    now_text = datetime.now().isoformat()
+    with BUILD_IP_QUOTA_LOCK:
+        state = _load_build_ip_quota_state()
+        state = {today_key: state.get(today_key) if isinstance(state.get(today_key), dict) else {"ips": {}}}
+        day_state = state[today_key]
+        ips = day_state.get("ips") if isinstance(day_state.get("ips"), dict) else {}
+        ip_state = ips.get(client_ip) if isinstance(ips.get(client_ip), dict) else {}
+        client_ids = ip_state.get("client_ids") if isinstance(ip_state.get("client_ids"), dict) else {}
+        native_client_ids = ip_state.get("native_client_ids") if isinstance(ip_state.get("native_client_ids"), dict) else {}
+        client_ids.setdefault(client_id, now_text)
+        if is_native:
+            native_client_ids.setdefault(client_id, now_text)
+        ip_state["build_count"] = int(ip_state.get("build_count") or 0) + 1
+        if is_native:
+            ip_state["native_build_count"] = int(ip_state.get("native_build_count") or 0) + 1
+        else:
+            ip_state["native_build_count"] = int(ip_state.get("native_build_count") or 0)
+        ip_state["client_ids"] = client_ids
+        ip_state["native_client_ids"] = native_client_ids
+        ip_state["last_seen_at"] = now_text
+        ip_state["last_task_id"] = str(quota_context.get("task_id") or "")
+        ips[client_ip] = ip_state
+        day_state["ips"] = ips
+        state[today_key] = day_state
+        _save_build_ip_quota_state(state)
+
 AUTH_GITHUB_CLIENT_ID = str(os.getenv("AUTH_GITHUB_CLIENT_ID") or "").strip()
 AUTH_GITHUB_CLIENT_SECRET = str(os.getenv("AUTH_GITHUB_CLIENT_SECRET") or "").strip()
 AUTH_GITHUB_SCOPE = str(os.getenv("AUTH_GITHUB_SCOPE") or "read:user user:email").strip() or "read:user user:email"
@@ -7068,7 +7266,7 @@ async def cancel_running_tasks(payload: dict):
 
 
 @app.post("/api/tasks/{task_id}/start", response_model=BuildTaskResponse)
-async def start_task(task_id: str, client_id: str = None):
+async def start_task(task_id: str, request: Request, client_id: str = None):
     """开始构建任务"""
     if task_id not in tasks_db:
         raise HTTPException(status_code=404, detail="任务不存在")
@@ -7131,6 +7329,11 @@ async def start_task(task_id: str, client_id: str = None):
             detail = status.get("error") or "Build environment is not ready"
             raise HTTPException(status_code=503, detail=detail)
 
+    ip_quota_context = _check_build_ip_quota(
+        request=request,
+        client_id=client_id,
+        task=task,
+    )
     bound_user_id = _get_user_id_by_client_id(client_id) or ""
     quota_result = consume_build_quota(
         task_id=task_id,
@@ -7177,6 +7380,8 @@ async def start_task(task_id: str, client_id: str = None):
                 "remaining_balance": quota_result.get("remaining_balance"),
             },
         )
+
+    _commit_build_ip_quota_usage(ip_quota_context)
 
     task.status = BuildStatus.PROCESSING
     task.progress = 5
