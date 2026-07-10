@@ -282,6 +282,7 @@ def fetch_feature_flags(client_id: str = "", force: bool = False) -> Dict[str, A
         "client_login_enabled": True,
         "client_sms_login_enabled": False,
         "client_register_enabled": True,
+        "build_ip_quota_enabled": False,
         "upload_max_size_mb": 200,
         "risk_scan_block_keywords": [],
         "risk_scan_domain_keywords": [],
@@ -388,6 +389,8 @@ def fetch_feature_flags(client_id: str = "", force: bool = False) -> Dict[str, A
             result["client_sms_login_enabled"] = bool(data.get("client_sms_login_enabled"))
         if "client_register_enabled" in data:
             result["client_register_enabled"] = bool(data.get("client_register_enabled"))
+        if "build_ip_quota_enabled" in data:
+            result["build_ip_quota_enabled"] = bool(data.get("build_ip_quota_enabled"))
         if "upload_max_size_mb" in data:
             try:
                 parsed_size = int(data.get("upload_max_size_mb") or 0)

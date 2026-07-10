@@ -709,6 +709,9 @@ def _build_ip_quota_message(reason: str, is_native: bool) -> str:
 def _check_build_ip_quota(*, request: Request | None, client_id: str, task: BuildTask) -> dict | None:
     if not BUILD_IP_QUOTA_ENABLED:
         return None
+    feature_flags = fetch_feature_flags(client_id=client_id)
+    if not bool(feature_flags.get("build_ip_quota_enabled", False)):
+        return None
     normalized_client_id = _normalize_client_id(client_id)
     if normalized_client_id.lower() in BUILD_IP_QUOTA_ALLOWLIST_CLIENT_IDS:
         return None
@@ -8406,5 +8409,4 @@ if __name__ == "__main__":
     print("[Docs] 文档: http://localhost:8000/docs")
     port = int(os.getenv("CONVERTAPK_PORT", "8000"))
     uvicorn.run(app, host="0.0.0.0", port=port)
-
 
