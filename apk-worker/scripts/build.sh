@@ -60,6 +60,41 @@ check_error() {
     fi
 }
 
+SIGNATURE_VERIFY_TIMEOUT_SECONDS="${SIGNATURE_VERIFY_TIMEOUT_SECONDS:-120}"
+
+# 后置签名校验只做摘要验证，并加超时保护，避免校验阶段长时间占用构建队列
+runSignatureVerification() {
+    local label="$1"
+    shift
+    local output=""
+    local status=0
+
+    set +e
+    if command -v timeout >/dev/null 2>&1; then
+        output="$(timeout "$SIGNATURE_VERIFY_TIMEOUT_SECONDS" "$@" 2>&1)"
+        status=$?
+    else
+        log_warning "未找到 timeout 命令，$label 将不启用超时保护"
+        output="$("$@" 2>&1)"
+        status=$?
+    fi
+    set -e
+
+    if [ -n "$output" ]; then
+        printf '%s\n' "$output"
+    fi
+
+    if [ "$status" -eq 124 ] || [ "$status" -eq 137 ]; then
+        log_error "$label 超过 ${SIGNATURE_VERIFY_TIMEOUT_SECONDS}s，已停止以避免阻塞构建队列"
+        return 1
+    fi
+    if [ "$status" -ne 0 ]; then
+        log_error "$label 执行失败"
+        return "$status"
+    fi
+    return 0
+}
+
 prepareLauncherForegroundIcon() {
     local source_file="$1"
     local target_file="$2"
@@ -5476,9 +5511,8 @@ if [ "$OUTPUT_FORMAT" = "aab" ]; then
 
     # 验证签名
     log_info "验证 AAB 签名..."
-    jarsigner -verify -verbose -certs "$SIGNED_AAB"
-    verifyOutputSignatureMatchesKeystore
-    check_error "AAB 签名验证失败"
+    runSignatureVerification "AAB 签名验证" jarsigner -verify "$SIGNED_AAB" || { log_error "AAB 签名验证失败"; exit 1; }
+    verifyOutputSignatureMatchesKeystore || { log_error "AAB 签名验证失败"; exit 1; }
 
     log_success "AAB 签名完成"
     FINAL_OUTPUT="$SIGNED_AAB"
@@ -5516,9 +5550,8 @@ else
 
     # 验证签名
     log_info "验证 APK 签名..."
-    apksigner verify --verbose "$SIGNED_APK"
-    verifyOutputSignatureMatchesKeystore
-    check_error "APK 签名验证失败"
+    runSignatureVerification "APK 签名验证" apksigner verify "$SIGNED_APK" || { log_error "APK 签名验证失败"; exit 1; }
+    verifyOutputSignatureMatchesKeystore || { log_error "APK 签名验证失败"; exit 1; }
 
     log_success "APK 签名完成"
     FINAL_OUTPUT="$SIGNED_APK"
