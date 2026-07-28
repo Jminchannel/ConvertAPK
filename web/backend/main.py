@@ -260,13 +260,23 @@ def _validate_feedback_image_content(data: bytes, expected_content_type: str) ->
                     or height <= 0
                     or pixel_count > FEEDBACK_PROXY_MAX_IMAGE_PIXELS
                     or frame_count > FEEDBACK_PROXY_MAX_ANIMATED_IMAGE_FRAMES
-                    or pixel_count * frame_count * 4 > FEEDBACK_PROXY_MAX_DECODED_IMAGE_BYTES
                 ):
                     raise HTTPException(status_code=400, detail="feedback image dimensions are invalid")
                 decoded_image.verify()
             with Image.open(BytesIO(data)) as decoded_image:
+                decoded_bytes = 0
                 for frame_index in range(frame_count):
                     decoded_image.seek(frame_index)
+                    frame_width, frame_height = decoded_image.size
+                    frame_pixels = frame_width * frame_height
+                    decoded_bytes += frame_pixels * 4
+                    if (
+                        frame_width <= 0
+                        or frame_height <= 0
+                        or frame_pixels > FEEDBACK_PROXY_MAX_IMAGE_PIXELS
+                        or decoded_bytes > FEEDBACK_PROXY_MAX_DECODED_IMAGE_BYTES
+                    ):
+                        raise HTTPException(status_code=400, detail="feedback image dimensions are invalid")
                     decoded_image.load()
     except HTTPException:
         raise

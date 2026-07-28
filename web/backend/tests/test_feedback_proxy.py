@@ -26,6 +26,30 @@ class _FeedbackUpload:
         return self.file.read()
 
 
+class _DecodedGif:
+    def __init__(self, frame_sizes):
+        self.format = "GIF"
+        self.n_frames = len(frame_sizes)
+        self._frame_sizes = frame_sizes
+        self.size = frame_sizes[0]
+        self.loaded_frames = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        return False
+
+    def verify(self):
+        return None
+
+    def seek(self, frame_index):
+        self.size = self._frame_sizes[frame_index]
+
+    def load(self):
+        self.loaded_frames.append(self.size)
+
+
 def _png_chunk(chunk_type, data):
     return (
         len(data).to_bytes(4, "big")
@@ -204,6 +228,17 @@ class FeedbackProxyTests(unittest.TestCase):
 
         self.assertEqual(result[0]["content_type"], "image/gif")
         self.assertEqual(result[0]["data"], gif_bytes)
+
+    def test_feedback_decoder_rejects_large_later_gif_frame_before_load(self):
+        first_open = _DecodedGif([(1, 1), (1, 1)])
+        frame_decoder = _DecodedGif([(1, 1), (main.FEEDBACK_PROXY_MAX_IMAGE_PIXELS + 1, 1)])
+
+        with patch.object(main.Image, "open", side_effect=[first_open, frame_decoder]):
+            with self.assertRaises(main.HTTPException) as raised:
+                main._validate_feedback_image_content(b"gif", "image/gif")
+
+        self.assertEqual(raised.exception.status_code, 400)
+        self.assertEqual(frame_decoder.loaded_frames, [(1, 1)])
 
     def test_inbox_proxy_maps_upstream_access_failure_to_forbidden(self):
         payload = main.FeedbackInboxProxyRequest(client_id="client_a", tickets=[])
