@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict'
 import {
+  canSubmitInitialFeedback,
   createFeedbackInboxGuard,
   enqueueUnreadAdminMessages,
   readFeedbackTickets,
+  revokeFeedbackPreviewUrls,
   saveFeedbackTicket,
-  selectAdminMessageText
+  selectAdminMessageText,
+  shouldDismissFeedbackQueueMessage
 } from '../src/utils/feedbackConversation.js'
 
 const storage = () => {
@@ -41,6 +44,22 @@ const storage = () => {
     { id: 3, feedback_id: 31, sender_type: 'client', created_at: '2026-07-28T08:00:00Z' }
   ])
   assert.deepEqual(queue.map((message) => message.id), [1, 2])
+}
+
+{
+  assert.equal(shouldDismissFeedbackQueueMessage(false), false)
+  assert.equal(shouldDismissFeedbackQueueMessage(true), true)
+}
+
+{
+  assert.equal(canSubmitInitialFeedback('   ', []), false)
+  assert.equal(canSubmitInitialFeedback('   ', [{ name: 'screen.png' }]), true)
+}
+
+{
+  const revoked = []
+  revokeFeedbackPreviewUrls({ first: 'blob:one', second: 'blob:two' }, (url) => revoked.push(url))
+  assert.deepEqual(revoked, ['blob:one', 'blob:two'])
 }
 
 console.log('feedbackConversation helpers: PASS')

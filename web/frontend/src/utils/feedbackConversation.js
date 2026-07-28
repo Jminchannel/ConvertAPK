@@ -86,6 +86,14 @@ export const sanitizeFeedbackReplyContent = (value, maxLength = 4000) => String(
   .trim()
   .slice(0, maxLength)
 
+export const canSubmitInitialFeedback = (content, images) => Boolean(sanitizeFeedbackReplyContent(content) || (Array.isArray(images) && images.length))
+
+export const shouldDismissFeedbackQueueMessage = (acknowledged) => acknowledged === true
+
+export const revokeFeedbackPreviewUrls = (previews, revoke = (url) => URL.revokeObjectURL(url)) => {
+  for (const url of Object.values(previews || {})) revoke(url)
+}
+
 export const selectFeedbackReplyImages = (files, maxImages = 5, maxSize = 10 * 1024 * 1024) => {
   const allowedTypes = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif'])
   return Array.from(files || [])

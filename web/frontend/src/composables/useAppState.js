@@ -46,13 +46,16 @@ import {
   bumpPatchVersion
 } from '../utils/appShared'
 import {
+  canSubmitInitialFeedback,
   createFeedbackInboxGuard,
   enqueueUnreadAdminMessages,
   readFeedbackTickets,
+  revokeFeedbackPreviewUrls,
   sanitizeFeedbackReplyContent,
   saveFeedbackTicket,
   selectAdminMessageText,
-  selectFeedbackReplyImages
+  selectFeedbackReplyImages,
+  shouldDismissFeedbackQueueMessage
 } from '../utils/feedbackConversation'
 
 export const useAppState = () => {
@@ -4438,7 +4441,8 @@ export const useAppState = () => {
   }
 
   const submitFeedback = async () => {
-    if (!feedbackContent.value) {
+    const content = sanitizeFeedbackReplyContent(feedbackContent.value)
+    if (!canSubmitInitialFeedback(content, feedbackImages.value)) {
       showToast(t('toast.feedbackEmpty'), 'error')
       return
     }
@@ -4446,7 +4450,7 @@ export const useAppState = () => {
     try {
       const result = await api.submitFeedback({
         client_id: api.getClientId(),
-        content: feedbackContent.value,
+        content,
         device_info: { ...deviceInfo.value },
         images: feedbackImages.value
       })
@@ -4509,16 +4513,24 @@ export const useAppState = () => {
   const closeFeedbackReplyPopup = async () => {
     const message = activeFeedbackReply.value
     if (!message) return
-    await markFeedbackMessageRead(message)
-    removeQueuedFeedbackMessage(message)
+    if (shouldDismissFeedbackQueueMessage(await markFeedbackMessageRead(message))) {
+      removeQueuedFeedbackMessage(message)
+      return
+    }
+    showToast('已读确认失败，请重试', 'error')
   }
 
   const openFeedbackConversation = async (feedbackId, message = null) => {
-    activeFeedbackTicketId.value = Number.parseInt(feedbackId, 10) || null
+    const nextFeedbackTicketId = Number.parseInt(feedbackId, 10) || null
+    if (activeFeedbackTicketId.value !== nextFeedbackTicketId) revokeFeedbackAttachmentPreviews()
+    activeFeedbackTicketId.value = nextFeedbackTicketId
     showFeedbackConversation.value = Boolean(activeFeedbackTicketId.value)
     if (message) {
-      await markFeedbackMessageRead(message)
-      removeQueuedFeedbackMessage(message)
+      if (shouldDismissFeedbackQueueMessage(await markFeedbackMessageRead(message))) {
+        removeQueuedFeedbackMessage(message)
+      } else {
+        showToast('已读确认失败，请重试', 'error')
+      }
     }
   }
 
@@ -4526,6 +4538,7 @@ export const useAppState = () => {
     showFeedbackConversation.value = false
     feedbackReplyContent.value = ''
     feedbackReplyImages.value = []
+    revokeFeedbackAttachmentPreviews()
   }
 
   const triggerFeedbackReplyFileSelect = () => {
@@ -4542,7 +4555,7 @@ export const useAppState = () => {
 
   const attachmentPreviewKey = (messageId, index) => `${messageId}:${index}`
   const revokeFeedbackAttachmentPreviews = () => {
-    for (const url of Object.values(feedbackAttachmentPreviews.value)) URL.revokeObjectURL(url)
+    revokeFeedbackPreviewUrls(feedbackAttachmentPreviews.value)
     feedbackAttachmentPreviews.value = {}
   }
   const attachmentPreviewUrl = (messageId, index) => feedbackAttachmentPreviews.value[attachmentPreviewKey(messageId, index)] || ''
@@ -4594,8 +4607,11 @@ export const useAppState = () => {
       feedbackReplyImages.value = []
       const currentAdminMessage = activeFeedbackReply.value
       if (currentAdminMessage?.feedback_id === ticket.feedback_id) {
-        await markFeedbackMessageRead(currentAdminMessage)
-        removeQueuedFeedbackMessage(currentAdminMessage)
+        if (shouldDismissFeedbackQueueMessage(await markFeedbackMessageRead(currentAdminMessage))) {
+          removeQueuedFeedbackMessage(currentAdminMessage)
+        } else {
+          showToast('已读确认失败，请重试', 'error')
+        }
       }
     } catch {
       showToast(t('toast.feedbackFailed'), 'error')
