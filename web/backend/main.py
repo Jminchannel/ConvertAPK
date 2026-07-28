@@ -1637,6 +1637,10 @@ def _compact_text_for_risk_scan(value: str | None) -> tuple[str, str]:
     return collapsed, compact
 
 
+def _can_use_compact_risk_keyword_match(keyword: str) -> bool:
+    return not (bool(re.search(r"[a-z]", keyword)) and bool(re.search(r"\s", keyword)))
+
+
 def _collect_risk_keyword_hits(value: str | None, keywords: tuple[str, ...], max_hits: int = 24) -> list[str]:
     normalized, compact = _compact_text_for_risk_scan(value)
     if not normalized:
@@ -1648,7 +1652,11 @@ def _collect_risk_keyword_hits(value: str | None, keywords: tuple[str, ...], max
         if not probe:
             continue
         probe_compact = re.sub(r"[\s_\-./]+", "", probe)
-        matched = probe in normalized or (probe_compact and probe_compact in compact)
+        matched = probe in normalized or (
+            _can_use_compact_risk_keyword_match(probe)
+            and probe_compact
+            and probe_compact in compact
+        )
         if not matched:
             continue
         if probe in seen:
@@ -2526,30 +2534,18 @@ def _run_ai_marketplace_guard_for_task(
 def _apply_ai_guard_result_to_risk_scan(base_risk_scan: dict, ai_guard_result: dict) -> dict:
     risk_scan = dict(base_risk_scan or {})
     risk_scan["ai_guard"] = ai_guard_result if isinstance(ai_guard_result, dict) else {}
+    risk_scan["ai_guard_blocked"] = False
+    risk_scan["ai_guard_hit_bonus"] = 0
+    risk_scan["ai_guard_review_suggested"] = False
     if not isinstance(ai_guard_result, dict):
         return risk_scan
-    ai_blocked = bool(ai_guard_result.get("suspected")) and str(ai_guard_result.get("action") or "") in {"review", "block"}
-    if not ai_blocked:
+    ai_review_suggested = bool(ai_guard_result.get("suspected")) and str(ai_guard_result.get("action") or "").strip().lower() in {"review", "block"}
+    if not ai_review_suggested:
         return risk_scan
 
-    current_hit_count = int(risk_scan.get("hit_count") or 0)
-    evidence_count = len(list(ai_guard_result.get("evidence") or []))
-    ai_hit_bonus = max(1, min(4, evidence_count or 1))
-    risk_scan["hit_count"] = current_hit_count + ai_hit_bonus
-    risk_scan["risk_level"] = "high"
-    risk_scan["ai_guard_blocked"] = True
-    risk_scan["ai_guard_hit_bonus"] = ai_hit_bonus
-
-    field_hits = list(risk_scan.get("field_hits") or [])
-    reason = str(ai_guard_result.get("reason") or "AI????????/????/??????").strip()
-    field_hits.append(
-        {
-            "field": "ai_guard",
-            "keyword": "prohibited_distribution_or_gambling_suspected",
-            "sample": reason[:120],
-        }
-    )
-    risk_scan["field_hits"] = field_hits[:128]
+    risk_scan["ai_guard_review_suggested"] = True
+    if str(risk_scan.get("risk_level") or "normal").strip().lower() != "high":
+        risk_scan["risk_level"] = "medium"
     return risk_scan
 
 
@@ -2623,25 +2619,14 @@ def _refresh_task_risk_guard_before_start(task_id: str, task: BuildTask, client_
     manual_review_released = _is_task_review_released_by_admin(task)
     freeze_record = None
     if not manual_review_released:
-        if _is_ai_guard_high_risk(ai_guard_result):
-            freeze_reason, freeze_evidence, freeze_source = _build_freeze_reason_and_evidence(ai_guard_result, risk_scan)
-            freeze_record = _freeze_client_by_ai_risk(
-                client_id=client_id,
-                task_id=task_id,
-                reason=freeze_reason,
-                evidence=freeze_evidence,
-                source=freeze_source,
-            )
+        freeze_record = _freeze_client_when_risk_blocked(
+            client_id=client_id,
+            task_id=task_id,
+            risk_scan=risk_scan,
+            ai_guard_result=ai_guard_result,
+        )
+        if freeze_record:
             risk_scan = _attach_freeze_alert_to_risk_scan(risk_scan, client_id, freeze_record)
-        else:
-            freeze_record = _freeze_client_when_risk_blocked(
-                client_id=client_id,
-                task_id=task_id,
-                risk_scan=risk_scan,
-                ai_guard_result=ai_guard_result,
-            )
-            if freeze_record:
-                risk_scan = _attach_freeze_alert_to_risk_scan(risk_scan, client_id, freeze_record)
 
     risk_level = str(risk_scan.get("risk_level") or "normal").strip().lower()
     if freeze_record:
@@ -2678,6 +2663,8 @@ def _refresh_task_risk_guard_before_start(task_id: str, task: BuildTask, client_
         if task.status == BuildStatus.PENDING:
             if freeze_record:
                 task.message = "Risk guard marked this client as high risk and frozen. Please contact developer to unfreeze."
+            elif risk_level == "medium" and bool(risk_scan.get("ai_guard_review_suggested")):
+                task.message = "AI risk signal detected. Waiting for admin review."
             else:
                 task.message = "High-risk signals detected. Waiting for admin review."
     elif risk_level == "high":
@@ -2721,12 +2708,15 @@ def _is_risk_review_allowlisted(client_id: str | None) -> bool:
 def _requires_risk_review(client_id: str | None, risk_scan: dict) -> bool:
     if not RISK_REVIEW_ENABLED:
         return False
-    if str(risk_scan.get("risk_level") or "").strip().lower() != "high":
+    risk_level = str(risk_scan.get("risk_level") or "").strip().lower()
+    if risk_level not in {"medium", "high"}:
         return False
     if _is_risk_review_allowlisted(client_id):
         return False
-    if bool(risk_scan.get("ai_guard_blocked")):
+    if bool(risk_scan.get("ai_guard_review_suggested")):
         return True
+    if risk_level != "high":
+        return False
     if bool(risk_scan.get("combo_blocked")):
         return True
     hit_count = 0
@@ -3426,20 +3416,6 @@ def _is_ai_guard_high_risk(ai_guard_result: dict | None) -> bool:
 
 
 def _build_freeze_reason_and_evidence(ai_guard_result: dict | None, risk_scan: dict | None) -> tuple[str, list[str], str]:
-    if _is_ai_guard_high_risk(ai_guard_result):
-        reason = str((ai_guard_result or {}).get("reason") or "AI risk guard flagged high risk").strip()
-        evidence: list[str] = []
-        for item in list((ai_guard_result or {}).get("evidence") or []):
-            text = str(item or "").strip()
-            if not text:
-                continue
-            if text in evidence:
-                continue
-            evidence.append(text[:200])
-            if len(evidence) >= 8:
-                break
-        return reason[:240] or "AI risk guard flagged high risk", evidence, "ai_risk_guard"
-
     merged_risk_scan = risk_scan if isinstance(risk_scan, dict) else {}
     evidence: list[str] = []
 
@@ -3542,10 +3518,10 @@ def _freeze_client_when_risk_blocked(
     review_required = _requires_risk_review(client_id, merged_risk_scan)
     if risk_level != "high" or not review_required:
         return None
-    severe_hit = bool(merged_risk_scan.get("combo_blocked")) or bool(merged_risk_scan.get("ai_guard_blocked"))
+    severe_hit = bool(merged_risk_scan.get("combo_blocked"))
     if not severe_hit:
         try:
-            severe_hit = int(merged_risk_scan.get("hit_count") or 0) >= int(RISK_SCAN_MIN_HIT_COUNT_FOR_FREEZE)
+            severe_hit = int(merged_risk_scan.get("base_hit_count") or 0) >= int(RISK_SCAN_MIN_HIT_COUNT_FOR_FREEZE)
         except Exception:
             severe_hit = False
     if not severe_hit:
@@ -6857,25 +6833,14 @@ async def create_task(task_data: BuildTaskCreate):
         )
 
     freeze_record = None
-    if _is_ai_guard_high_risk(ai_guard_result):
-        freeze_reason, freeze_evidence, freeze_source = _build_freeze_reason_and_evidence(ai_guard_result, risk_scan)
-        freeze_record = _freeze_client_by_ai_risk(
-            client_id=client_id,
-            task_id=task_id,
-            reason=freeze_reason,
-            evidence=freeze_evidence,
-            source=freeze_source,
-        )
+    freeze_record = _freeze_client_when_risk_blocked(
+        client_id=client_id,
+        task_id=task_id,
+        risk_scan=risk_scan,
+        ai_guard_result=ai_guard_result,
+    )
+    if freeze_record:
         risk_scan = _attach_freeze_alert_to_risk_scan(risk_scan, client_id, freeze_record)
-    else:
-        freeze_record = _freeze_client_when_risk_blocked(
-            client_id=client_id,
-            task_id=task_id,
-            risk_scan=risk_scan,
-            ai_guard_result=ai_guard_result,
-        )
-        if freeze_record:
-            risk_scan = _attach_freeze_alert_to_risk_scan(risk_scan, client_id, freeze_record)
 
     risk_level = str(risk_scan.get("risk_level") or "normal").strip().lower()
     if freeze_record:
@@ -6899,11 +6864,14 @@ async def create_task(task_data: BuildTaskCreate):
         ).strip()[:160] or None
     else:
         review_note = "风险命中但已在放行名单内" if (risk_level == "high" and allowlisted_for_review) else None
-    pending_message = (
-        "Risk guard marked this client as high risk and frozen. Please contact developer to unfreeze."
-        if freeze_record
-        else ("命中高风险规则，等待管理人员审核放行" if review_required else "等待构建中")
-    )
+    if freeze_record:
+        pending_message = "Risk guard marked this client as high risk and frozen. Please contact developer to unfreeze."
+    elif review_required and risk_level == "medium" and bool(risk_scan.get("ai_guard_review_suggested")):
+        pending_message = "AI 风险提示，等待管理人员审核"
+    elif review_required:
+        pending_message = "命中高风险规则，等待管理人员审核放行"
+    else:
+        pending_message = "等待构建中"
 
     task = BuildTask(
         id=task_id,
