@@ -566,6 +566,46 @@ export const submitFeedback = async (payload) => {
   return response.data
 }
 
+// 反馈会话凭据仅通过 POST 请求体传递，避免出现在 URL、历史记录或代理日志中。
+export const fetchFeedbackInbox = async (tickets) => {
+  const response = await api.post('/adminhub/feedback/inbox', {
+    client_id: getClientId(),
+    tickets: Array.isArray(tickets) ? tickets : []
+  })
+  return response.data
+}
+
+export const replyToFeedback = async (feedbackId, payload = {}) => {
+  const formData = new FormData()
+  formData.append('client_id', getClientId())
+  formData.append('access_token', String(payload.access_token || '').trim())
+  formData.append('content', String(payload.content || ''))
+  for (const image of Array.isArray(payload.images) ? payload.images : []) {
+    formData.append('images', image)
+  }
+  const response = await api.post(`/adminhub/feedback/${encodeURIComponent(feedbackId)}/messages`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  })
+  return response.data
+}
+
+export const acknowledgeFeedbackMessage = async (feedbackId, messageId, accessToken) => {
+  const response = await api.post(
+    `/adminhub/feedback/${encodeURIComponent(feedbackId)}/messages/${encodeURIComponent(messageId)}/read`,
+    { client_id: getClientId(), access_token: String(accessToken || '').trim() }
+  )
+  return response.data
+}
+
+export const downloadFeedbackAttachment = async (feedbackId, messageId, attachmentIndex, accessToken) => {
+  const response = await api.post(
+    `/adminhub/feedback/${encodeURIComponent(feedbackId)}/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentIndex)}`,
+    { client_id: getClientId(), access_token: String(accessToken || '').trim() },
+    { responseType: 'blob' }
+  )
+  return response.data
+}
+
 // 获取 GitHub 仓库统计信息（Stars/Forks）用于首页展示
 export const getGithubRepoStats = async () => {
   const response = await api.get('/github/repo-stats')

@@ -45,6 +45,15 @@ import {
   compareVersion,
   bumpPatchVersion
 } from '../utils/appShared'
+import {
+  createFeedbackInboxGuard,
+  enqueueUnreadAdminMessages,
+  readFeedbackTickets,
+  sanitizeFeedbackReplyContent,
+  saveFeedbackTicket,
+  selectAdminMessageText,
+  selectFeedbackReplyImages
+} from '../utils/feedbackConversation'
 
 export const useAppState = () => {
   const alipayQr = new URL('../pics/支付宝.png', import.meta.url).href
@@ -677,6 +686,22 @@ export const useAppState = () => {
   const feedbackImages = ref([])
   const feedbackFileInput = ref(null)
   const feedbackSubmitting = ref(false)
+  const feedbackInboxGuard = createFeedbackInboxGuard()
+  const feedbackTickets = ref(readFeedbackTickets())
+  const feedbackMessages = ref([])
+  const feedbackReplyQueue = ref([])
+  const activeFeedbackTicketId = ref(null)
+  const showFeedbackConversation = ref(false)
+  const feedbackReplyContent = ref('')
+  const feedbackReplyImages = ref([])
+  const feedbackReplyFileInput = ref(null)
+  const feedbackReplySubmitting = ref(false)
+  const feedbackAttachmentPreviews = ref({})
+  const activeFeedbackReply = computed(() => feedbackReplyQueue.value[0] || null)
+  const activeFeedbackTicket = computed(() => feedbackTickets.value.find((ticket) => ticket.feedback_id === activeFeedbackTicketId.value) || null)
+  const activeFeedbackConversationMessages = computed(() => feedbackMessages.value
+    .filter((message) => message.feedback_id === activeFeedbackTicketId.value)
+    .sort((left, right) => String(left.created_at || '').localeCompare(String(right.created_at || ''))))
   const showDonation = ref(false)
   const donationHideChecked = ref(false)
   const donationAutoDisabled = ref(localStorage.getItem('apk_builder_donation_hide') === '1')
@@ -4419,12 +4444,15 @@ export const useAppState = () => {
     }
     feedbackSubmitting.value = true
     try {
-      await api.submitFeedback({
+      const result = await api.submitFeedback({
         client_id: api.getClientId(),
         content: feedbackContent.value,
         device_info: { ...deviceInfo.value },
         images: feedbackImages.value
       })
+      if (saveFeedbackTicket(localStorage, result)) {
+        feedbackTickets.value = readFeedbackTickets()
+      }
       feedbackContent.value = ''
       feedbackImages.value = []
       showToast(t('toast.feedbackSent'), 'success')
@@ -4434,6 +4462,149 @@ export const useAppState = () => {
       feedbackSubmitting.value = false
     }
   }
+
+  const addFeedbackMessages = (messages) => {
+    const knownMessages = new Map(feedbackMessages.value.map((message) => [`${message.feedback_id}:${message.id}`, message]))
+    for (const message of Array.isArray(messages) ? messages : []) {
+      const feedbackId = Number.parseInt(message?.feedback_id, 10)
+      const messageId = Number.parseInt(message?.id, 10)
+      if (feedbackId > 0 && messageId > 0) {
+        knownMessages.set(`${feedbackId}:${messageId}`, { ...message, feedback_id: feedbackId, id: messageId })
+      }
+    }
+    feedbackMessages.value = [...knownMessages.values()]
+  }
+
+  const loadFeedbackInboxOnce = async () => {
+    if (!feedbackInboxGuard.consume()) return
+    const tickets = readFeedbackTickets()
+    feedbackTickets.value = tickets
+    if (!tickets.length) return
+    try {
+      const messages = enqueueUnreadAdminMessages(await api.fetchFeedbackInbox(tickets))
+      addFeedbackMessages(messages)
+      feedbackReplyQueue.value = enqueueUnreadAdminMessages([...feedbackReplyQueue.value, ...messages])
+    } catch {
+      // 启动收件箱失败不显示敏感请求细节，也不会自动重试或轮询。
+    }
+  }
+
+  const getFeedbackTicket = (feedbackId) => feedbackTickets.value.find((ticket) => ticket.feedback_id === Number.parseInt(feedbackId, 10)) || null
+
+  const markFeedbackMessageRead = async (message) => {
+    const ticket = getFeedbackTicket(message?.feedback_id)
+    if (!ticket || message?.sender_type !== 'admin') return false
+    try {
+      await api.acknowledgeFeedbackMessage(ticket.feedback_id, message.id, ticket.access_token)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  const removeQueuedFeedbackMessage = (message) => {
+    feedbackReplyQueue.value = feedbackReplyQueue.value.filter((item) => !(item.feedback_id === message.feedback_id && item.id === message.id))
+  }
+
+  const closeFeedbackReplyPopup = async () => {
+    const message = activeFeedbackReply.value
+    if (!message) return
+    await markFeedbackMessageRead(message)
+    removeQueuedFeedbackMessage(message)
+  }
+
+  const openFeedbackConversation = async (feedbackId, message = null) => {
+    activeFeedbackTicketId.value = Number.parseInt(feedbackId, 10) || null
+    showFeedbackConversation.value = Boolean(activeFeedbackTicketId.value)
+    if (message) {
+      await markFeedbackMessageRead(message)
+      removeQueuedFeedbackMessage(message)
+    }
+  }
+
+  const closeFeedbackConversation = () => {
+    showFeedbackConversation.value = false
+    feedbackReplyContent.value = ''
+    feedbackReplyImages.value = []
+  }
+
+  const triggerFeedbackReplyFileSelect = () => {
+    feedbackReplyFileInput.value?.click?.()
+  }
+
+  const handleFeedbackReplyFiles = (event) => {
+    const files = Array.from(event.target?.files || [])
+    const selected = selectFeedbackReplyImages(files)
+    if (selected.length < files.length) showToast(t('toast.feedbackFileLimit'), 'error')
+    feedbackReplyImages.value = selected
+    if (event.target) event.target.value = ''
+  }
+
+  const attachmentPreviewKey = (messageId, index) => `${messageId}:${index}`
+  const revokeFeedbackAttachmentPreviews = () => {
+    for (const url of Object.values(feedbackAttachmentPreviews.value)) URL.revokeObjectURL(url)
+    feedbackAttachmentPreviews.value = {}
+  }
+  const attachmentPreviewUrl = (messageId, index) => feedbackAttachmentPreviews.value[attachmentPreviewKey(messageId, index)] || ''
+  const setAttachmentPreview = (messageId, index, blob) => {
+    const key = attachmentPreviewKey(messageId, index)
+    const previousUrl = feedbackAttachmentPreviews.value[key]
+    if (previousUrl) URL.revokeObjectURL(previousUrl)
+    feedbackAttachmentPreviews.value = { ...feedbackAttachmentPreviews.value, [key]: URL.createObjectURL(blob) }
+  }
+  const loadFeedbackAttachmentPreview = async (message, index) => {
+    const ticket = getFeedbackTicket(message?.feedback_id)
+    if (!ticket || attachmentPreviewUrl(message.id, index)) return
+    try {
+      const blob = await api.downloadFeedbackAttachment(ticket.feedback_id, message.id, index, ticket.access_token)
+      setAttachmentPreview(message.id, index, blob)
+    } catch {
+      showToast(t('toast.feedbackFailed'), 'error')
+    }
+  }
+  const downloadFeedbackAttachment = async (message, index) => {
+    const ticket = getFeedbackTicket(message?.feedback_id)
+    if (!ticket) return
+    try {
+      const blob = await api.downloadFeedbackAttachment(ticket.feedback_id, message.id, index, ticket.access_token)
+      const url = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = `feedback-${message.id}-${index + 1}`
+      anchor.click()
+      URL.revokeObjectURL(url)
+    } catch {
+      showToast(t('toast.feedbackFailed'), 'error')
+    }
+  }
+
+  const submitFeedbackReply = async () => {
+    const ticket = activeFeedbackTicket.value
+    const content = sanitizeFeedbackReplyContent(feedbackReplyContent.value)
+    if (!ticket || (!content && !feedbackReplyImages.value.length)) return
+    feedbackReplySubmitting.value = true
+    try {
+      const result = await api.replyToFeedback(ticket.feedback_id, {
+        access_token: ticket.access_token,
+        content,
+        images: feedbackReplyImages.value
+      })
+      addFeedbackMessages([{ ...result, feedback_id: ticket.feedback_id, sender_type: 'client' }])
+      feedbackReplyContent.value = ''
+      feedbackReplyImages.value = []
+      const currentAdminMessage = activeFeedbackReply.value
+      if (currentAdminMessage?.feedback_id === ticket.feedback_id) {
+        await markFeedbackMessageRead(currentAdminMessage)
+        removeQueuedFeedbackMessage(currentAdminMessage)
+      }
+    } catch {
+      showToast(t('toast.feedbackFailed'), 'error')
+    } finally {
+      feedbackReplySubmitting.value = false
+    }
+  }
+
+  const formatFeedbackMessageText = (message) => selectAdminMessageText(message?.content_i18n, currentLang.value) || String(message?.content || '')
 
   const refreshAll = async () => {
     await refreshTasks()
@@ -4559,7 +4730,8 @@ export const useAppState = () => {
         fetchAdminFeatures(),
         refreshTasks(),
         fetchAnnouncements(),
-        loadSystemInfo()
+        loadSystemInfo(),
+        loadFeedbackInboxOnce()
       ])
       const authReady = authReadyResult.status === 'fulfilled' && Boolean(authReadyResult.value)
       if (githubCallbackResult.handled) {
@@ -4618,6 +4790,7 @@ export const useAppState = () => {
     mobileSwipeOffsetX.value = 0
     if (appIcon.value && !appIcon.value.startsWith('/api/')) URL.revokeObjectURL(appIcon.value)
     if (cropperImageSrc.value) URL.revokeObjectURL(cropperImageSrc.value)
+    revokeFeedbackAttachmentPreviews()
     if (htmlDiagnosticsHandle) {
       if (typeof cancelAnimationFrame === 'function') {
         cancelAnimationFrame(htmlDiagnosticsHandle)
@@ -4803,6 +4976,19 @@ export const useAppState = () => {
     feedbackImages,
     feedbackFileInput,
     feedbackSubmitting,
+    feedbackTickets,
+    feedbackMessages,
+    feedbackReplyQueue,
+    activeFeedbackReply,
+    activeFeedbackTicket,
+    activeFeedbackConversationMessages,
+    showFeedbackConversation,
+    feedbackReplyContent,
+    feedbackReplyImages,
+    feedbackReplyFileInput,
+    feedbackReplySubmitting,
+    attachmentPreviewUrl,
+    formatFeedbackMessageText,
     showDonation,
     donationHideChecked,
     donationAutoDisabled,
@@ -4964,6 +5150,14 @@ export const useAppState = () => {
     triggerFeedbackFileSelect,
     handleFeedbackFiles,
     submitFeedback,
+    closeFeedbackReplyPopup,
+    openFeedbackConversation,
+    closeFeedbackConversation,
+    triggerFeedbackReplyFileSelect,
+    handleFeedbackReplyFiles,
+    submitFeedbackReply,
+    loadFeedbackAttachmentPreview,
+    downloadFeedbackAttachment,
     refreshAll,
     openDonation,
     closeDonation,

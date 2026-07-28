@@ -1976,11 +1976,87 @@
                 </button>
               </div>
               <div class="settings-hint">{{ t('settings.feedbackHint') }}</div>
+              <div v-if="feedbackTickets.length" class="feedback-conversation-known">
+                <div class="settings-hint">已保存的反馈会话</div>
+                <button
+                  v-for="ticket in feedbackTickets"
+                  :key="ticket.feedback_id"
+                  class="btn btn-secondary btn-sm"
+                  @click="openFeedbackConversation(ticket.feedback_id)"
+                >
+                  查看反馈 #{{ ticket.feedback_id }}
+                </button>
+              </div>
             </div>
           </div>
 
           <div class="settings-dialog-footer">
             <button class="btn btn-secondary btn-sm" @click="closeSettings">{{ t('settings.cancel') }}</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <Teleport to="body">
+      <aside v-if="activeFeedbackReply" class="feedback-reply-popup" role="dialog" aria-live="polite" aria-label="反馈回复">
+        <button class="feedback-reply-popup-close" aria-label="关闭反馈回复" @click="closeFeedbackReplyPopup">×</button>
+        <div class="feedback-reply-popup-title">收到管理员回复</div>
+        <p class="feedback-reply-popup-content">{{ formatFeedbackMessageText(activeFeedbackReply) }}</p>
+        <button class="btn btn-primary btn-sm" @click="openFeedbackConversation(activeFeedbackReply.feedback_id, activeFeedbackReply)">
+          查看并回复
+        </button>
+      </aside>
+    </Teleport>
+
+    <Teleport to="body">
+      <div
+        v-if="showFeedbackConversation"
+        class="feedback-conversation-overlay"
+        role="dialog"
+        aria-modal="true"
+        aria-label="反馈会话"
+        @click.self="closeFeedbackConversation"
+        @keydown.esc.stop="closeFeedbackConversation"
+        tabindex="-1"
+      >
+        <div class="feedback-conversation-dialog">
+          <div class="feedback-conversation-header">
+            <h3>反馈会话 #{{ activeFeedbackTicket?.feedback_id }}</h3>
+            <button class="settings-close-btn" aria-label="关闭" @click="closeFeedbackConversation">×</button>
+          </div>
+          <div class="feedback-conversation-body">
+            <p v-if="!activeFeedbackConversationMessages.length" class="settings-hint">此设备尚未收到该会话的新回复。</p>
+            <article
+              v-for="message in activeFeedbackConversationMessages"
+              :key="`${message.feedback_id}-${message.id}`"
+              class="feedback-message"
+              :class="`feedback-message-${message.sender_type}`"
+            >
+              <div class="feedback-message-sender">{{ message.sender_type === 'admin' ? '管理员' : '我' }}</div>
+              <p v-if="formatFeedbackMessageText(message)" class="feedback-message-content">{{ formatFeedbackMessageText(message) }}</p>
+              <div v-if="message.image_paths?.length" class="feedback-message-attachments">
+                <div v-for="(_, index) in message.image_paths" :key="index" class="feedback-message-attachment">
+                  <img
+                    v-if="attachmentPreviewUrl(message.id, index)"
+                    :src="attachmentPreviewUrl(message.id, index)"
+                    alt="反馈附件预览"
+                  />
+                  <button v-else class="btn btn-secondary btn-sm" @click="loadFeedbackAttachmentPreview(message, index)">预览图片</button>
+                  <button class="btn btn-ghost btn-sm" @click="downloadFeedbackAttachment(message, index)">下载</button>
+                </div>
+              </div>
+            </article>
+          </div>
+          <div class="feedback-conversation-composer">
+            <textarea v-model="feedbackReplyContent" class="form-input" rows="3" maxlength="4000" placeholder="输入回复内容"></textarea>
+            <input ref="feedbackReplyFileInput" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple v-show="false" @change="handleFeedbackReplyFiles" />
+            <div class="feedback-conversation-actions">
+              <button class="btn btn-secondary btn-sm" @click="triggerFeedbackReplyFileSelect">选择图片</button>
+              <span class="settings-hint">{{ feedbackReplyImages.length ? `已选择 ${feedbackReplyImages.length} 张图片` : '最多选择 5 张图片' }}</span>
+              <button class="btn btn-primary btn-sm ml-auto" :disabled="feedbackReplySubmitting" @click="submitFeedbackReply">
+                {{ feedbackReplySubmitting ? '发送中…' : '发送回复' }}
+              </button>
+            </div>
           </div>
         </div>
       </div>
