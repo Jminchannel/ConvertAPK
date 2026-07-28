@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import {
+  canStoreFeedbackAttachmentPreview,
   canSubmitInitialFeedback,
   createFeedbackInboxGuard,
   enqueueUnreadAdminMessages,
@@ -60,6 +61,14 @@ const storage = () => {
   const revoked = []
   revokeFeedbackPreviewUrls({ first: 'blob:one', second: 'blob:two' }, (url) => revoked.push(url))
   assert.deepEqual(revoked, ['blob:one', 'blob:two'])
+}
+
+{
+  const currentSession = { isOpen: true, activeFeedbackId: 31, generation: 4 }
+  assert.equal(canStoreFeedbackAttachmentPreview(currentSession, { feedbackId: 31, generation: 4 }), true)
+  assert.equal(canStoreFeedbackAttachmentPreview(currentSession, { feedbackId: 31, generation: 3 }), false)
+  assert.equal(canStoreFeedbackAttachmentPreview({ ...currentSession, isOpen: false }, { feedbackId: 31, generation: 4 }), false)
+  assert.equal(canStoreFeedbackAttachmentPreview(currentSession, { feedbackId: 32, generation: 4 }), false)
 }
 
 console.log('feedbackConversation helpers: PASS')

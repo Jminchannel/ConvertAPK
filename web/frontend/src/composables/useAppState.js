@@ -46,6 +46,7 @@ import {
   bumpPatchVersion
 } from '../utils/appShared'
 import {
+  canStoreFeedbackAttachmentPreview,
   canSubmitInitialFeedback,
   createFeedbackInboxGuard,
   enqueueUnreadAdminMessages,
@@ -700,6 +701,7 @@ export const useAppState = () => {
   const feedbackReplyFileInput = ref(null)
   const feedbackReplySubmitting = ref(false)
   const feedbackAttachmentPreviews = ref({})
+  const feedbackConversationGeneration = ref(0)
   const activeFeedbackReply = computed(() => feedbackReplyQueue.value[0] || null)
   const activeFeedbackTicket = computed(() => feedbackTickets.value.find((ticket) => ticket.feedback_id === activeFeedbackTicketId.value) || null)
   const activeFeedbackConversationMessages = computed(() => feedbackMessages.value
@@ -4522,7 +4524,8 @@ export const useAppState = () => {
 
   const openFeedbackConversation = async (feedbackId, message = null) => {
     const nextFeedbackTicketId = Number.parseInt(feedbackId, 10) || null
-    if (activeFeedbackTicketId.value !== nextFeedbackTicketId) revokeFeedbackAttachmentPreviews()
+    feedbackConversationGeneration.value += 1
+    revokeFeedbackAttachmentPreviews()
     activeFeedbackTicketId.value = nextFeedbackTicketId
     showFeedbackConversation.value = Boolean(activeFeedbackTicketId.value)
     if (message) {
@@ -4535,6 +4538,7 @@ export const useAppState = () => {
   }
 
   const closeFeedbackConversation = () => {
+    feedbackConversationGeneration.value += 1
     showFeedbackConversation.value = false
     feedbackReplyContent.value = ''
     feedbackReplyImages.value = []
@@ -4568,8 +4572,17 @@ export const useAppState = () => {
   const loadFeedbackAttachmentPreview = async (message, index) => {
     const ticket = getFeedbackTicket(message?.feedback_id)
     if (!ticket || attachmentPreviewUrl(message.id, index)) return
+    const previewSession = {
+      feedbackId: ticket.feedback_id,
+      generation: feedbackConversationGeneration.value
+    }
     try {
       const blob = await api.downloadFeedbackAttachment(ticket.feedback_id, message.id, index, ticket.access_token)
+      if (!canStoreFeedbackAttachmentPreview({
+        isOpen: showFeedbackConversation.value,
+        activeFeedbackId: activeFeedbackTicketId.value,
+        generation: feedbackConversationGeneration.value
+      }, previewSession)) return
       setAttachmentPreview(message.id, index, blob)
     } catch {
       showToast(t('toast.feedbackFailed'), 'error')
@@ -4806,6 +4819,7 @@ export const useAppState = () => {
     mobileSwipeOffsetX.value = 0
     if (appIcon.value && !appIcon.value.startsWith('/api/')) URL.revokeObjectURL(appIcon.value)
     if (cropperImageSrc.value) URL.revokeObjectURL(cropperImageSrc.value)
+    feedbackConversationGeneration.value += 1
     revokeFeedbackAttachmentPreviews()
     if (htmlDiagnosticsHandle) {
       if (typeof cancelAnimationFrame === 'function') {

@@ -94,6 +94,10 @@ export const revokeFeedbackPreviewUrls = (previews, revoke = (url) => URL.revoke
   for (const url of Object.values(previews || {})) revoke(url)
 }
 
+export const canStoreFeedbackAttachmentPreview = (currentSession, expectedSession) => Boolean(currentSession?.isOpen)
+  && Number.parseInt(currentSession.activeFeedbackId, 10) === Number.parseInt(expectedSession?.feedbackId, 10)
+  && Number.parseInt(currentSession.generation, 10) === Number.parseInt(expectedSession?.generation, 10)
+
 export const selectFeedbackReplyImages = (files, maxImages = 5, maxSize = 10 * 1024 * 1024) => {
   const allowedTypes = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif'])
   return Array.from(files || [])
