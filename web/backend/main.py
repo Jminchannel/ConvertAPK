@@ -169,7 +169,14 @@ TASK_LOG_ESTIMATED_LINE_BYTES = 320
 FEEDBACK_PROXY_MAX_IMAGES = 5
 FEEDBACK_PROXY_MAX_IMAGE_BYTES = 10 * 1024 * 1024
 FEEDBACK_PROXY_MAX_TOTAL_IMAGE_BYTES = FEEDBACK_PROXY_MAX_IMAGES * FEEDBACK_PROXY_MAX_IMAGE_BYTES
-FEEDBACK_PROXY_ALLOWED_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+FEEDBACK_PROXY_MAX_DECODED_IMAGE_BYTES = 64 * 1024 * 1024
+FEEDBACK_PROXY_IMAGE_TYPE_EXTENSIONS = {
+    "image/jpeg": {".jpg", ".jpeg"},
+    "image/png": {".png"},
+    "image/webp": {".webp"},
+    "image/gif": {".gif"},
+}
+FEEDBACK_PROXY_ALLOWED_CONTENT_TYPES = set(FEEDBACK_PROXY_IMAGE_TYPE_EXTENSIONS)
 
 
 class FeedbackTicketRequest(BaseModel):
@@ -206,6 +213,12 @@ def _validate_feedback_proxy_uploads(images: List[UploadFile]) -> None:
         raise HTTPException(status_code=400, detail="too many feedback images")
     total_size = 0
     for image in images:
+        content_type = str(image.content_type or "").lower().split(";", 1)[0].strip()
+        normalized_filename = os.path.basename(str(image.filename or "").replace("\\", "/"))
+        extension = os.path.splitext(normalized_filename)[1].lower()
+        allowed_extensions = FEEDBACK_PROXY_IMAGE_TYPE_EXTENSIONS.get(content_type)
+        if not allowed_extensions or extension not in allowed_extensions:
+            raise HTTPException(status_code=400, detail="feedback image type is invalid")
         try:
             image.file.seek(0, os.SEEK_END)
             image_size = image.file.tell()
@@ -219,18 +232,206 @@ def _validate_feedback_proxy_uploads(images: List[UploadFile]) -> None:
             raise HTTPException(status_code=400, detail="feedback images are too large")
 
 
+def _is_valid_feedback_zlib(data: bytes) -> bool:
+    try:
+        decompressor = zlib.decompressobj()
+        decoded = decompressor.decompress(data, FEEDBACK_PROXY_MAX_DECODED_IMAGE_BYTES + 1)
+        if len(decoded) > FEEDBACK_PROXY_MAX_DECODED_IMAGE_BYTES or decompressor.unconsumed_tail:
+            return False
+        remaining = FEEDBACK_PROXY_MAX_DECODED_IMAGE_BYTES + 1 - len(decoded)
+        decoded += decompressor.flush(remaining)
+    except zlib.error:
+        return False
+    return (
+        len(decoded) <= FEEDBACK_PROXY_MAX_DECODED_IMAGE_BYTES
+        and decompressor.eof
+        and not decompressor.unused_data
+    )
+
+
+def _is_valid_feedback_png(data: bytes) -> bool:
+    if len(data) < 45 or not data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return False
+    offset = 8
+    has_ihdr = False
+    idat_chunks: List[bytes] = []
+    while offset + 12 <= len(data):
+        chunk_size = int.from_bytes(data[offset:offset + 4], "big")
+        chunk_type = data[offset + 4:offset + 8]
+        chunk_end = offset + 12 + chunk_size
+        if chunk_end > len(data):
+            return False
+        chunk_data = data[offset + 8:offset + 8 + chunk_size]
+        expected_crc = int.from_bytes(data[offset + 8 + chunk_size:chunk_end], "big")
+        if zlib.crc32(chunk_type + chunk_data) & 0xFFFFFFFF != expected_crc:
+            return False
+        if not has_ihdr:
+            if chunk_type != b"IHDR" or chunk_size != 13:
+                return False
+            width = int.from_bytes(chunk_data[0:4], "big")
+            height = int.from_bytes(chunk_data[4:8], "big")
+            if width <= 0 or height <= 0:
+                return False
+            has_ihdr = True
+        elif chunk_type == b"IDAT":
+            idat_chunks.append(chunk_data)
+        elif chunk_type == b"IEND":
+            return (
+                chunk_size == 0
+                and bool(idat_chunks)
+                and chunk_end == len(data)
+                and _is_valid_feedback_zlib(b"".join(idat_chunks))
+            )
+        offset = chunk_end
+    return False
+
+
+def _skip_feedback_gif_sub_blocks(data: bytes, offset: int) -> int:
+    while offset < len(data):
+        block_size = data[offset]
+        offset += 1
+        if block_size == 0:
+            return offset
+        offset += block_size
+        if offset > len(data):
+            return -1
+    return -1
+
+
+def _is_valid_feedback_gif(data: bytes) -> bool:
+    if len(data) < 14 or data[:6] not in {b"GIF87a", b"GIF89a"}:
+        return False
+    offset = 13
+    packed_fields = data[10]
+    if packed_fields & 0x80:
+        offset += 3 * (1 << ((packed_fields & 0x07) + 1))
+    if offset > len(data):
+        return False
+    has_image = False
+    while offset < len(data):
+        block_type = data[offset]
+        offset += 1
+        if block_type == 0x3B:
+            return has_image and offset == len(data)
+        if block_type == 0x2C:
+            if offset + 9 > len(data):
+                return False
+            image_packed_fields = data[offset + 8]
+            offset += 9
+            if image_packed_fields & 0x80:
+                offset += 3 * (1 << ((image_packed_fields & 0x07) + 1))
+            if offset >= len(data) or data[offset] > 8:
+                return False
+            offset = _skip_feedback_gif_sub_blocks(data, offset + 1)
+            if offset < 0:
+                return False
+            has_image = True
+            continue
+        if block_type != 0x21 or offset >= len(data):
+            return False
+        offset += 1
+        offset = _skip_feedback_gif_sub_blocks(data, offset)
+        if offset < 0:
+            return False
+    return False
+
+
+def _is_valid_feedback_jpeg(data: bytes) -> bool:
+    if len(data) < 12 or not data.startswith(b"\xff\xd8") or not data.endswith(b"\xff\xd9"):
+        return False
+    offset = 2
+    has_frame = False
+    has_scan = False
+    while offset + 1 < len(data):
+        if data[offset] != 0xFF:
+            return False
+        while offset < len(data) and data[offset] == 0xFF:
+            offset += 1
+        if offset >= len(data):
+            return False
+        marker = data[offset]
+        offset += 1
+        if marker == 0xD9:
+            return has_frame and has_scan and offset == len(data)
+        if marker in {0x01, *range(0xD0, 0xD8)}:
+            continue
+        if offset + 2 > len(data):
+            return False
+        segment_size = int.from_bytes(data[offset:offset + 2], "big")
+        if segment_size < 2 or offset + segment_size > len(data):
+            return False
+        if marker in {*range(0xC0, 0xC4), *range(0xC5, 0xC8), *range(0xC9, 0xCC), *range(0xCD, 0xD0)}:
+            if segment_size < 8:
+                return False
+            height = int.from_bytes(data[offset + 3:offset + 5], "big")
+            width = int.from_bytes(data[offset + 5:offset + 7], "big")
+            if width <= 0 or height <= 0:
+                return False
+            has_frame = True
+        if marker == 0xDA:
+            has_scan = True
+            return has_frame and data.endswith(b"\xff\xd9")
+        offset += segment_size
+    return False
+
+
+def _is_valid_feedback_webp(data: bytes) -> bool:
+    if len(data) < 20 or data[:4] != b"RIFF" or data[8:12] != b"WEBP":
+        return False
+    if int.from_bytes(data[4:8], "little") + 8 != len(data):
+        return False
+    offset = 12
+    has_image_chunk = False
+    while offset + 8 <= len(data):
+        chunk_type = data[offset:offset + 4]
+        chunk_size = int.from_bytes(data[offset + 4:offset + 8], "little")
+        chunk_start = offset + 8
+        chunk_end = chunk_start + chunk_size
+        if chunk_end > len(data):
+            return False
+        chunk_data = data[chunk_start:chunk_end]
+        if chunk_type == b"VP8 ":
+            if len(chunk_data) < 10 or chunk_data[3:6] != b"\x9d\x01\x2a":
+                return False
+            has_image_chunk = True
+        elif chunk_type == b"VP8L":
+            if len(chunk_data) < 5 or chunk_data[0] != 0x2F:
+                return False
+            has_image_chunk = True
+        elif chunk_type == b"VP8X":
+            if len(chunk_data) != 10:
+                return False
+            has_image_chunk = True
+        offset = chunk_end + (chunk_size % 2)
+    return has_image_chunk and offset == len(data)
+
+
+def _detect_feedback_image_content_type(data: bytes) -> str | None:
+    if _is_valid_feedback_png(data):
+        return "image/png"
+    if _is_valid_feedback_gif(data):
+        return "image/gif"
+    if _is_valid_feedback_jpeg(data):
+        return "image/jpeg"
+    if _is_valid_feedback_webp(data):
+        return "image/webp"
+    return None
+
+
 async def _read_feedback_proxy_uploads(images: List[UploadFile]) -> List[dict]:
     _validate_feedback_proxy_uploads(images)
     items: List[dict] = []
     for image in images:
         data = await image.read()
-        if not data:
-            raise HTTPException(status_code=400, detail="feedback image is empty")
+        content_type = str(image.content_type or "").lower().split(";", 1)[0].strip()
+        if _detect_feedback_image_content_type(data) != content_type:
+            raise HTTPException(status_code=400, detail="feedback image content is invalid")
+        filename = os.path.basename(str(image.filename or "").replace("\\", "/"))
         items.append(
             {
                 "field": "images",
-                "filename": image.filename or "image.png",
-                "content_type": image.content_type or "application/octet-stream",
+                "filename": filename,
+                "content_type": content_type,
                 "data": data,
             }
         )
@@ -8412,7 +8613,7 @@ async def adminhub_feedback(
     image_items = await _read_feedback_proxy_uploads(images)
     result = submit_feedback(normalized_client_id, content, device_info_json, image_items)
     if not result.get("ok"):
-        raise HTTPException(status_code=502, detail="feedback upload failed")
+        _feedback_proxy_error(result)
     return {
         "ok": True,
         "feedback_id": result["feedback_id"],
@@ -8424,7 +8625,13 @@ async def adminhub_feedback(
 async def adminhub_feedback_inbox(payload: FeedbackInboxProxyRequest):
     client_id = _require_client_id(payload.client_id)
     tickets = [ticket.model_dump() for ticket in payload.tickets]
-    return fetch_feedback_inbox(client_id, tickets)
+    result = fetch_feedback_inbox(client_id, tickets)
+    if not result.get("ok"):
+        _feedback_proxy_error(result)
+    data = result.get("data")
+    if not isinstance(data, list):
+        _feedback_proxy_error({"status_code": 502})
+    return data
 
 
 @app.post("/api/adminhub/feedback/{feedback_id}/messages")

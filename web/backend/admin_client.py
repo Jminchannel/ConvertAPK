@@ -748,13 +748,17 @@ def submit_feedback(
     return {"ok": True, "feedback_id": feedback_id, "access_token": access_token}
 
 
-def fetch_feedback_inbox(client_id: str, tickets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def fetch_feedback_inbox(client_id: str, tickets: List[Dict[str, Any]]) -> Dict[str, Any]:
     payload = {
         "client_id": str(client_id or "").strip(),
         "tickets": tickets if isinstance(tickets, list) else [],
     }
-    data = _request_json("POST", "/api/client/feedback/inbox", payload=payload)
-    return data if isinstance(data, list) else []
+    result = _request_feedback_json("/api/client/feedback/inbox", payload)
+    if not result.get("ok"):
+        return result
+    if not isinstance(result.get("data"), list):
+        return {"ok": False, "status_code": 502}
+    return result
 
 
 def reply_to_feedback(
