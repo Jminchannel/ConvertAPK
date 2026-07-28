@@ -651,27 +651,162 @@ def _should_upload_task_input_assets() -> bool:
     return _env_flag("ADMIN_UPLOAD_TASK_INPUT_ASSETS", default=False)
 
 
-def submit_feedback(client_id: str, content: str, device_info: Dict[str, Any], images: List[Dict[str, Any]]) -> bool:
+def _read_json_response(response) -> Optional[Any]:
+    body = response.read().decode("utf-8")
+    return json.loads(body) if body else {}
+
+
+def _request_feedback_multipart(
+    path: str,
+    fields: Dict[str, str],
+    files: List[Dict[str, Any]],
+) -> Dict[str, Any]:
     base_url, token = _get_config()
     if not base_url or not token:
-        return False
-    fields = {
-        "client_id": client_id,
-        "content": content,
-        "device_info": json.dumps(device_info, ensure_ascii=False),
-    }
-    body, content_type = _encode_multipart(fields, images)
-    req = urllib.request.Request(
-        f"{base_url}/api/client/feedback",
+        return {"ok": False, "status_code": 503}
+    body, content_type = _encode_multipart(fields, files)
+    request = urllib.request.Request(
+        f"{base_url}{path}",
         data=body,
         method="POST",
         headers={"X-Client-Token": token, "Content-Type": content_type},
     )
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            return 200 <= resp.status < 300
+        with urllib.request.urlopen(request, timeout=15) as response:
+            data = _read_json_response(response)
+            return {"ok": 200 <= response.status < 300, "status_code": response.status, "data": data}
+    except urllib.error.HTTPError as exc:
+        return {"ok": False, "status_code": exc.code}
     except Exception:
-        return False
+        return {"ok": False, "status_code": 503}
+
+
+def _request_feedback_json(path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    base_url, token = _get_config()
+    if not base_url or not token:
+        return {"ok": False, "status_code": 503}
+    request = urllib.request.Request(
+        f"{base_url}{path}",
+        data=json.dumps(payload).encode("utf-8"),
+        method="POST",
+        headers={"X-Client-Token": token, "Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            data = _read_json_response(response)
+            return {"ok": 200 <= response.status < 300, "status_code": response.status, "data": data}
+    except urllib.error.HTTPError as exc:
+        return {"ok": False, "status_code": exc.code}
+    except Exception:
+        return {"ok": False, "status_code": 503}
+
+
+def _request_feedback_attachment(path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    base_url, token = _get_config()
+    if not base_url or not token:
+        return {"ok": False, "status_code": 503}
+    request = urllib.request.Request(
+        f"{base_url}{path}",
+        data=json.dumps(payload).encode("utf-8"),
+        method="POST",
+        headers={"X-Client-Token": token, "Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            return {
+                "ok": 200 <= response.status < 300,
+                "status_code": response.status,
+                "content": response.read(),
+                "content_type": response.headers.get_content_type(),
+            }
+    except urllib.error.HTTPError as exc:
+        return {"ok": False, "status_code": exc.code}
+    except Exception:
+        return {"ok": False, "status_code": 503}
+
+
+def submit_feedback(
+    client_id: str,
+    content: str,
+    device_info: Dict[str, Any],
+    images: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    fields = {
+        "client_id": client_id,
+        "content": content,
+        "device_info": json.dumps(device_info, ensure_ascii=False),
+    }
+    result = _request_feedback_multipart("/api/client/feedback", fields, images)
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    try:
+        feedback_id = int(data.get("id"))
+    except (TypeError, ValueError):
+        feedback_id = 0
+    access_token = str(data.get("access_token") or "")
+    if not result.get("ok") or feedback_id <= 0 or not access_token:
+        return {"ok": False, "status_code": result.get("status_code", 502)}
+    return {"ok": True, "feedback_id": feedback_id, "access_token": access_token}
+
+
+def fetch_feedback_inbox(client_id: str, tickets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    payload = {
+        "client_id": str(client_id or "").strip(),
+        "tickets": tickets if isinstance(tickets, list) else [],
+    }
+    data = _request_json("POST", "/api/client/feedback/inbox", payload=payload)
+    return data if isinstance(data, list) else []
+
+
+def reply_to_feedback(
+    feedback_id: int,
+    client_id: str,
+    access_token: str,
+    content: str,
+    images: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    fields = {
+        "client_id": str(client_id or "").strip(),
+        "access_token": str(access_token or ""),
+        "content": str(content or ""),
+    }
+    return _request_feedback_multipart(
+        f"/api/client/feedback/{int(feedback_id)}/messages",
+        fields,
+        images,
+    )
+
+
+def acknowledge_feedback_message(
+    feedback_id: int,
+    message_id: int,
+    client_id: str,
+    access_token: str,
+) -> Dict[str, Any]:
+    payload = {
+        "client_id": str(client_id or "").strip(),
+        "access_token": str(access_token or ""),
+    }
+    return _request_feedback_json(
+        f"/api/client/feedback/{int(feedback_id)}/messages/{int(message_id)}/read",
+        payload,
+    )
+
+
+def download_feedback_attachment(
+    feedback_id: int,
+    message_id: int,
+    attachment_index: int,
+    client_id: str,
+    access_token: str,
+) -> Dict[str, Any]:
+    payload = {
+        "client_id": str(client_id or "").strip(),
+        "access_token": str(access_token or ""),
+    }
+    return _request_feedback_attachment(
+        f"/api/client/feedback/{int(feedback_id)}/messages/{int(message_id)}/attachments/{int(attachment_index)}",
+        payload,
+    )
 
 
 def upload_task_assets(

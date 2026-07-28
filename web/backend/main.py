@@ -4,9 +4,10 @@ patch_typing_eval_type()
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, Body, Request, Form
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from starlette.background import BackgroundTask
 from typing import List
+from pydantic import BaseModel, Field
 from datetime import datetime, timedelta
 from pathlib import Path, PurePosixPath
 import uuid
@@ -68,6 +69,10 @@ from admin_client import (
     create_alipay_build_payment,
     redeem_build_code,
     submit_feedback,
+    fetch_feedback_inbox,
+    reply_to_feedback,
+    acknowledge_feedback_message,
+    download_feedback_attachment,
     upload_task_assets,
     flush_task_assets_queue,
     check_admin_service,
@@ -161,6 +166,75 @@ TASK_LOG_MAX_LINE_CHARS_MAX = 20000
 TASK_LOG_TAIL_READ_MIN_BYTES = 128 * 1024
 TASK_LOG_TAIL_READ_MAX_BYTES = 8 * 1024 * 1024
 TASK_LOG_ESTIMATED_LINE_BYTES = 320
+FEEDBACK_PROXY_MAX_IMAGES = 5
+FEEDBACK_PROXY_MAX_IMAGE_BYTES = 10 * 1024 * 1024
+FEEDBACK_PROXY_MAX_TOTAL_IMAGE_BYTES = FEEDBACK_PROXY_MAX_IMAGES * FEEDBACK_PROXY_MAX_IMAGE_BYTES
+FEEDBACK_PROXY_ALLOWED_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+
+
+class FeedbackTicketRequest(BaseModel):
+    feedback_id: int = Field(gt=0)
+    access_token: str = Field(min_length=1, max_length=512)
+
+
+class FeedbackInboxProxyRequest(BaseModel):
+    client_id: str = Field(min_length=1, max_length=128)
+    tickets: List[FeedbackTicketRequest] = Field(default_factory=list, max_length=200)
+
+
+class FeedbackTicketAccessRequest(BaseModel):
+    client_id: str = Field(min_length=1, max_length=128)
+    access_token: str = Field(min_length=1, max_length=512)
+
+
+def _feedback_proxy_error(result: dict) -> None:
+    try:
+        status_code = int(result.get("status_code") or 502)
+    except (TypeError, ValueError):
+        status_code = 502
+    if status_code in {401, 403}:
+        raise HTTPException(status_code=403, detail="feedback access denied")
+    if status_code == 404:
+        raise HTTPException(status_code=404, detail="feedback resource not found")
+    if 400 <= status_code < 500:
+        raise HTTPException(status_code=400, detail="feedback request rejected")
+    raise HTTPException(status_code=502, detail="feedback service unavailable")
+
+
+def _validate_feedback_proxy_uploads(images: List[UploadFile]) -> None:
+    if len(images) > FEEDBACK_PROXY_MAX_IMAGES:
+        raise HTTPException(status_code=400, detail="too many feedback images")
+    total_size = 0
+    for image in images:
+        try:
+            image.file.seek(0, os.SEEK_END)
+            image_size = image.file.tell()
+            image.file.seek(0)
+        except (AttributeError, OSError):
+            raise HTTPException(status_code=400, detail="invalid feedback image")
+        if image_size <= 0 or image_size > FEEDBACK_PROXY_MAX_IMAGE_BYTES:
+            raise HTTPException(status_code=400, detail="feedback image size is invalid")
+        total_size += image_size
+        if total_size > FEEDBACK_PROXY_MAX_TOTAL_IMAGE_BYTES:
+            raise HTTPException(status_code=400, detail="feedback images are too large")
+
+
+async def _read_feedback_proxy_uploads(images: List[UploadFile]) -> List[dict]:
+    _validate_feedback_proxy_uploads(images)
+    items: List[dict] = []
+    for image in images:
+        data = await image.read()
+        if not data:
+            raise HTTPException(status_code=400, detail="feedback image is empty")
+        items.append(
+            {
+                "field": "images",
+                "filename": image.filename or "image.png",
+                "content_type": image.content_type or "application/octet-stream",
+                "data": data,
+            }
+        )
+    return items
 
 
 def _normalize_upload_max_size_mb(value) -> int:
@@ -8334,19 +8408,95 @@ async def adminhub_feedback(
         device_info_json = json.loads(device_info)
     except Exception:
         raise HTTPException(status_code=400, detail="device_info invalid")
-    image_items = []
-    for image in images:
-        data = await image.read()
-        image_items.append({
-            "field": "images",
-            "filename": image.filename or "image.png",
-            "content_type": image.content_type or "application/octet-stream",
-            "data": data,
-        })
-    ok = submit_feedback(client_id, content, device_info_json, image_items)
-    if not ok:
+    normalized_client_id = _require_client_id(client_id)
+    image_items = await _read_feedback_proxy_uploads(images)
+    result = submit_feedback(normalized_client_id, content, device_info_json, image_items)
+    if not result.get("ok"):
         raise HTTPException(status_code=502, detail="feedback upload failed")
+    return {
+        "ok": True,
+        "feedback_id": result["feedback_id"],
+        "access_token": result["access_token"],
+    }
+
+
+@app.post("/api/adminhub/feedback/inbox")
+async def adminhub_feedback_inbox(payload: FeedbackInboxProxyRequest):
+    client_id = _require_client_id(payload.client_id)
+    tickets = [ticket.model_dump() for ticket in payload.tickets]
+    return fetch_feedback_inbox(client_id, tickets)
+
+
+@app.post("/api/adminhub/feedback/{feedback_id}/messages")
+async def adminhub_feedback_reply(
+    feedback_id: int,
+    client_id: str = Form(...),
+    access_token: str = Form(...),
+    content: str = Form(""),
+    images: List[UploadFile] = File(default_factory=list),
+):
+    if feedback_id <= 0:
+        raise HTTPException(status_code=400, detail="feedback_id is invalid")
+    normalized_client_id = _require_client_id(client_id)
+    normalized_token = str(access_token or "").strip()
+    if not normalized_token:
+        raise HTTPException(status_code=400, detail="access_token is required")
+    image_items = await _read_feedback_proxy_uploads(images)
+    result = reply_to_feedback(
+        feedback_id,
+        normalized_client_id,
+        normalized_token,
+        str(content or ""),
+        image_items,
+    )
+    if not result.get("ok"):
+        _feedback_proxy_error(result)
+    data = result.get("data")
+    return data if isinstance(data, dict) else {"ok": True}
+
+
+@app.post("/api/adminhub/feedback/{feedback_id}/messages/{message_id}/read")
+async def adminhub_feedback_read(
+    feedback_id: int,
+    message_id: int,
+    payload: FeedbackTicketAccessRequest,
+):
+    if feedback_id <= 0 or message_id <= 0:
+        raise HTTPException(status_code=400, detail="feedback message id is invalid")
+    result = acknowledge_feedback_message(
+        feedback_id,
+        message_id,
+        _require_client_id(payload.client_id),
+        payload.access_token,
+    )
+    if not result.get("ok"):
+        _feedback_proxy_error(result)
     return {"ok": True}
+
+
+@app.post("/api/adminhub/feedback/{feedback_id}/messages/{message_id}/attachments/{attachment_index}")
+async def adminhub_feedback_attachment(
+    feedback_id: int,
+    message_id: int,
+    attachment_index: int,
+    payload: FeedbackTicketAccessRequest,
+):
+    if feedback_id <= 0 or message_id <= 0 or attachment_index < 0:
+        raise HTTPException(status_code=400, detail="feedback attachment id is invalid")
+    result = download_feedback_attachment(
+        feedback_id,
+        message_id,
+        attachment_index,
+        _require_client_id(payload.client_id),
+        payload.access_token,
+    )
+    if not result.get("ok"):
+        _feedback_proxy_error(result)
+    content_type = str(result.get("content_type") or "").lower().split(";", 1)[0].strip()
+    content = result.get("content")
+    if content_type not in FEEDBACK_PROXY_ALLOWED_CONTENT_TYPES or not isinstance(content, bytes):
+        raise HTTPException(status_code=502, detail="feedback attachment is invalid")
+    return StreamingResponse(iter([content]), media_type=content_type)
 
 
 @app.on_event("startup")
