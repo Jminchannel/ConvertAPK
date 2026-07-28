@@ -1,6 +1,7 @@
 import sys
 import unittest
 import asyncio
+import base64
 import zlib
 from io import BytesIO
 from pathlib import Path
@@ -147,6 +148,62 @@ class FeedbackProxyTests(unittest.TestCase):
             asyncio.run(main._read_feedback_proxy_uploads([image]))
 
         self.assertEqual(raised.exception.status_code, 400)
+
+    def test_feedback_upload_rejects_png_with_invalid_color_type(self):
+        png_bytes = (
+            b"\x89PNG\r\n\x1a\n"
+            + _png_chunk(b"IHDR", b"\x00\x00\x00\x01\x00\x00\x00\x01\x08\x05\x00\x00\x00")
+            + _png_chunk(b"IDAT", zlib.compress(b"\x00\x00"))
+            + _png_chunk(b"IEND", b"")
+        )
+        image = _FeedbackUpload("reply.png", "image/png", png_bytes)
+
+        with self.assertRaises(main.HTTPException) as raised:
+            asyncio.run(main._read_feedback_proxy_uploads([image]))
+
+        self.assertEqual(raised.exception.status_code, 400)
+
+    def test_feedback_upload_rejects_gif_with_invalid_lzw_payload(self):
+        gif_bytes = bytearray(base64.b64decode("R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="))
+        gif_bytes[31] = 0xFF
+        image = _FeedbackUpload("reply.gif", "image/gif", bytes(gif_bytes))
+
+        with self.assertRaises(main.HTTPException) as raised:
+            asyncio.run(main._read_feedback_proxy_uploads([image]))
+
+        self.assertEqual(raised.exception.status_code, 400)
+
+    def test_feedback_upload_rejects_jpeg_sos_without_image_data(self):
+        jpeg_bytes = (
+            b"\xff\xd8"
+            b"\xff\xc0\x00\x0b\x08\x00\x01\x00\x01\x01\x01\x11\x00"
+            b"\xff\xda\x00\x08\x01\x01\x00\x00\x3f\x00"
+            b"\xff\xd9"
+        )
+        image = _FeedbackUpload("reply.jpg", "image/jpeg", jpeg_bytes)
+
+        with self.assertRaises(main.HTTPException) as raised:
+            asyncio.run(main._read_feedback_proxy_uploads([image]))
+
+        self.assertEqual(raised.exception.status_code, 400)
+
+    def test_feedback_upload_rejects_webp_vp8x_without_image_payload(self):
+        webp_bytes = b"RIFF\x16\x00\x00\x00WEBPVP8X\x0a\x00\x00\x00" + (b"\x00" * 10)
+        image = _FeedbackUpload("reply.webp", "image/webp", webp_bytes)
+
+        with self.assertRaises(main.HTTPException) as raised:
+            asyncio.run(main._read_feedback_proxy_uploads([image]))
+
+        self.assertEqual(raised.exception.status_code, 400)
+
+    def test_feedback_upload_accepts_valid_gif(self):
+        gif_bytes = base64.b64decode("R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==")
+        image = _FeedbackUpload("reply.gif", "image/gif", gif_bytes)
+
+        result = asyncio.run(main._read_feedback_proxy_uploads([image]))
+
+        self.assertEqual(result[0]["content_type"], "image/gif")
+        self.assertEqual(result[0]["data"], gif_bytes)
 
     def test_inbox_proxy_maps_upstream_access_failure_to_forbidden(self):
         payload = main.FeedbackInboxProxyRequest(client_id="client_a", tickets=[])

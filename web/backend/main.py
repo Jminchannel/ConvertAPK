@@ -9,6 +9,7 @@ from starlette.background import BackgroundTask
 from typing import List
 from pydantic import BaseModel, Field
 from datetime import datetime, timedelta
+from io import BytesIO
 from pathlib import Path, PurePosixPath
 import uuid
 import sys
@@ -23,6 +24,7 @@ import struct
 import zlib
 import threading
 import time
+import warnings
 import urllib.request
 import urllib.error
 import urllib.parse
@@ -31,6 +33,7 @@ import html
 import re
 import hashlib
 import secrets
+from PIL import Image, UnidentifiedImageError
 from redis import Redis
 from redis.exceptions import RedisError
 
@@ -169,6 +172,8 @@ TASK_LOG_ESTIMATED_LINE_BYTES = 320
 FEEDBACK_PROXY_MAX_IMAGES = 5
 FEEDBACK_PROXY_MAX_IMAGE_BYTES = 10 * 1024 * 1024
 FEEDBACK_PROXY_MAX_TOTAL_IMAGE_BYTES = FEEDBACK_PROXY_MAX_IMAGES * FEEDBACK_PROXY_MAX_IMAGE_BYTES
+FEEDBACK_PROXY_MAX_IMAGE_PIXELS = 16_000_000
+FEEDBACK_PROXY_MAX_ANIMATED_IMAGE_FRAMES = 20
 FEEDBACK_PROXY_MAX_DECODED_IMAGE_BYTES = 64 * 1024 * 1024
 FEEDBACK_PROXY_IMAGE_TYPE_EXTENSIONS = {
     "image/jpeg": {".jpg", ".jpeg"},
@@ -232,190 +237,48 @@ def _validate_feedback_proxy_uploads(images: List[UploadFile]) -> None:
             raise HTTPException(status_code=400, detail="feedback images are too large")
 
 
-def _is_valid_feedback_zlib(data: bytes) -> bool:
+def _validate_feedback_image_content(data: bytes, expected_content_type: str) -> None:
+    expected_format = {
+        "image/jpeg": "JPEG",
+        "image/png": "PNG",
+        "image/webp": "WEBP",
+        "image/gif": "GIF",
+    }.get(expected_content_type)
+    if not expected_format:
+        raise HTTPException(status_code=400, detail="feedback image type is invalid")
     try:
-        decompressor = zlib.decompressobj()
-        decoded = decompressor.decompress(data, FEEDBACK_PROXY_MAX_DECODED_IMAGE_BYTES + 1)
-        if len(decoded) > FEEDBACK_PROXY_MAX_DECODED_IMAGE_BYTES or decompressor.unconsumed_tail:
-            return False
-        remaining = FEEDBACK_PROXY_MAX_DECODED_IMAGE_BYTES + 1 - len(decoded)
-        decoded += decompressor.flush(remaining)
-    except zlib.error:
-        return False
-    return (
-        len(decoded) <= FEEDBACK_PROXY_MAX_DECODED_IMAGE_BYTES
-        and decompressor.eof
-        and not decompressor.unused_data
-    )
-
-
-def _is_valid_feedback_png(data: bytes) -> bool:
-    if len(data) < 45 or not data.startswith(b"\x89PNG\r\n\x1a\n"):
-        return False
-    offset = 8
-    has_ihdr = False
-    idat_chunks: List[bytes] = []
-    while offset + 12 <= len(data):
-        chunk_size = int.from_bytes(data[offset:offset + 4], "big")
-        chunk_type = data[offset + 4:offset + 8]
-        chunk_end = offset + 12 + chunk_size
-        if chunk_end > len(data):
-            return False
-        chunk_data = data[offset + 8:offset + 8 + chunk_size]
-        expected_crc = int.from_bytes(data[offset + 8 + chunk_size:chunk_end], "big")
-        if zlib.crc32(chunk_type + chunk_data) & 0xFFFFFFFF != expected_crc:
-            return False
-        if not has_ihdr:
-            if chunk_type != b"IHDR" or chunk_size != 13:
-                return False
-            width = int.from_bytes(chunk_data[0:4], "big")
-            height = int.from_bytes(chunk_data[4:8], "big")
-            if width <= 0 or height <= 0:
-                return False
-            has_ihdr = True
-        elif chunk_type == b"IDAT":
-            idat_chunks.append(chunk_data)
-        elif chunk_type == b"IEND":
-            return (
-                chunk_size == 0
-                and bool(idat_chunks)
-                and chunk_end == len(data)
-                and _is_valid_feedback_zlib(b"".join(idat_chunks))
-            )
-        offset = chunk_end
-    return False
-
-
-def _skip_feedback_gif_sub_blocks(data: bytes, offset: int) -> int:
-    while offset < len(data):
-        block_size = data[offset]
-        offset += 1
-        if block_size == 0:
-            return offset
-        offset += block_size
-        if offset > len(data):
-            return -1
-    return -1
-
-
-def _is_valid_feedback_gif(data: bytes) -> bool:
-    if len(data) < 14 or data[:6] not in {b"GIF87a", b"GIF89a"}:
-        return False
-    offset = 13
-    packed_fields = data[10]
-    if packed_fields & 0x80:
-        offset += 3 * (1 << ((packed_fields & 0x07) + 1))
-    if offset > len(data):
-        return False
-    has_image = False
-    while offset < len(data):
-        block_type = data[offset]
-        offset += 1
-        if block_type == 0x3B:
-            return has_image and offset == len(data)
-        if block_type == 0x2C:
-            if offset + 9 > len(data):
-                return False
-            image_packed_fields = data[offset + 8]
-            offset += 9
-            if image_packed_fields & 0x80:
-                offset += 3 * (1 << ((image_packed_fields & 0x07) + 1))
-            if offset >= len(data) or data[offset] > 8:
-                return False
-            offset = _skip_feedback_gif_sub_blocks(data, offset + 1)
-            if offset < 0:
-                return False
-            has_image = True
-            continue
-        if block_type != 0x21 or offset >= len(data):
-            return False
-        offset += 1
-        offset = _skip_feedback_gif_sub_blocks(data, offset)
-        if offset < 0:
-            return False
-    return False
-
-
-def _is_valid_feedback_jpeg(data: bytes) -> bool:
-    if len(data) < 12 or not data.startswith(b"\xff\xd8") or not data.endswith(b"\xff\xd9"):
-        return False
-    offset = 2
-    has_frame = False
-    has_scan = False
-    while offset + 1 < len(data):
-        if data[offset] != 0xFF:
-            return False
-        while offset < len(data) and data[offset] == 0xFF:
-            offset += 1
-        if offset >= len(data):
-            return False
-        marker = data[offset]
-        offset += 1
-        if marker == 0xD9:
-            return has_frame and has_scan and offset == len(data)
-        if marker in {0x01, *range(0xD0, 0xD8)}:
-            continue
-        if offset + 2 > len(data):
-            return False
-        segment_size = int.from_bytes(data[offset:offset + 2], "big")
-        if segment_size < 2 or offset + segment_size > len(data):
-            return False
-        if marker in {*range(0xC0, 0xC4), *range(0xC5, 0xC8), *range(0xC9, 0xCC), *range(0xCD, 0xD0)}:
-            if segment_size < 8:
-                return False
-            height = int.from_bytes(data[offset + 3:offset + 5], "big")
-            width = int.from_bytes(data[offset + 5:offset + 7], "big")
-            if width <= 0 or height <= 0:
-                return False
-            has_frame = True
-        if marker == 0xDA:
-            has_scan = True
-            return has_frame and data.endswith(b"\xff\xd9")
-        offset += segment_size
-    return False
-
-
-def _is_valid_feedback_webp(data: bytes) -> bool:
-    if len(data) < 20 or data[:4] != b"RIFF" or data[8:12] != b"WEBP":
-        return False
-    if int.from_bytes(data[4:8], "little") + 8 != len(data):
-        return False
-    offset = 12
-    has_image_chunk = False
-    while offset + 8 <= len(data):
-        chunk_type = data[offset:offset + 4]
-        chunk_size = int.from_bytes(data[offset + 4:offset + 8], "little")
-        chunk_start = offset + 8
-        chunk_end = chunk_start + chunk_size
-        if chunk_end > len(data):
-            return False
-        chunk_data = data[chunk_start:chunk_end]
-        if chunk_type == b"VP8 ":
-            if len(chunk_data) < 10 or chunk_data[3:6] != b"\x9d\x01\x2a":
-                return False
-            has_image_chunk = True
-        elif chunk_type == b"VP8L":
-            if len(chunk_data) < 5 or chunk_data[0] != 0x2F:
-                return False
-            has_image_chunk = True
-        elif chunk_type == b"VP8X":
-            if len(chunk_data) != 10:
-                return False
-            has_image_chunk = True
-        offset = chunk_end + (chunk_size % 2)
-    return has_image_chunk and offset == len(data)
-
-
-def _detect_feedback_image_content_type(data: bytes) -> str | None:
-    if _is_valid_feedback_png(data):
-        return "image/png"
-    if _is_valid_feedback_gif(data):
-        return "image/gif"
-    if _is_valid_feedback_jpeg(data):
-        return "image/jpeg"
-    if _is_valid_feedback_webp(data):
-        return "image/webp"
-    return None
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            with Image.open(BytesIO(data)) as decoded_image:
+                if decoded_image.format != expected_format:
+                    raise HTTPException(status_code=400, detail="feedback image content is invalid")
+                width, height = decoded_image.size
+                pixel_count = width * height
+                frame_count = int(getattr(decoded_image, "n_frames", 1) or 1)
+                if (
+                    width <= 0
+                    or height <= 0
+                    or pixel_count > FEEDBACK_PROXY_MAX_IMAGE_PIXELS
+                    or frame_count > FEEDBACK_PROXY_MAX_ANIMATED_IMAGE_FRAMES
+                    or pixel_count * frame_count * 4 > FEEDBACK_PROXY_MAX_DECODED_IMAGE_BYTES
+                ):
+                    raise HTTPException(status_code=400, detail="feedback image dimensions are invalid")
+                decoded_image.verify()
+            with Image.open(BytesIO(data)) as decoded_image:
+                for frame_index in range(frame_count):
+                    decoded_image.seek(frame_index)
+                    decoded_image.load()
+    except HTTPException:
+        raise
+    except (
+        Image.DecompressionBombWarning,
+        Image.DecompressionBombError,
+        UnidentifiedImageError,
+        OSError,
+        SyntaxError,
+        ValueError,
+    ) as exc:
+        raise HTTPException(status_code=400, detail="feedback image content is invalid") from exc
 
 
 async def _read_feedback_proxy_uploads(images: List[UploadFile]) -> List[dict]:
@@ -424,8 +287,7 @@ async def _read_feedback_proxy_uploads(images: List[UploadFile]) -> List[dict]:
     for image in images:
         data = await image.read()
         content_type = str(image.content_type or "").lower().split(";", 1)[0].strip()
-        if _detect_feedback_image_content_type(data) != content_type:
-            raise HTTPException(status_code=400, detail="feedback image content is invalid")
+        _validate_feedback_image_content(data, content_type)
         filename = os.path.basename(str(image.filename or "").replace("\\", "/"))
         items.append(
             {
