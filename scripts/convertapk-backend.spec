@@ -4,7 +4,7 @@ from pathlib import Path
 from PyInstaller.utils.hooks import collect_submodules
 
 repo_root = Path(os.getenv("CONVERTAPK_REPO_ROOT", Path.cwd()))
-backend_dir = repo_root / "web" / "backend"
+backend_dir = repo_root / "apps" / "web" / "backend"
 main_py = backend_dir / "main.py"
 
 hiddenimports = ['env_setup', 'local_builder', 'typing_compat', 'uvicorn', 'uvicorn.logging', 'uvicorn.loops', 'uvicorn.loops.auto', 'uvicorn.protocols', 'uvicorn.protocols.http', 'uvicorn.protocols.http.auto', 'uvicorn.protocols.websockets', 'uvicorn.protocols.websockets.auto', 'uvicorn.lifespan', 'uvicorn.lifespan.on', 'fastapi', 'starlette', 'pydantic']

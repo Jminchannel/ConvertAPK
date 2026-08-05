@@ -1,8 +1,8 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$backendDir = Join-Path $PSScriptRoot "..\web\backend"
-$distDir = Join-Path $PSScriptRoot "..\dist\backend"
+$backendDir = Join-Path $PSScriptRoot "..\apps\web\backend"
+$distDir = Join-Path $PSScriptRoot "..\artifacts\backend"
 
 Write-Host "=== Building Backend EXE ===" -ForegroundColor Cyan
 
@@ -16,22 +16,14 @@ Write-Host "[2/3] Building EXE with PyInstaller..."
 $specPath = Join-Path $PSScriptRoot "convertapk-backend.spec"
 pyinstaller --noconfirm --clean `
   --distpath $distDir `
-  --workpath (Join-Path $PSScriptRoot "..\build\backend") `
+  --workpath (Join-Path $PSScriptRoot "..\artifacts\build\backend") `
   $specPath
 if ($LASTEXITCODE -ne 0) {
     throw "PyInstaller failed with exit code $LASTEXITCODE"
 }
 
-# Copy to desktop resources
-Write-Host "[3/3] Copying to desktop resources..."
-$targetDir = Join-Path $PSScriptRoot "..\desktop\dist\win-unpacked\resources\backend"
-if (Test-Path $targetDir) {
-    $exePath = Join-Path $distDir "convertapk-backend.exe"
-    if (Test-Path $exePath) {
-        Copy-Item $exePath $targetDir -Force
-        Write-Host "Copied to: $targetDir" -ForegroundColor Green
-    }
-}
+# Electron 构建会从 artifacts/backend 自动打包后端程序。
+Write-Host "[3/3] Backend artifact ready for Electron packaging."
 
 Write-Host "=== Build Complete ===" -ForegroundColor Green
 Write-Host "EXE location: $distDir\convertapk-backend.exe"

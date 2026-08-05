@@ -69,8 +69,6 @@ https://gentsergame.com/
 git clone https://github.com/Jminchannel/ConvertAPK.git
 cd ConvertAPK
 
-cp admin/backend/.env.example admin/backend/.env
-
 docker compose --profile builder build apk-builder
 docker compose up -d --build
 ```
@@ -93,7 +91,7 @@ docker compose -f docker-compose.yml -f docker-compose.windows.yml up -d --build
 用户端后端：
 
 ```bash
-cd web/backend
+cd apps/web/backend
 pip install -r requirements.txt
 python main.py
 ```
@@ -101,32 +99,22 @@ python main.py
 用户端前端：
 
 ```bash
-cd web/frontend
+cd apps/web/frontend
 npm install
 npm run dev
 ```
 
-管理端后端：
+可选外部管理端：
 
-```bash
-cd admin/backend
-pip install -r requirements.txt
-copy .env.example .env
-uvicorn app.main:app --reload --host 127.0.0.1 --port 9001
-```
-
-管理端前端：
-
-```bash
-cd admin/frontend
-npm install
-npm run dev
+```text
+当前 GitHub 源码不包含 admin 服务。若需要公告、配额、支付和反馈等管理能力，
+请部署兼容的管理端，并通过 ADMIN_API_URL 和 ADMIN_CLIENT_TOKEN 连接。
 ```
 
 桌面端：
 
 ```bash
-cd desktop
+cd apps/desktop-electron
 npm install
 npm run dev
 ```
@@ -141,17 +129,18 @@ npm run dev
 
 ```text
 .
-├── web/                       用户端前后端
-│   ├── frontend/              用户端 Vue 3 + Vite 前端
-│   └── backend/               用户端 FastAPI 后端
-├── admin/                     管理端前后端
-│   ├── frontend/              管理端 Vue 3 + Vite 前端
-│   └── backend/               管理端 FastAPI + SQLAlchemy 后端
-├── apk-worker/                Android/桌面构建镜像与脚本
-├── desktop/                   Electron 桌面壳
-├── templates/                 Android 模板工程与资源
+├── apps/                      可部署应用源码
+│   ├── web/                   用户端前后端
+│   │   ├── frontend/          用户端 Vue 3 + Vite 前端
+│   │   └── backend/           用户端 FastAPI 后端
+│   └── desktop-electron/      Electron 桌面壳源码
+├── workers/                   构建执行器
+│   └── apk-worker/            Android/桌面构建镜像与脚本
+├── templates/                 平台模板工程与资源
+│   └── android/               HTML2APK 与 Tubbim Android 模板
 ├── docs/                      部署、接口和运营文档
 ├── scripts/                   本地联调脚本
+├── artifacts/                 本地构建输出，默认不提交
 ├── data/                      运行时数据，默认不提交
 ├── docker-compose.yml         Docker 一体化编排
 └── docker-compose.windows.yml Windows 数据卷路径覆盖
@@ -162,7 +151,7 @@ npm run dev
 - 前端：Vue 3、Vite
 - 后端：FastAPI、Pydantic、SQLAlchemy
 - 构建端：Docker、Node.js、JDK、Android SDK、Capacitor、Gradle
-- 桌面端：Electron、Tauri
+- 桌面壳：Electron；桌面任务构建支持 Electron、Tauri
 - 数据库：PostgreSQL
 
 ## 常见问题

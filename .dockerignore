@@ -13,15 +13,15 @@
 **/dist
 
 # runtime data (do not bake into images)
-web/backend/uploads
-web/backend/outputs
-web/backend/logs
-web/backend/tasks
-web/backend/gradle-wrapper-cache
+apps/web/backend/uploads
+apps/web/backend/outputs
+apps/web/backend/logs
+apps/web/backend/tasks
+apps/web/backend/gradle-wrapper-cache
 
-apk-worker/input
-apk-worker/output
-apk-worker/keystore
+workers/apk-worker/input
+workers/apk-worker/output
+workers/apk-worker/keystore
 
 *.log
 *.tmp

@@ -2,7 +2,7 @@ services:
   backend:
     build:
       context: .
-      dockerfile: web/backend/Dockerfile
+      dockerfile: apps/web/backend/Dockerfile
     image: convertapk-backend:latest
     environment:
       - TZ=Asia/Shanghai
@@ -13,9 +13,9 @@ services:
       - APK_BUILDER_DATA_VOLUME=convertapk-data
       - APK_BUILDER_GRADLE_CACHE_MODE=volume
       - APK_BUILDER_GRADLE_CACHE_VOLUME=convertapk-gradle-cache
-      - APK_BUILDER_TEMPLATES_DIR=${APK_BUILDER_TEMPLATES_DIR:-/data/ConvertAPK-Desktop/templates}
-      - ADMIN_API_URL=http://admin-backend:9001
-      - ADMIN_CLIENT_TOKEN=client-secret
+      - APK_BUILDER_TEMPLATES_DIR=${APK_BUILDER_TEMPLATES_DIR:-/data/ConvertAPK-Desktop/templates/android}
+      - ADMIN_API_URL=${ADMIN_API_URL:-}
+      - ADMIN_CLIENT_TOKEN=${ADMIN_CLIENT_TOKEN:-}
       - ADMIN_UPLOAD_TASK_INPUT_ASSETS=false
       - AUTH_GITHUB_CLIENT_ID=${AUTH_GITHUB_CLIENT_ID:-}
       - AUTH_GITHUB_CLIENT_SECRET=${AUTH_GITHUB_CLIENT_SECRET:-}
@@ -44,13 +44,12 @@ services:
     ports:
       - "0.0.0.0:8000:8000"
     depends_on:
-      - admin-backend
       - redis
     restart: unless-stopped
 
   frontend:
     build:
-      context: web/frontend
+      context: apps/web/frontend
       dockerfile: Dockerfile
     image: convertapk-frontend:latest
     depends_on:
@@ -59,68 +58,16 @@ services:
       - "0.0.0.0:8080:80"
     restart: unless-stopped
 
-  admin-db:
-    image: postgres:15
-    environment:
-      - TZ=Asia/Shanghai
-      - POSTGRES_DB=convertapk_admin
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-    volumes:
-      - admin-db-data:/var/lib/postgresql/data
-    restart: unless-stopped
-
   redis:
     image: redis:7-alpine
     command: ["redis-server", "--appendonly", "no", "--save", ""]
-    restart: unless-stopped
-
-  admin-backend:
-    build:
-      context: .
-      dockerfile: admin/backend/Dockerfile
-    image: convertapk-admin-backend:latest
-    env_file:
-      - ./admin/backend/.env
-    environment:
-      - TZ=Asia/Shanghai
-      - DATABASE_URL=postgresql://postgres:postgres@admin-db:5432/convertapk_admin
-      - ADMIN_USER=admin
-      - ADMIN_PASS=admin123
-      - JWT_SECRET=change-me
-      - CLIENT_TOKEN=client-secret
-      - ADMIN_STORAGE_ROOT=admin-storage
-      - CONVERTAPK_TASKS_ROOT=/data/tasks
-      - CONVERTAPK_TASK_INPUTS_ROOT=/data/task-inputs
-      - CONVERTAPK_DOCKER_CLEANUP_ENABLED=true
-      - CONVERTAPK_DEPLOY_ROOT=/data/ConvertAPK-Desktop
-    volumes:
-      - admin-storage:/app/admin/backend/admin-storage
-      - convertapk-data:/data
-      - .:/data/ConvertAPK-Desktop
-      - /var/run/docker.sock:/var/run/docker.sock
-    depends_on:
-      - admin-db
-    ports:
-      - "0.0.0.0:9001:9001"
-    restart: unless-stopped
-
-  admin-frontend:
-    build:
-      context: .
-      dockerfile: admin/frontend/Dockerfile
-    image: convertapk-admin-frontend:latest
-    depends_on:
-      - admin-backend
-    ports:
-      - "0.0.0.0:9002:80"
     restart: unless-stopped
 
   # Build apk-builder image on demand.
   apk-builder:
     profiles: ["builder"]
     build:
-      context: apk-worker
+      context: workers/apk-worker
       dockerfile: Dockerfile
     image: apk-builder:latest
     entrypoint: ["/bin/bash", "-lc", "echo 'apk-builder image is ready'; sleep infinity"]
@@ -131,7 +78,7 @@ services:
     profiles: ["builder"]
     build:
       context: .
-      dockerfile: apk-worker/desktop-builder.Dockerfile
+      dockerfile: workers/apk-worker/desktop-builder.Dockerfile
     image: desktop-builder:latest
     entrypoint: ["/bin/bash", "-lc", "echo 'desktop-builder image is ready'; sleep infinity"]
     restart: "no"
@@ -151,17 +98,3 @@ volumes:
       type: none
       o: bind
       device: /data/convertapk/gradle-cache
-  admin-db-data:
-    name: convertapk-admin-db
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: /data/convertapk-admin/db
-  admin-storage:
-    name: convertapk-admin-storage
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: /data/convertapk-admin/storage

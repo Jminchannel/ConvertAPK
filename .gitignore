@@ -14,10 +14,9 @@
 # ==============================
 # 构建产物
 # ==============================
-desktop/build/
-desktop/dist/
-web/frontend/dist/
-admin/frontend/dist/
+apps/desktop-electron/dist/
+apps/web/frontend/dist/
+artifacts/
 build/
 dist/
 
@@ -71,18 +70,15 @@ debug-*.js
 
 # 模板与本地打包产物（避免误提交）
 # HTML2APK 模板源码需要纳入版本管理，这里仅忽略本地缓存与构建产物
-templates/HTML2APK/.gradle/
-templates/HTML2APK/.gradle-home/
-templates/HTML2APK/.idea/
-templates/HTML2APK/.kotlin/
-templates/HTML2APK/build/
-templates/HTML2APK/app/build/
-templates/HTML2APK/local.properties
-templates/Tubbim.zip
-templates/HTML2APK.zip
-templates/demoLogo.png
-build-worker-docker/templates/HTML2APK/
-build-worker-docker/templates/Tubbim/
-build-worker-docker/templates/demoLogo.png
-apk-worker/templates/HTML2APK/
-apk-worker/templates/Tubbim/
+templates/android/HTML2APK/.gradle/
+templates/android/HTML2APK/.gradle-home/
+templates/android/HTML2APK/.idea/
+templates/android/HTML2APK/.kotlin/
+templates/android/HTML2APK/build/
+templates/android/HTML2APK/app/build/
+templates/android/HTML2APK/local.properties
+templates/android/Tubbim.zip
+templates/android/HTML2APK.zip
+templates/android/demoLogo.png
+workers/apk-worker/templates/HTML2APK/
+workers/apk-worker/templates/Tubbim/

@@ -23,7 +23,7 @@
 用户端前端：
 
 ```bash
-cd web/frontend
+cd apps/web/frontend
 npm install
 npm run build
 ```
@@ -31,28 +31,18 @@ npm run build
 用户端后端：
 
 ```bash
-cd web/backend
+cd apps/web/backend
 pip install -r requirements.txt
 python -m py_compile main.py builder.py local_builder.py models.py admin_client.py
 ```
 
-管理端前端：
+外部管理端：
 
-```bash
-cd admin/frontend
-npm install
-npm run build
+```text
+当前 GitHub 源码未包含管理端；修改外部管理端集成时，请使用独立的兼容管理端环境进行联调。
 ```
 
-管理端后端：
-
-```bash
-cd admin/backend
-pip install -r requirements.txt
-python -m py_compile app/main.py
-```
-
-如果改动了 `apk-worker/scripts/` 或 Android 模板，请重新构建 `apk-builder:latest` 并至少跑一次真实构建任务。
+如果改动了 `workers/apk-worker/scripts/` 或 Android 模板，请重新构建 `apk-builder:latest` 并至少跑一次真实构建任务。
 
 ## Pull Request 要求
 

@@ -1,0 +1,68 @@
+{
+  "name": "convertapk-desktop",
+  "version": "1.0.3",
+  "description": "ConvertAPK desktop app V1.0.3",
+  "main": "main.js",
+  "scripts": {
+    "dev": "electron .",
+    "dist": "electron-builder --win nsis"
+  },
+  "devDependencies": {
+    "electron": "^30.4.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.convertapk.desktop",
+    "productName": "ConvertAPK",
+    "icon": "resources/icon.ico",
+    "compression": "maximum",
+    "electronLanguages": [
+      "en-US",
+      "zh-CN"
+    ],
+    "win": {
+      "icon": "resources/icon.ico"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/icon.png",
+        "to": "icon.png"
+      },
+      {
+        "from": "../../templates/android/Tubbim",
+        "to": "templates/Tubbim",
+        "filter": [
+          "**/*",
+          "!**/.gradle/**",
+          "!**/.idea/**",
+          "!**/.kotlin/**",
+          "!**/app/build/**",
+          "!**/build/**"
+        ]
+      },
+      {
+        "from": "../../artifacts/backend",
+        "to": "backend"
+      },
+      {
+        "from": "../web/frontend/dist",
+        "to": "frontend"
+      }
+    ],
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "ConvertAPK",
+      "include": "resources/installer.nsh",
+      "installerIcon": "resources/icon.ico",
+      "uninstallerIcon": "resources/icon.ico"
+    }
+  }
+}
