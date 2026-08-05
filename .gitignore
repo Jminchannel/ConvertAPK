@@ -17,7 +17,7 @@
 apps/desktop-electron/dist/
 apps/web/frontend/dist/
 artifacts/
-build/
+/build/
 dist/
 
 # ==============================
