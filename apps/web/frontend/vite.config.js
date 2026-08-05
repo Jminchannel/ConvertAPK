@@ -5,6 +5,10 @@ const apiTarget = process.env.VITE_API_TARGET || 'http://localhost:8000'
 
 export default defineConfig({
   plugins: [vue()],
+  test: {
+    environment: 'jsdom',
+    include: ['tests/unit/**/*.test.mjs'],
+  },
   server: {
     host: '0.0.0.0',  // 允许局域网访问
     port: 3000,
