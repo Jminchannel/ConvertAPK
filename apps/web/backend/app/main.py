@@ -81,6 +81,7 @@ from .services.build_failure_diagnosis import (
     normalize_diag_language,
     resolve_openrouter_diag_runtime_config,
 )
+from .api.routes.operations import register_operations_routes
 
 app = FastAPI(
     title="APK转换服务",
@@ -8083,7 +8084,6 @@ async def rerun_task_diagnosis(task_id: str, payload: dict = Body(...)):
     }
 
 
-@app.get("/api/queue/status")
 async def get_queue_status():
     """获取构建队列状态"""
     try:
@@ -8098,26 +8098,21 @@ async def get_queue_status():
         }
 
 
-@app.get("/api/env/status")
 async def get_env_status():
     return env_setup.get_status()
 
-@app.get("/env/status")
 async def get_env_status_alt():
     return env_setup.get_status()
 
 
-@app.get("/api/env/config")
 async def get_env_config():
     return env_setup.get_config()
 
 
-@app.get("/env/config")
 async def get_env_config_alt():
     return env_setup.get_config()
 
 
-@app.post("/api/env/config")
 async def set_env_config(payload: dict = Body(...)):
     toolchain_root = str(payload.get("toolchain_root", "")).strip()
     migrate = bool(payload.get("migrate", False))
@@ -8146,7 +8141,6 @@ async def set_env_config(payload: dict = Body(...)):
         raise HTTPException(status_code=400, detail=str(exc))
 
 
-@app.post("/env/config")
 async def set_env_config_alt(payload: dict = Body(...)):
     toolchain_root = str(payload.get("toolchain_root", "")).strip()
     migrate = bool(payload.get("migrate", False))
@@ -8175,31 +8169,26 @@ async def set_env_config_alt(payload: dict = Body(...)):
         raise HTTPException(status_code=400, detail=str(exc))
 
 
-@app.api_route("/api/env/prepare", methods=["GET", "POST"])
 async def prepare_env(force: bool = False, payload: dict | None = Body(default=None)):
     if payload and isinstance(payload, dict) and "force" in payload:
         force = bool(payload.get("force"))
     return env_setup.prepare_env(force=force)
 
 
-@app.api_route("/env/prepare", methods=["GET", "POST"])
 async def prepare_env_alt(force: bool = False, payload: dict | None = Body(default=None)):
     if payload and isinstance(payload, dict) and "force" in payload:
         force = bool(payload.get("force"))
     return env_setup.prepare_env(force=force)
 
 
-@app.get("/api/app/version")
 async def get_app_version():
     return {"version": os.getenv("CONVERTAPK_APP_VERSION", "0.0.0")}
 
 
-@app.get("/api/system/info")
 async def system_info():
     return get_system_info()
 
 
-@app.get("/api/github/repo-stats")
 async def get_github_repo_stats():
     return _fetch_github_repo_stats()
 
@@ -8218,7 +8207,6 @@ def _probe_url(url: str, timeout: float = 5.0) -> tuple[bool, int | None, str]:
             return False, None, str(exc)
 
 
-@app.post("/api/url-probe")
 async def url_probe(payload: dict = Body(...), client_id: str | None = None):
     probe_client_id = _normalize_client_id(client_id or payload.get("client_id"))
     if not _is_web_link_mode_enabled(probe_client_id):
@@ -8230,6 +8218,24 @@ async def url_probe(payload: dict = Body(...), client_id: str | None = None):
         raise HTTPException(status_code=400, detail="url must include http/https")
     ok, status, detail = _probe_url(url)
     return {"ok": ok, "status": status, "detail": detail}
+
+
+register_operations_routes(
+    app,
+    get_queue_status=get_queue_status,
+    get_env_status=get_env_status,
+    get_env_status_alt=get_env_status_alt,
+    get_env_config=get_env_config,
+    get_env_config_alt=get_env_config_alt,
+    set_env_config=set_env_config,
+    set_env_config_alt=set_env_config_alt,
+    prepare_env=prepare_env,
+    prepare_env_alt=prepare_env_alt,
+    get_app_version=get_app_version,
+    system_info=system_info,
+    get_github_repo_stats=get_github_repo_stats,
+    url_probe=url_probe,
+)
 
 
 @app.get("/api/adminhub/announcements")

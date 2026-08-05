@@ -35,6 +35,11 @@ class BackendRouteContractTests(unittest.TestCase):
         self.assertTrue(EXPECTED_ROUTES <= actual_routes)
         self.assertIn(("GET", "/{path:path}"), actual_routes)
 
+    def test_operations_routes_are_registered_outside_application_entry(self):
+        source = (BACKEND_DIR / "app" / "main.py").read_text(encoding="utf-8")
+        self.assertIn("register_operations_routes(", source)
+        self.assertNotIn('@app.get("/api/queue/status")', source)
+
 
 if __name__ == "__main__":
     unittest.main()
