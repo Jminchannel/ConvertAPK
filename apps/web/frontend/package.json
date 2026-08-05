@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "lint": "eslint src/app src/components/layout tests --max-warnings=0",
+    "lint": "eslint src/app src/components/layout src/features/ui tests --max-warnings=0",
     "test:unit": "vitest run",
     "test": "node --test tests/app-shell-structure.test.mjs tests/tooling-contract.test.mjs && vitest run",
     "check": "npm run lint && npm run test && npm run build"

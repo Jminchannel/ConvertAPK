@@ -11,7 +11,9 @@ export default [
     files: ['src/**/*.{js,vue}', 'tests/**/*.mjs'],
     languageOptions: {
       globals: {
+        clearTimeout: 'readonly',
         document: 'readonly',
+        setTimeout: 'readonly',
         window: 'readonly',
       },
     },

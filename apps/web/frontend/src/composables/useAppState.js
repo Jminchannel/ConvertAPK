@@ -28,6 +28,7 @@ import { lintGutter, setDiagnostics } from '@codemirror/lint'
 import { searchKeymap, highlightSelectionMatches } from '@codemirror/search'
 import * as api from '../api'
 import { getSavedLanguage, saveLanguage, getSavedTheme, saveTheme, createI18n } from '../i18n'
+import { useToastState } from '../features/ui/composables/useToastState'
 import {
   jsTemplate,
   permissionsList,
@@ -1231,12 +1232,7 @@ export const useAppState = () => {
     quickGenerateStash.value = null
   }
 
-  // Toast
-  const toast = ref({ show: false, type: 'success', message: '' })
-  const showToast = (message, type = 'success') => {
-    toast.value = { show: true, type, message }
-    setTimeout(() => (toast.value.show = false), 3000)
-  }
+  const { toast, showToast } = useToastState()
 
   // 自定义确认对话框：替代原生 confirm()
   // 同一时刻仅保留一个 pending 的 Promise，避免多重弹窗导致状态紊乱
