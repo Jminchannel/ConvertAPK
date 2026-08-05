@@ -16,8 +16,11 @@ apps/web/
 │   ├── package.json
 │   └── vite.config.js
 ├── backend/           # FastAPI 后端
-│   ├── main.py        # 主程序
-│   ├── models.py      # Pydantic数据模型
+│   ├── app/           # API、领域模型与业务服务
+│   │   ├── main.py    # FastAPI 主程序
+│   │   ├── domain/    # Pydantic 数据模型
+│   │   └── services/  # 构建、环境与外部服务
+│   ├── main.py        # 旧启动方式兼容入口
 │   └── requirements.txt
 └── README.md
 ```
@@ -44,7 +47,7 @@ cd apps/web/backend
 pip install -r requirements.txt
 
 # 启动服务
-python main.py
+python -m uvicorn app.main:app --reload --port 8000
 ```
 
 后端将在 http://localhost:8000 运行

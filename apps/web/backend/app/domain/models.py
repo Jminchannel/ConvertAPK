@@ -1,4 +1,4 @@
-from typing_compat import patch_typing_eval_type
+from ..core.typing_compat import patch_typing_eval_type
 
 patch_typing_eval_type()
 

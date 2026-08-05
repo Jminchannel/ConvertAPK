@@ -1,10 +1,15 @@
 import json
 import os
+import sys
 from datetime import datetime
 from pathlib import Path
 
-from admin_client import check_admin_service, report_task_start
-from builder import TASKS_DIR
+BACKEND_DIR = Path(__file__).resolve().parents[1]
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
+
+from app.services.admin_client import check_admin_service, report_task_start
+from app.services.builder import TASKS_DIR
 
 
 def _load_tasks(path: Path) -> list[dict]:

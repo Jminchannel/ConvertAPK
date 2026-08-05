@@ -93,7 +93,7 @@ docker compose -f docker-compose.yml -f docker-compose.windows.yml up -d --build
 ```bash
 cd apps/web/backend
 pip install -r requirements.txt
-python main.py
+python -m uvicorn app.main:app --reload --port 8000
 ```
 
 用户端前端：

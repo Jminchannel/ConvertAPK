@@ -6,8 +6,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from admin_client import upload_task_assets
-from builder import TASKS_DIR
+from app.services.admin_client import upload_task_assets
+from app.services.builder import TASKS_DIR
 
 
 TASKS_STATE_PATH = TASKS_DIR / "tasks.json"

@@ -46,17 +46,19 @@
 
 ### 4.1 用户端前端
 - API 封装：`apps/web/frontend/src/api/index.js`
+- 应用入口：`apps/web/frontend/src/App.vue`
+- 页面壳与状态上下文：`apps/web/frontend/src/app/AppShell.vue`、`apps/web/frontend/src/app/appStateContext.js`
+- 页面区域：`apps/web/frontend/src/features/build/`、`apps/web/frontend/src/features/tasks/`、`apps/web/frontend/src/features/dialogs/`
 - 核心状态与业务逻辑：`apps/web/frontend/src/composables/useAppState.js`
 - 公共工具：`apps/web/frontend/src/utils/appShared.js`
-- 主界面：`apps/web/frontend/src/App.vue`
 
 ### 4.2 用户端后端
-- 入口与路由：`apps/web/backend/main.py`
-- 任务/配置模型：`apps/web/backend/models.py`
-- 构建调度与队列：`apps/web/backend/builder.py`
-- 本地构建实现：`apps/web/backend/local_builder.py`
-- 环境准备：`apps/web/backend/env_setup.py`
-- 管理端通讯：`apps/web/backend/admin_client.py`
+- 入口与路由：`apps/web/backend/app/main.py`（`main.py` 仅保留旧启动方式兼容）
+- 任务/配置模型：`apps/web/backend/app/domain/models.py`
+- 构建调度与队列：`apps/web/backend/app/services/builder.py`
+- 本地构建实现：`apps/web/backend/app/services/local_builder.py`
+- 环境准备：`apps/web/backend/app/services/env_setup.py`
+- 管理端通讯：`apps/web/backend/app/services/admin_client.py`
 
 ### 4.3 构建端与桌面端
 - Docker 构建镜像：`workers/apk-worker/Dockerfile`
@@ -70,7 +72,7 @@
 - 后端：
 - `cd apps/web/backend`
 - `pip install -r requirements.txt`
-- `python main.py`
+- `python -m uvicorn app.main:app --reload --port 8000`
 - 前端：
 - `cd apps/web/frontend`
 - `npm install`
@@ -88,7 +90,7 @@
 
 ## 6. 接口与数据约定（改接口时必看）
 
-- 用户端任务接口集中在 `apps/web/backend/main.py`。
+- 用户端任务接口集中在 `apps/web/backend/app/main.py`。
 - 用户端任务数据包含 `client_id` 维度，改动时不得破坏隔离逻辑。
 - 任务状态流转以 `pending/processing/success/failed` 为准，前后端必须一致。
 

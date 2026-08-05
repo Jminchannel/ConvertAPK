@@ -12,7 +12,7 @@ import urllib.error
 from pathlib import Path, PurePosixPath
 from typing import Callable, Dict, Optional, Tuple
 
-import env_setup
+from . import env_setup
 
 
 def _log(on_log: Optional[Callable[[str], None]], message: str) -> None:
@@ -783,7 +783,7 @@ def _resolve_templates_root() -> Path:
         return Path(resources_root) / "templates"
     if getattr(sys, "_MEIPASS", ""):
         return Path(sys._MEIPASS) / "templates"
-    return Path(__file__).resolve().parents[3] / "templates" / "android"
+    return Path(__file__).resolve().parents[5] / "templates" / "android"
 
 
 def _extract_zip_safely(archive_path: Path, dst_dir: Path) -> None:
@@ -1803,7 +1803,7 @@ def _offlineize_html_assets(entry_html: Path, env: Dict[str, str], on_log=None) 
     if not enabled:
         _log(on_log, "[HTML] CDN localize disabled, skip offlineize")
         return
-    script_path = Path(__file__).resolve().parents[3] / "workers" / "apk-worker" / "scripts" / "offlineize_html_assets.mjs"
+    script_path = Path(__file__).resolve().parents[5] / "workers" / "apk-worker" / "scripts" / "offlineize_html_assets.mjs"
     if not script_path.exists():
         _log(on_log, f"[HTML] offlineize script not found: {script_path}")
         return

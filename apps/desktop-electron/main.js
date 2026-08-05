@@ -211,12 +211,12 @@ function startBackend() {
       logLine(`[Main] frontend dist not found: ${frontendDir}`);
     }
   } else {
-    const backendScript = path.join(__dirname, "..", "web", "backend", "main.py");
+    const backendDir = path.join(__dirname, "..", "web", "backend");
     const frontendDir = path.join(__dirname, "..", "web", "frontend", "dist");
     env.FRONTEND_DIST_DIR = frontendDir;
     command = process.env.CONVERTAPK_PYTHON || "python";
-    args = [backendScript];
-    cwd = path.dirname(backendScript);
+    args = ["-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", String(backendPort)];
+    cwd = backendDir;
   }
 
   if (!backendPort) {

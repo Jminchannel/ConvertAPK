@@ -3,7 +3,7 @@ import sys
 import traceback
 from pathlib import Path
 
-from local_builder import run_local_build
+from app.services.local_builder import run_local_build
 
 
 def log(message: str) -> None:

@@ -19,10 +19,10 @@ from typing import Callable, Optional, List, Tuple
 from redis import Redis
 from redis.exceptions import RedisError
 
-from local_builder import run_local_build
-import env_setup
-from admin_client import report_task_logs, upload_task_assets, report_task_status, flush_task_assets_queue, fetch_feature_flags
-from build_failure_diagnosis import (
+from .local_builder import run_local_build
+from . import env_setup
+from .admin_client import report_task_logs, upload_task_assets, report_task_status, flush_task_assets_queue, fetch_feature_flags
+from .build_failure_diagnosis import (
     create_failed_diagnosis,
     create_idle_diagnosis,
     create_running_diagnosis,
@@ -31,14 +31,14 @@ from build_failure_diagnosis import (
 )
 
 # 项目根目录
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
+PROJECT_ROOT = Path(__file__).resolve().parents[5]
 APK_WORKER_DIR = PROJECT_ROOT / "workers" / "apk-worker"
 INPUT_DIR = APK_WORKER_DIR / "input"
 OUTPUT_DIR = APK_WORKER_DIR / "output"
 KEYSTORE_DIR = APK_WORKER_DIR / "keystore"
 
 # 后端目录
-BACKEND_DIR = Path(__file__).parent
+BACKEND_DIR = Path(__file__).resolve().parents[2]
 
 # 数据目录（支持配置，便于容器化或云部署场景落盘持久化）
 _data_dir_raw = os.getenv("APK_BUILDER_DATA_DIR", "").strip()

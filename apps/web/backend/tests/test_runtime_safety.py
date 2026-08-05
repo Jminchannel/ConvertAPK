@@ -14,7 +14,7 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 import main
-from models import AppConfig, BuildStatus, BuildTask, BuildTaskCreate
+from app.domain.models import AppConfig, BuildStatus, BuildTask, BuildTaskCreate
 
 
 class RuntimeSafetyTests(unittest.IsolatedAsyncioTestCase):

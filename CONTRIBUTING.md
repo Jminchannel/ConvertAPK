@@ -33,7 +33,7 @@ npm run build
 ```bash
 cd apps/web/backend
 pip install -r requirements.txt
-python -m py_compile main.py builder.py local_builder.py models.py admin_client.py
+python -m py_compile main.py app/main.py app/domain/models.py app/services/builder.py app/services/local_builder.py app/services/admin_client.py
 ```
 
 外部管理端：

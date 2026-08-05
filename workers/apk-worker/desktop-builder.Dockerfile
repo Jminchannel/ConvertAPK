@@ -40,8 +40,10 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
 
 WORKDIR /app
 
-COPY apps/web/backend/local_builder.py /app/web/backend/local_builder.py
-COPY apps/web/backend/env_setup.py /app/web/backend/env_setup.py
+COPY apps/web/backend/app/__init__.py /app/web/backend/app/__init__.py
+COPY apps/web/backend/app/services/__init__.py /app/web/backend/app/services/__init__.py
+COPY apps/web/backend/app/services/local_builder.py /app/web/backend/app/services/local_builder.py
+COPY apps/web/backend/app/services/env_setup.py /app/web/backend/app/services/env_setup.py
 COPY templates/android/ /app/templates/
 COPY apps/desktop-electron/resources/icon.ico /app/desktop/build/icon.ico
 COPY workers/apk-worker/scripts/desktop-entrypoint.sh /workspace/scripts/desktop-entrypoint.sh
