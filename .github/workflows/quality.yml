@@ -1,0 +1,48 @@
+name: 质量检查
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  frontend:
+    name: 前端检查
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web/frontend
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+      - name: 设置 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/web/frontend/package-lock.json
+      - name: 安装依赖
+        run: npm ci
+      - name: 执行质量检查
+        run: npm run check
+
+  python-and-compose:
+    name: 后端与编排检查
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: 安装用户端后端依赖
+        run: python -m pip install -r apps/web/backend/requirements.txt
+      - name: 执行用户端后端测试
+        run: python -m unittest discover -s apps/web/backend/tests -v
+      - name: 执行构建器契约测试
+        run: python -m unittest discover -s workers/apk-worker/tests -v
+      - name: 校验 Docker Compose 配置
+        run: docker compose -f docker-compose.yml config --no-interpolate
