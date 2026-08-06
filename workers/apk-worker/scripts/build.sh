@@ -3,6 +3,9 @@
 
 set -e
 
+export LANG=C.UTF-8
+export LC_ALL=C.UTF-8
+
 # 保存构建日志，便于排查失败原因
 mkdir -p "${OUTPUT_DIR:-/workspace/output}"
 LOG_FILE="${OUTPUT_DIR:-/workspace/output}/build.log"
@@ -5457,7 +5460,7 @@ FINAL_OUTPUT=""
 if [ "$OUTPUT_FORMAT" = "aab" ]; then
     # 复制 AAB 到输出目录
     UNSIGNED_AAB="$OUTPUT_DIR/app-release-unsigned.aab"
-    SIGNED_AAB="$OUTPUT_DIR/${APP_NAME}-v${VERSION_NAME}.aab"
+    SIGNED_AAB="$OUTPUT_DIR/app-release-signed.aab"
     cp "$AAB_PATH" "$UNSIGNED_AAB"
     check_error "复制 AAB 失败"
     log_success "AAB 输出已准备"
@@ -5465,12 +5468,15 @@ else
     # 复制 APK 到临时位置
     UNSIGNED_APK="$OUTPUT_DIR/app-release-unsigned.apk"
     ALIGNED_APK="$OUTPUT_DIR/app-release-aligned.apk"
-    SIGNED_APK="$OUTPUT_DIR/${APP_NAME}-v${VERSION_NAME}.apk"
+    SIGNED_APK="$OUTPUT_DIR/app-release-signed.apk"
     cp "$APK_PATH" "$UNSIGNED_APK"
 
     # 使用 zipalign 对齐
-    zipalign -p -f -v 4 "$UNSIGNED_APK" "$ALIGNED_APK"
+    zipalign -p -f 4 "$UNSIGNED_APK" "$ALIGNED_APK"
     check_error "APK 对齐失败"
+
+    zipalign -c -p 4 "$ALIGNED_APK" >/dev/null
+    check_error "APK 对齐验证失败"
 
     log_success "APK 对齐完成"
 fi

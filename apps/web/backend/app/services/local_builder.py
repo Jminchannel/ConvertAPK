@@ -32,6 +32,19 @@ def _decode_process_output(raw: bytes) -> str:
     return raw.decode("utf-8", errors="replace")
 
 
+def _configure_npm_registry(env: Dict[str, str]) -> None:
+    registry = str(
+        env.get("CONVERTAPK_NPM_REGISTRY")
+        or os.getenv("CONVERTAPK_NPM_REGISTRY")
+        or "https://registry.npmjs.org"
+    ).strip()
+    if not registry.startswith(("https://", "http://")):
+        registry = "https://registry.npmjs.org"
+    registry = f"{registry.rstrip('/')}/"
+    env["npm_config_registry"] = registry
+    env["NPM_CONFIG_REGISTRY"] = registry
+
+
 def _run_cmd(cmd, cwd=None, env=None, on_log=None) -> None:
     _log(on_log, f"$ {' '.join(cmd)}")
     process = subprocess.Popen(
@@ -3488,6 +3501,7 @@ def run_local_build(
     process_env = os.environ.copy()
     process_env.update(env)
     process_env.update(env_setup.get_npm_config())
+    _configure_npm_registry(process_env)
     gradle_opts = process_env.get("GRADLE_OPTS", "")
     gradle_opts += " -Dorg.gradle.wrapper.timeout=600000 -Dorg.gradle.daemon=true"
     gradle_opts += " -Dorg.gradle.internal.http.connectionTimeout=600000"

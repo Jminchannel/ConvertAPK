@@ -1538,11 +1538,12 @@ class BuildTaskRunner:
             return
         now = time.monotonic()
         if force or (now - self._last_persist) >= self._persist_interval:
-            self._last_persist = now
             try:
                 self.on_state_change(force)
             except Exception:
                 pass
+            finally:
+                self._last_persist = time.monotonic()
     
     def start_build(self, task_id: str):
         """
