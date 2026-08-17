@@ -170,6 +170,7 @@ fun Html2ApkWebView(startUrl: String, modifier: Modifier = Modifier) {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT,
             )
+            setBackgroundColor(android.graphics.Color.TRANSPARENT)
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             settings.useWideViewPort = useContainFillMode
