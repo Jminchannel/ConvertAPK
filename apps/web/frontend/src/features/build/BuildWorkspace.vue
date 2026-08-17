@@ -548,6 +548,10 @@
                     <input type="checkbox" v-model="config.double_click_exit" />
                     {{ t('config.doubleClickExit') }}
                   </label>
+                  <label class="settings-checkbox" style="margin-bottom: 12px;">
+                    <input type="checkbox" v-model="config.keyboard_resize" />
+                    {{ t('config.keyboardResize') }}
+                  </label>
                 </div>
               </div>
 

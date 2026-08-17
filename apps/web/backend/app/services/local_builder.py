@@ -1873,6 +1873,7 @@ def _patch_android_manifest(
     manifest_path: Path,
     screen_orientation: str,
     permissions: list[str],
+    keyboard_resize: bool = False,
     on_log=None
 ) -> None:
     if not manifest_path.exists():
@@ -1893,11 +1894,22 @@ def _patch_android_manifest(
             return tag_text
         return f'{tag_text} android:screenOrientation="{orientation_value}"'
 
+    def _apply_keyboard_resize_to_tag(tag_text: str) -> str:
+        if not keyboard_resize:
+            return tag_text
+        if "android:windowSoftInputMode" in tag_text:
+            return re.sub(
+                r'android:windowSoftInputMode="[^"]*"',
+                'android:windowSoftInputMode="adjustResize"',
+                tag_text,
+            )
+        return f'{tag_text} android:windowSoftInputMode="adjustResize"'
+
     def _update_activity_block(block: str) -> str:
         tag_match = re.search(r"(<activity\b[^>]*)(>)", block)
         if not tag_match:
             return block
-        updated_tag = _apply_orientation_to_tag(tag_match.group(1))
+        updated_tag = _apply_keyboard_resize_to_tag(_apply_orientation_to_tag(tag_match.group(1)))
         return block.replace(tag_match.group(0), f"{updated_tag}{tag_match.group(2)}", 1)
 
     updated = text
@@ -1915,7 +1927,7 @@ def _patch_android_manifest(
     if not updated_any:
         activity_pattern = re.compile(r"(<activity\b[^>]*android:name=\"[^\"]*MainActivity\"[^>]*)(>)")
         def _apply_orientation(match: re.Match) -> str:
-            activity_block = _apply_orientation_to_tag(match.group(1))
+            activity_block = _apply_keyboard_resize_to_tag(_apply_orientation_to_tag(match.group(1)))
             return f"{activity_block}{match.group(2)}"
         updated = activity_pattern.sub(_apply_orientation, updated, count=1)
         if updated != text:
@@ -1927,6 +1939,8 @@ def _patch_android_manifest(
             _log(on_log, f"[Android] screenOrientation => {orientation_value}")
         else:
             _log(on_log, "[Android] screenOrientation cleared (follow system)")
+        if keyboard_resize:
+            _log(on_log, "[Android] windowSoftInputMode => adjustResize")
 
     if permissions:
         existing = set(re.findall(r'uses-permission[^>]+android:name=\"([^\"]+)\"', text))
@@ -3992,6 +4006,7 @@ def run_local_build(
         manifest_path,
         env.get("SCREEN_ORIENTATION", "auto"),
         permissions,
+        keyboard_resize=str(env.get("KEYBOARD_RESIZE", "false")).strip().lower() == "true",
         on_log=on_log,
     )
     _patch_android_status_bar_styles(android_app_dir, env, on_log=on_log)

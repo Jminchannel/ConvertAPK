@@ -7820,6 +7820,8 @@ async def update_task(task_id: str, update_data: UpdateTaskRequest):
         style_updates["download_mode"] = update_data.download_mode
     if update_data.web_fill_mode is not None:
         style_updates["web_fill_mode"] = update_data.web_fill_mode
+    if update_data.keyboard_resize is not None:
+        style_updates["keyboard_resize"] = update_data.keyboard_resize
     if update_data.desktop_installer_mode is not None:
         style_updates["desktop_installer_mode"] = update_data.desktop_installer_mode
     if update_data.desktop_runtime is not None:

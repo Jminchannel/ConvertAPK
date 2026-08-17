@@ -65,6 +65,8 @@ class AppConfig(BaseModel):
     # HTML mode download behavior: silent (save directly) | picker (system file manager)
     download_mode: str = "picker"
     web_fill_mode: str = "contain"
+    # 是否在软键盘弹出时调整页面可视区域。
+    keyboard_resize: bool = False
     # Frontend sends short names (e.g. INTERNET) or full names (android.permission.INTERNET)
     permissions: List[str] = []
 
@@ -378,6 +380,7 @@ class UpdateTaskRequest(BaseModel):
     webview_user_agent: Optional[str] = None  # android | pc (web mode)
     download_mode: Optional[str] = None  # silent | picker (html mode)
     web_fill_mode: Optional[str] = None
+    keyboard_resize: Optional[bool] = None
     permissions: Optional[List[str]] = None
     cdn_localize_enabled: Optional[bool] = None
     cdn_localize_urls: Optional[List[str]] = None

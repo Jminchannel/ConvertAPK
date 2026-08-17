@@ -4431,6 +4431,7 @@ if (fs.existsSync(manifest)) {
     .toLowerCase();
   const desired =
     orientationRaw === "portrait" || orientationRaw === "landscape" ? orientationRaw : "auto";
+  const keyboardResize = String(process.env.KEYBOARD_RESIZE || "").trim().toLowerCase() === "true";
 
   // Permissions: comma-separated, supports both short and full names.
   const permsRaw = String(process.env.PERMISSIONS || "").trim();
@@ -4459,6 +4460,19 @@ if (fs.existsSync(manifest)) {
         const suffix = end.includes("/>") ? " />" : ">";
         return ` android:screenOrientation="${desired}"${suffix}`;
       });
+    }
+    if (keyboardResize) {
+      if (/\bandroid:windowSoftInputMode=/.test(updated)) {
+        updated = updated.replace(
+          /\bandroid:windowSoftInputMode="[^"]*"/,
+          'android:windowSoftInputMode="adjustResize"'
+        );
+      } else {
+        updated = updated.replace(/\s*\/?>$/, (end) => {
+          const suffix = end.includes("/>") ? " />" : ">";
+          return ` android:windowSoftInputMode="adjustResize"${suffix}`;
+        });
+      }
     }
     if (taskMode === "convert" && statusBarHidden) {
       const fullscreenLaunchThemeRef = "@style/ConvertApk.FullscreenLaunch";
