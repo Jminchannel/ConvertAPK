@@ -33,6 +33,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.windowInsetsTopHeight
@@ -63,7 +64,12 @@ class MainActivity : ComponentActivity() {
             HTML2APKTheme {
                 Box(modifier = Modifier.fillMaxSize()) {
                     val paddingModifier = if (AppConfig.hideSystemBars) Modifier else Modifier.systemBarsPadding()
-                    Box(modifier = Modifier.fillMaxSize().then(paddingModifier)) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .then(paddingModifier)
+                            .imePadding(),
+                    ) {
                         Html2ApkWebView(startUrl = START_URL, modifier = Modifier.fillMaxSize())
                     }
                     if (!AppConfig.hideSystemBars && !AppConfig.statusBarDrawBehind) {
