@@ -209,6 +209,7 @@ fun Html2ApkWebView(startUrl: String, modifier: Modifier = Modifier) {
                 override fun onPageFinished(view: WebView, url: String) {
                     canGoBack = view.canGoBack()
                     view.evaluateJavascript(INJECT_DOWNLOAD_HOOK, null)
+                    view.evaluateJavascript(INJECT_IME_SURFACE_FALLBACK, null)
                 }
             }
 
@@ -304,6 +305,98 @@ private const val INJECT_DOWNLOAD_HOOK = """
     } catch (e) {}
     return origClick.call(this);
   };
+})();
+"""
+
+private const val INJECT_IME_SURFACE_FALLBACK = """
+(function() {
+  if (window.__convertApkImeSurfaceFallback) return;
+  window.__convertApkImeSurfaceFallback = true;
+
+  const storedStyles = new Map();
+  let restoreTimer = 0;
+
+  function isEditable(element) {
+    return element instanceof HTMLElement && element.matches(
+      'input:not([type="hidden"]), textarea, [contenteditable="true"], [contenteditable=""]'
+    );
+  }
+
+  function getOpaqueColor(element) {
+    const color = window.getComputedStyle(element).backgroundColor;
+    const match = color.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*([\d.]+))?\s*\)$/i);
+    if (!match || (match[4] !== undefined && Number(match[4]) < 0.98)) return '';
+    return 'rgb(' + match[1] + ', ' + match[2] + ', ' + match[3] + ')';
+  }
+
+  function getViewportSize() {
+    const viewport = window.visualViewport;
+    return {
+      width: Math.max(1, viewport ? viewport.width : window.innerWidth),
+      height: Math.max(1, viewport ? viewport.height : window.innerHeight),
+    };
+  }
+
+  function findSurface(target) {
+    const viewport = getViewportSize();
+    let element = target;
+    while (element && element !== document.documentElement) {
+      const rect = element.getBoundingClientRect();
+      const color = getOpaqueColor(element);
+      if (color && rect.width >= viewport.width * 0.8 && rect.height >= 96) {
+        return { element: element, color: color };
+      }
+      element = element.parentElement;
+    }
+    return null;
+  }
+
+  function applySurfaceFallback(target) {
+    const surface = findSurface(target);
+    if (!surface) return;
+
+    const viewport = getViewportSize();
+    let element = surface.element.parentElement;
+    while (element) {
+      const rect = element.getBoundingClientRect();
+      if (rect.width >= viewport.width * 0.8 && rect.height >= viewport.height * 0.5) {
+        if (!storedStyles.has(element)) {
+          storedStyles.set(element, {
+            backgroundColor: element.style.backgroundColor,
+            backgroundImage: element.style.backgroundImage,
+          });
+        }
+        element.style.backgroundColor = surface.color;
+        element.style.backgroundImage = 'none';
+      }
+      element = element.parentElement;
+    }
+  }
+
+  function restoreSurfaceFallback() {
+    storedStyles.forEach(function(style, element) {
+      element.style.backgroundColor = style.backgroundColor;
+      element.style.backgroundImage = style.backgroundImage;
+    });
+    storedStyles.clear();
+  }
+
+  function scheduleRestore() {
+    window.clearTimeout(restoreTimer);
+    restoreTimer = window.setTimeout(function() {
+      if (!isEditable(document.activeElement)) restoreSurfaceFallback();
+    }, 180);
+  }
+
+  document.addEventListener('focusin', function(event) {
+    if (!isEditable(event.target)) return;
+    window.clearTimeout(restoreTimer);
+    window.requestAnimationFrame(function() {
+      applySurfaceFallback(event.target);
+    });
+  }, true);
+  document.addEventListener('focusout', scheduleRestore, true);
+  window.addEventListener('pagehide', restoreSurfaceFallback, { once: true });
 })();
 """
 
