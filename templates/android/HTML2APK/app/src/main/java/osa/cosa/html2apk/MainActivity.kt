@@ -62,7 +62,7 @@ class MainActivity : ComponentActivity() {
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
         setContent {
             HTML2APKTheme {
-                Box(modifier = Modifier.fillMaxSize()) {
+                Box(modifier = Modifier.fillMaxSize().background(ComposeColor.Black)) {
                     val paddingModifier = if (AppConfig.hideSystemBars) Modifier else Modifier.systemBarsPadding()
                     Box(
                         modifier = Modifier
@@ -97,7 +97,7 @@ class MainActivity : ComponentActivity() {
         val statusBarColor = AppConfig.statusBarColor
         @Suppress("DEPRECATION")
         window.statusBarColor = statusBarColor
-        window.decorView.setBackgroundColor(statusBarColor)
+        window.decorView.setBackgroundColor(android.graphics.Color.BLACK)
 
         val controller = WindowInsetsControllerCompat(window, window.decorView)
         controller.isAppearanceLightStatusBars = AppConfig.lightStatusBarIcons
