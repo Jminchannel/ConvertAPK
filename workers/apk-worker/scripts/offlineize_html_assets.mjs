@@ -35,6 +35,7 @@ const offlineRoot = path.join(rootDir, "assets", "remote");
 const remoteToLocal = new Map();
 const sourceBaseByFile = new Map();
 const failedCanonicalUrls = new Set();
+const rewrittenLocalAssetFiles = new Set();
 
 let downloadCount = 0;
 let replaceCount = 0;
@@ -553,6 +554,7 @@ async function processJsFile(jsFile) {
   const rewritten = await processJsText(source, jsFile, baseUrl);
   if (rewritten !== source) {
     await fsp.writeFile(jsFile, rewritten, "utf8");
+    rewrittenLocalAssetFiles.add(path.resolve(jsFile));
     return true;
   }
   return false;
@@ -564,9 +566,33 @@ async function processCssFile(cssFile) {
   const rewritten = await processCssText(source, cssFile, baseUrl);
   if (rewritten !== source) {
     await fsp.writeFile(cssFile, rewritten, "utf8");
+    rewrittenLocalAssetFiles.add(path.resolve(cssFile));
     return true;
   }
   return false;
+}
+
+async function removeStaleIntegrityFromHtml(htmlFiles) {
+  for (const htmlFile of htmlFiles) {
+    const source = await fsp.readFile(htmlFile, "utf8");
+    const rewritten = source.replace(/<(?:link|script)\b[^>]*>/gi, (tag) => {
+      const resourceMatch = tag.match(/\b(?:src|href)\s*=\s*(["'])([^"']+)\1/i);
+      if (!resourceMatch || !/\bintegrity\s*=\s*/i.test(tag)) {
+        return tag;
+      }
+
+      const localAssetPath = localFileCandidate(htmlFile, resourceMatch[2]);
+      if (!localAssetPath || !rewrittenLocalAssetFiles.has(path.resolve(localAssetPath))) {
+        return tag;
+      }
+
+      return tag.replace(/\s+integrity\s*=\s*(["'])[^"']*\1/gi, "");
+    });
+
+    if (rewritten !== source) {
+      await fsp.writeFile(htmlFile, rewritten, "utf8");
+    }
+  }
 }
 
 async function collectFiles(dir, extensions) {
@@ -645,6 +671,8 @@ async function main() {
       break;
     }
   }
+
+  await removeStaleIntegrityFromHtml(htmlFiles);
 
   await cleanupPartFiles(rootDir);
 
